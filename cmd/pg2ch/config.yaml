@@ -1,0 +1,49 @@
+tables:
+#    pgbench_history: # Name on the Postgresql side
+#        main_table: pgbench_history # name on the ClickHouse side
+#        buffer_table: pgbench_history_buf # buffer table name on the ClickHouse side
+#        engine: ReplacingMergeTree
+#        columns: # PostgreSQL: Clickhouse
+#            - tid:
+#                chType: Int32
+#                chName: tid
+#            - bid:
+#                chType: Int32
+#                chName: bid
+#            - aid:
+#                chType: Int32
+#                chName: aid
+#            - delta:
+#                chType: Int32
+#                chName: delta
+#            - mtime:
+#                chType: DateTime
+#                chName: mtime
+#        sign_column: sign
+#        ver_column: ver
+    pgbench_accounts:
+        main_table: pgbench_accounts
+        buffer_table: pgbench_accounts_buf # optional, if not specified, insert directly to the main table
+        engine: CollapsingMergeTree
+        buffer_size: 1000
+        merge_treshold: 4 # buffers
+        columns: # in the same order as in the pg table
+            - aid:
+                type: Int32
+                name: aid
+            - abalance:
+                type: Int32
+                name: abalance
+            - filler:
+            - bid:
+        sign_column: sign
+        ver_column: ver
+
+clickhouse: tcp://localhost:9000
+pg:
+    host: localhost
+    port: 5432
+    database: pg2ch_test
+    user: postgres
+    replicationSlotName: myslot
+    publicationName: my_pub
