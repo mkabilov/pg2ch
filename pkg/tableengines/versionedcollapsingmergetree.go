@@ -68,20 +68,20 @@ func (t *VersionedCollapsingMergeTree) Sync(pgTx *pgx.Tx) error {
 }
 
 func (t *VersionedCollapsingMergeTree) Insert(lsn utils.LSN, new message.Row) error {
-	return t.bufferCmdSet(commandSet{
+	return t.processCommandSet(commandSet{
 		append(t.convertTuples(new), 1, uint64(lsn)),
 	})
 }
 
 func (t *VersionedCollapsingMergeTree) Update(lsn utils.LSN, old, new message.Row) error {
-	return t.bufferCmdSet(commandSet{
+	return t.processCommandSet(commandSet{
 		append(t.convertTuples(old), -1, uint64(lsn)),
 		append(t.convertTuples(new), 1, uint64(lsn)),
 	})
 }
 
 func (t *VersionedCollapsingMergeTree) Delete(lsn utils.LSN, old message.Row) error {
-	return t.bufferCmdSet(commandSet{
+	return t.processCommandSet(commandSet{
 		append(t.convertTuples(old), -1, uint64(lsn)),
 	})
 }

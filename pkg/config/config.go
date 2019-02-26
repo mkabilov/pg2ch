@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx"
 
@@ -40,14 +41,16 @@ type Column struct {
 type ColumnMapping []map[string]Column
 
 type Table struct {
-	Columns        ColumnMapping `yaml:"columns"`
-	SignColumn     string        `yaml:"sign_column"`
-	BufferTable    string        `yaml:"buffer_table"`
-	BufferSize     int           `yaml:"buffer_size"`
-	MainTable      string        `yaml:"main_table"`
-	VerColumn      string        `yaml:"ver_column"`
-	Engine         TableEngine   `yaml:"engine"`
-	MergeThreshold int           `yaml:"merge_treshold"`
+	Columns                ColumnMapping `yaml:"columns"`
+	SignColumn             string        `yaml:"sign_column"`
+	BufferRowIdColumn      string        `yaml:"buffer_row_id"`
+	BufferTable            string        `yaml:"buffer_table"`
+	BufferSize             int           `yaml:"buffer_size"`
+	MainTable              string        `yaml:"main_table"`
+	VerColumn              string        `yaml:"ver_column"`
+	Engine                 TableEngine   `yaml:"engine"`
+	MergeThreshold         int           `yaml:"merge_treshold"`
+	InactivityMergeTimeout time.Duration `yaml:"inactivity_merge_timeout"`
 }
 
 type Config struct {

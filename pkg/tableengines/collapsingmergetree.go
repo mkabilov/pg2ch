@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx"
 
@@ -26,6 +27,11 @@ func NewCollapsingMergeTree(conn *sql.DB, name string, tblCfg config.Table) *Col
 	}
 	t.chColumns = append(t.chColumns, tblCfg.SignColumn)
 
+	t.mergeQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
+		t.mainTable, strings.Join(t.chColumns, ", "), t.bufferTable, t.bufferRowIdColumn)}
+
+	go t.backgroundMerge()
+
 	return &t
 }
 
@@ -39,28 +45,34 @@ func (t *CollapsingMergeTreeTable) Write(p []byte) (n int, err error) {
 		return 0, err
 	}
 
-	if err := t.stmntExec(append(t.convertStrings(rec), 1)); err != nil {
+	row := append(t.convertStrings(rec), 1)
+	if t.bufferTable != "" {
+		row = append(row, t.bufferRowId)
+	}
+
+	if err := t.stmntExec(row); err != nil {
 		return 0, fmt.Errorf("could not insert: %v", err)
 	}
+	t.bufferRowId++
 
 	return len(p), nil
 }
 
 func (t *CollapsingMergeTreeTable) Insert(lsn utils.LSN, new message.Row) error {
-	return t.bufferCmdSet(commandSet{
+	return t.processCommandSet(commandSet{
 		append(t.convertTuples(new), 1),
 	})
 }
 
 func (t *CollapsingMergeTreeTable) Update(lsn utils.LSN, old, new message.Row) error {
-	return t.bufferCmdSet(commandSet{
+	return t.processCommandSet(commandSet{
 		append(t.convertTuples(old), -1),
 		append(t.convertTuples(new), 1),
 	})
 }
 
 func (t *CollapsingMergeTreeTable) Delete(lsn utils.LSN, old message.Row) error {
-	return t.bufferCmdSet(commandSet{
+	return t.processCommandSet(commandSet{
 		append(t.convertTuples(old), -1),
 	})
 }

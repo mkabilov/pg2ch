@@ -47,13 +47,13 @@ func (t *ReplacingMergeTree) Sync(pgTx *pgx.Tx) error {
 }
 
 func (t *ReplacingMergeTree) Insert(lsn utils.LSN, new message.Row) error {
-	return t.bufferCmdSet(commandSet{
+	return t.processCommandSet(commandSet{
 		append(t.convertTuples(new), uint64(lsn)),
 	})
 }
 
 func (t *ReplacingMergeTree) Update(lsn utils.LSN, old, new message.Row) error {
-	return t.bufferCmdSet(commandSet{
+	return t.processCommandSet(commandSet{
 		append(t.convertTuples(new), uint64(lsn)),
 	})
 }

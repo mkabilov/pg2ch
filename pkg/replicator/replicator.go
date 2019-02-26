@@ -25,6 +25,8 @@ type RepTable interface {
 	Delete(lsn utils.LSN, old message.Row) error
 	Sync(*pgx.Tx) error
 	Close() error
+	Begin() error
+	Commit() error
 }
 
 type Replicator struct {
@@ -44,14 +46,17 @@ type Replicator struct {
 
 	finalLSN utils.LSN
 	startLSN utils.LSN
+
+	txTables map[string]struct{} // touched in the tx tables
 }
 
 func New(cfg config.Config) *Replicator {
 	r := Replicator{
-		cfg:     cfg,
-		tables:  make(map[string]RepTable),
-		oidName: make(map[utils.OID]string),
-		errCh:   make(chan error),
+		cfg:      cfg,
+		tables:   make(map[string]RepTable),
+		oidName:  make(map[utils.OID]string),
+		errCh:    make(chan error),
+		txTables: make(map[string]struct{}),
 	}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 
@@ -306,13 +311,17 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 		return nil
 	}
 
-	log.Printf("%s: %s", msg.MsgType(), msg.String())
-
 	switch v := msg.(type) {
 	case message.Begin:
+		r.txTables = make(map[string]struct{})
 	case message.Commit:
 		r.finalLSN = v.LSN
 		r.consumer.AdvanceLSN(lsn)
+		for tblName := range r.txTables {
+			if err := r.tables[tblName].Commit(); err != nil {
+				return fmt.Errorf("could not commit %q table: %v", tblName, err)
+			}
+		}
 	case message.Relation:
 	case message.Insert:
 		tblName, ok := r.oidName[v.RelationOID]
@@ -322,6 +331,12 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 		tbl, ok := r.tables[tblName]
 		if !ok {
 			break
+		}
+		if _, ok := r.txTables[tblName]; !ok {
+			r.txTables[tblName] = struct{}{}
+			if err := tbl.Begin(); err != nil {
+				return fmt.Errorf("could not begin tx for table %q: %v", tblName, err)
+			}
 		}
 
 		return tbl.Insert(lsn, v.NewRow)
@@ -334,6 +349,12 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 		if !ok {
 			break
 		}
+		if _, ok := r.txTables[tblName]; !ok {
+			r.txTables[tblName] = struct{}{}
+			if err := tbl.Begin(); err != nil {
+				return fmt.Errorf("could not begin tx for table %q: %v", tblName, err)
+			}
+		}
 
 		return tbl.Update(lsn, v.OldRow, v.NewRow)
 	case message.Delete:
@@ -344,6 +365,12 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 		tbl, ok := r.tables[tblName]
 		if !ok {
 			break
+		}
+		if _, ok := r.txTables[tblName]; !ok {
+			r.txTables[tblName] = struct{}{}
+			if err := tbl.Begin(); err != nil {
+				return fmt.Errorf("could not begin tx for table %q: %v", tblName, err)
+			}
 		}
 
 		return tbl.Delete(lsn, v.OldRow)
