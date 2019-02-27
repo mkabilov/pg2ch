@@ -146,8 +146,6 @@ func (r *Replicator) Run() error {
 	for tblName, tbl := range r.tables {
 		if err := tbl.Close(); err != nil {
 			log.Printf("could not close %s: %v", tblName, err)
-		} else {
-			log.Printf("%s closed", tblName)
 		}
 	}
 

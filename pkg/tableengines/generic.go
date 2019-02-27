@@ -98,15 +98,12 @@ func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTabl
 		t.mergeInactivityTimeout = defaultInactivityMergeTimeout
 	}
 
-	if tblCfg.BufferTable != "" {
-		t.buffer = make([]bufCommand, t.bufferSize)
-	}
+	t.buffer = make([]bufCommand, t.bufferSize)
 
 	return t
 }
 
 func (t *genericTable) truncateMainTable() error {
-	log.Printf("truncate main table")
 	if _, err := t.chConn.Exec(fmt.Sprintf("truncate table %s", t.mainTable)); err != nil {
 		return err
 	}
@@ -115,7 +112,6 @@ func (t *genericTable) truncateMainTable() error {
 }
 
 func (t *genericTable) truncateBufTable() error {
-	log.Printf("truncate buf table")
 	if _, err := t.chConn.Exec(fmt.Sprintf("truncate table %s", t.bufferTable)); err != nil {
 		return err
 	}
@@ -142,8 +138,6 @@ func (t *genericTable) stmntPrepare() error {
 		strings.Join(columns, ", "),
 		strings.Join(strings.Split(strings.Repeat("?", len(columns)), ""), ", "))
 
-	log.Printf("prepare %q", query)
-
 	t.chStmnt, err = t.chTx.Prepare(query)
 	if err != nil {
 		return fmt.Errorf("could not prepare statement: %v", err)
@@ -153,8 +147,6 @@ func (t *genericTable) stmntPrepare() error {
 }
 
 func (t *genericTable) stmntExec(params []interface{}) error {
-	log.Printf("exec statement with params: %v", params)
-
 	_, err := t.chStmnt.Exec(params...)
 
 	return err
@@ -162,8 +154,6 @@ func (t *genericTable) stmntExec(params []interface{}) error {
 
 func (t *genericTable) begin() (err error) {
 	t.chTx, err = t.chConn.Begin()
-
-	log.Printf("begin")
 
 	return
 }
@@ -186,8 +176,10 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		return fmt.Errorf("could not truncate main table: %v", err)
 	}
 
-	if err := t.truncateBufTable(); err != nil {
-		return fmt.Errorf("could not truncate buffer table: %v", err)
+	if t.bufferTable != "" {
+		if err := t.truncateBufTable(); err != nil {
+			return fmt.Errorf("could not truncate buffer table: %v", err)
+		}
 	}
 
 	if err := t.stmntPrepare(); err != nil {
@@ -225,7 +217,6 @@ func (t *genericTable) stmntCloseCommit() error {
 		return fmt.Errorf("could not commit transaction: %v", err)
 	}
 	t.inTx.Store(false)
-	log.Printf("stmnt close, commit")
 
 	return nil
 }
@@ -239,16 +230,13 @@ func (t *genericTable) backgroundMerge() {
 			return
 		case <-ticker.C:
 			if t.inTx.Load().(bool) {
-				log.Printf("in tx. skipping merge")
 				break
 			}
 
-			log.Printf("background flush")
 			if err := t.flushBuffer(); err != nil {
 				log.Fatalf("could not background flush buffer: %v", err)
 			}
 
-			log.Printf("background merge")
 			if err := t.merge(); err != nil {
 				log.Fatalf("could not background merge: %v", err)
 			}
@@ -259,8 +247,6 @@ func (t *genericTable) backgroundMerge() {
 func (t *genericTable) bufferAppend(cmdSet commandSet) {
 	t.bufferMutex.Lock()
 	defer t.bufferMutex.Unlock()
-
-	log.Printf("buffer[%v] = %v", t.bufferCmdId, cmdSet)
 
 	bufItem := make([]bufRow, len(cmdSet))
 	for i := range cmdSet {
@@ -320,8 +306,6 @@ func (t *genericTable) flushBuffer() error {
 	t.bufferCmdId = 0
 	t.bufferFlushCnt++
 
-	log.Printf("flushed")
-
 	return nil
 }
 
@@ -337,7 +321,6 @@ func (t *genericTable) merge() error {
 	}
 
 	for _, query := range t.mergeQueries {
-		log.Printf("merge query: %v", query)
 		if _, err := t.chConn.Exec(query); err != nil {
 			return err
 		}
@@ -346,11 +329,12 @@ func (t *genericTable) merge() error {
 	t.bufferFlushCnt = 0
 	t.bufferRowId = 0
 
-	if err := t.truncateBufTable(); err != nil {
-		return fmt.Errorf("could not truncate buffer table: %v", err)
+	if t.bufferTable != "" {
+		if err := t.truncateBufTable(); err != nil {
+			return fmt.Errorf("could not truncate buffer table: %v", err)
+		}
 	}
 
-	log.Printf("merged")
 	return nil
 }
 
