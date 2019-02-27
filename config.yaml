@@ -1,26 +1,4 @@
 tables:
-#    pgbench_history: # Name on the Postgresql side
-#        main_table: pgbench_history # name on the ClickHouse side
-#        buffer_table: pgbench_history_buf # buffer table name on the ClickHouse side
-#        engine: ReplacingMergeTree
-#        columns: # PostgreSQL: Clickhouse
-#            - tid:
-#                chType: Int32
-#                chName: tid
-#            - bid:
-#                chType: Int32
-#                chName: bid
-#            - aid:
-#                chType: Int32
-#                chName: aid
-#            - delta:
-#                chType: Int32
-#                chName: delta
-#            - mtime:
-#                chType: DateTime
-#                chName: mtime
-#        sign_column: sign
-#        ver_column: ver
     pgbench_accounts:
         main_table: pgbench_accounts_repl
         buffer_table: pgbench_accounts_buf # optional, if not specified, insert directly to the main table
