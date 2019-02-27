@@ -19,7 +19,7 @@ import (
 	"github.com/ikitiki/pg2ch/pkg/utils"
 )
 
-type RepTable interface {
+type CHTable interface {
 	Insert(lsn utils.LSN, new message.Row) error
 	Update(lsn utils.LSN, old message.Row, new message.Row) error
 	Delete(lsn utils.LSN, old message.Row) error
@@ -40,7 +40,7 @@ type Replicator struct {
 	pgTx   *pgx.Tx
 	chConn *sql.DB
 
-	tables       map[string]RepTable
+	tables       map[string]CHTable
 	oidName      map[utils.OID]string
 	tempSlotName string
 
@@ -53,7 +53,7 @@ type Replicator struct {
 func New(cfg config.Config) *Replicator {
 	r := Replicator{
 		cfg:      cfg,
-		tables:   make(map[string]RepTable),
+		tables:   make(map[string]CHTable),
 		oidName:  make(map[utils.OID]string),
 		errCh:    make(chan error),
 		txTables: make(map[string]struct{}),
@@ -63,7 +63,7 @@ func New(cfg config.Config) *Replicator {
 	return &r
 }
 
-func (r *Replicator) newTable(tableName string) (RepTable, error) {
+func (r *Replicator) newTable(tableName string) (CHTable, error) {
 	tbl := r.cfg.Tables[tableName]
 	switch tbl.Engine {
 	//case config.VersionedCollapsingMergeTree:
@@ -82,10 +82,6 @@ func (r *Replicator) newTable(tableName string) (RepTable, error) {
 
 		return tableengines.NewReplacingMergeTree(r.chConn, tableName, tbl), nil
 	case config.MergeTree:
-		if tbl.SignColumn == "" {
-			return nil, fmt.Errorf("MergeTree requires sign column to be set")
-		}
-
 		return tableengines.NewMergeTree(r.chConn, tableName, tbl), nil
 	case config.CollapsingMergeTree:
 		if tbl.SignColumn == "" {
@@ -322,7 +318,6 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 				return fmt.Errorf("could not commit %q table: %v", tblName, err)
 			}
 		}
-	case message.Relation:
 	case message.Insert:
 		tblName, ok := r.oidName[v.RelationOID]
 		if !ok {

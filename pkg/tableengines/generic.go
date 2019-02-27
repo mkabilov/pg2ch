@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx"
-	"go.uber.org/atomic"
 
 	"github.com/ikitiki/pg2ch/pkg/config"
 	"github.com/ikitiki/pg2ch/pkg/message"
@@ -54,7 +54,7 @@ type genericTable struct {
 	mergeInactivityTimeout time.Duration
 
 	bufferMutex sync.Mutex
-	inTx        *atomic.Bool
+	inTx        *atomic.Value
 }
 
 func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTable {
@@ -89,7 +89,7 @@ func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTabl
 		bufferSize:             tblCfg.BufferSize,
 		mergeBufferThreshold:   tblCfg.MergeThreshold,
 		bufferMutex:            sync.Mutex{},
-		inTx:                   atomic.NewBool(false),
+		inTx:                   &atomic.Value{},
 		mergeInactivityTimeout: tblCfg.InactivityMergeTimeout,
 		bufferRowIdColumn:      tblCfg.BufferRowIdColumn,
 	}
@@ -238,7 +238,7 @@ func (t *genericTable) backgroundMerge() {
 		case <-t.stopCh:
 			return
 		case <-ticker.C:
-			if t.inTx.Load() {
+			if t.inTx.Load().(bool) {
 				log.Printf("in tx. skipping merge")
 				break
 			}
