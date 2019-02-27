@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"fmt"
+	"log"
+	"strings"
 
 	"github.com/jackc/pgx"
 
@@ -17,6 +19,7 @@ type ReplacingMergeTree struct {
 	genericTable
 
 	verColumn string
+	row       []interface{}
 }
 
 func NewReplacingMergeTree(conn *sql.DB, name string, tblCfg config.Table) *ReplacingMergeTree {
@@ -25,6 +28,12 @@ func NewReplacingMergeTree(conn *sql.DB, name string, tblCfg config.Table) *Repl
 		verColumn:    tblCfg.VerColumn,
 	}
 	t.chColumns = append(t.chColumns, tblCfg.VerColumn)
+	t.row = make([]interface{}, len(t.chColumns))
+
+	t.mergeQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
+		t.mainTable, strings.Join(t.chColumns, ", "), t.bufferTable, t.bufferRowIdColumn)}
+
+	go t.backgroundMerge()
 
 	return &t
 }
@@ -35,9 +44,15 @@ func (t *ReplacingMergeTree) Write(p []byte) (n int, err error) {
 		return 0, err
 	}
 
-	if err := t.stmntExec(append(t.convertStrings(rec), 0)); err != nil {
+	row := append(t.convertStrings(rec), 0)
+	if t.bufferTable != "" {
+		row = append(row, t.bufferRowId)
+	}
+
+	if err := t.stmntExec(row); err != nil {
 		return 0, fmt.Errorf("could not insert: %v", err)
 	}
+	t.bufferRowId++
 
 	return len(p), nil
 }
@@ -59,5 +74,13 @@ func (t *ReplacingMergeTree) Update(lsn utils.LSN, old, new message.Row) error {
 }
 
 func (t *ReplacingMergeTree) Delete(lsn utils.LSN, old message.Row) error {
-	return nil
+	oldRow := append(t.convertTuples(old), uint64(lsn))
+
+	for id, val := range t.emptyValues {
+		oldRow[id] = val
+	}
+
+	log.Printf("old row:%v", oldRow)
+
+	return t.processCommandSet(commandSet{oldRow})
 }

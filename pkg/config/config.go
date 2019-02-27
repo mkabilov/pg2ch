@@ -34,8 +34,9 @@ type DbConfig struct {
 }
 
 type Column struct {
-	ChName string `yaml:"name"`
-	ChType string `yaml:"type"`
+	ChName     string  `yaml:"name"`
+	ChType     string  `yaml:"type"`
+	EmptyValue *string `yaml:"empty_value"`
 }
 
 type ColumnMapping []map[string]Column

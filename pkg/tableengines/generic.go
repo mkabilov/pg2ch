@@ -43,6 +43,7 @@ type genericTable struct {
 	pg2ch             map[string]string
 	chTypes           map[string]string
 	bufferRowIdColumn string
+	emptyValues       map[int]interface{}
 
 	buffer                 []bufCommand
 	bufferSize             int // buffer size
@@ -63,9 +64,19 @@ func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTabl
 
 	pgColumns := make([]string, len(tblCfg.Columns))
 	chColumns := make([]string, 0)
+	emptyValues := make(map[int]interface{})
 	for colId, column := range tblCfg.Columns {
 		for pgName, chProps := range column {
 			pgColumns[colId] = pgName
+
+			if chProps.EmptyValue != nil {
+				val, err := convert(*chProps.EmptyValue, chProps.ChType)
+				if err != nil {
+					log.Fatalf("wrong value for %q empty value: %v", pgName, err)
+				}
+				emptyValues[colId] = val
+			}
+
 			if chProps.ChName == "" {
 				continue
 			}
@@ -86,6 +97,7 @@ func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTabl
 		chTypes:                pgChTypes,
 		chColumns:              chColumns,
 		pgColumns:              pgColumns,
+		emptyValues:            emptyValues,
 		bufferSize:             tblCfg.BufferSize,
 		mergeBufferThreshold:   tblCfg.MergeThreshold,
 		bufferMutex:            sync.Mutex{},
@@ -138,6 +150,7 @@ func (t *genericTable) stmntPrepare() error {
 		strings.Join(columns, ", "),
 		strings.Join(strings.Split(strings.Repeat("?", len(columns)), ""), ", "))
 
+	log.Printf("query: %v", query)
 	t.chStmnt, err = t.chTx.Prepare(query)
 	if err != nil {
 		return fmt.Errorf("could not prepare statement: %v", err)
@@ -147,6 +160,7 @@ func (t *genericTable) stmntPrepare() error {
 }
 
 func (t *genericTable) stmntExec(params []interface{}) error {
+	log.Printf("exec: %v", params)
 	_, err := t.chStmnt.Exec(params...)
 
 	return err
@@ -321,6 +335,7 @@ func (t *genericTable) merge() error {
 	}
 
 	for _, query := range t.mergeQueries {
+		log.Printf("merge query: %v", query)
 		if _, err := t.chConn.Exec(query); err != nil {
 			return err
 		}

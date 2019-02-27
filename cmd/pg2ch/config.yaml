@@ -22,11 +22,11 @@ tables:
 #        sign_column: sign
 #        ver_column: ver
     pgbench_accounts:
-        main_table: pgbench_accounts
+        main_table: pgbench_accounts_repl
         buffer_table: pgbench_accounts_buf # optional, if not specified, insert directly to the main table
         buffer_row_id: 'buffer_command_id' # column name in the buffer table to store row id
         inactivity_merge_timeout: '30s' # merge buffered data after that timeout
-        engine: CollapsingMergeTree
+        engine: ReplacingMergeTree
         buffer_size: 1000
         merge_treshold: 4 # buffers
         columns: # in the same order as in the pg table
@@ -36,6 +36,7 @@ tables:
             - abalance:
                 type: Int32
                 name: abalance
+                empty_value: '0' # used for ReplacingMergeTree engine to discard old value
             - filler:
             - bid:
         sign_column: sign

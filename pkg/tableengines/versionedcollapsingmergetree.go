@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx"
 
@@ -47,6 +48,11 @@ func NewVersionedCollapsingMergeTree(conn *sql.DB, name string, tblCfg config.Ta
 
 	t.chColumns = append(t.chColumns, t.signColumn, t.verColumn)
 
+	t.mergeQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
+		t.mainTable, strings.Join(t.chColumns, ", "), t.bufferTable, t.bufferRowIdColumn)}
+
+	go t.backgroundMerge()
+
 	return &t
 }
 
@@ -56,9 +62,15 @@ func (t *VersionedCollapsingMergeTree) Write(p []byte) (n int, err error) {
 		return 0, err
 	}
 
-	if err := t.stmntExec(append(t.convertStrings(rec), 1, 0)); err != nil {
+	row := append(t.convertStrings(rec), 1, 0)
+	if t.bufferTable != "" {
+		row = append(row, t.bufferRowId)
+	}
+
+	if err := t.stmntExec(row); err != nil {
 		return 0, fmt.Errorf("could not insert: %v", err)
 	}
+	t.bufferRowId++
 
 	return len(p), nil
 }

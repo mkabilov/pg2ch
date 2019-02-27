@@ -300,6 +300,27 @@ loop:
 	}
 }
 
+func (r *Replicator) getTable(oid utils.OID) CHTable {
+	tblName, ok := r.oidName[oid]
+	if !ok {
+		return nil
+	}
+
+	tbl, ok := r.tables[tblName]
+	if !ok {
+		return nil
+	}
+
+	if _, ok := r.txTables[tblName]; !ok {
+		r.txTables[tblName] = struct{}{}
+		if err := tbl.Begin(); err != nil {
+			log.Printf("could not begin tx for table %q: %v", tblName, err)
+		}
+	}
+
+	return tbl
+}
+
 func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 	if lsn < r.startLSN {
 		return nil
@@ -307,9 +328,9 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 
 	switch v := msg.(type) {
 	case message.Begin:
+		r.finalLSN = v.FinalLSN
 		r.txTables = make(map[string]struct{})
 	case message.Commit:
-		r.finalLSN = v.LSN
 		r.consumer.AdvanceLSN(lsn)
 		for tblName := range r.txTables {
 			if err := r.tables[tblName].Commit(); err != nil {
@@ -317,56 +338,23 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 			}
 		}
 	case message.Insert:
-		tblName, ok := r.oidName[v.RelationOID]
-		if !ok {
+		if tbl := r.getTable(v.RelationOID); tbl == nil {
 			break
+		} else {
+			return tbl.Insert(r.finalLSN, v.NewRow)
 		}
-		tbl, ok := r.tables[tblName]
-		if !ok {
-			break
-		}
-		if _, ok := r.txTables[tblName]; !ok {
-			r.txTables[tblName] = struct{}{}
-			if err := tbl.Begin(); err != nil {
-				return fmt.Errorf("could not begin tx for table %q: %v", tblName, err)
-			}
-		}
-
-		return tbl.Insert(lsn, v.NewRow)
 	case message.Update:
-		tblName, ok := r.oidName[v.RelationOID]
-		if !ok {
+		if tbl := r.getTable(v.RelationOID); tbl == nil {
 			break
+		} else {
+			return tbl.Update(r.finalLSN, v.OldRow, v.NewRow)
 		}
-		tbl, ok := r.tables[tblName]
-		if !ok {
-			break
-		}
-		if _, ok := r.txTables[tblName]; !ok {
-			r.txTables[tblName] = struct{}{}
-			if err := tbl.Begin(); err != nil {
-				return fmt.Errorf("could not begin tx for table %q: %v", tblName, err)
-			}
-		}
-
-		return tbl.Update(lsn, v.OldRow, v.NewRow)
 	case message.Delete:
-		tblName, ok := r.oidName[v.RelationOID]
-		if !ok {
+		if tbl := r.getTable(v.RelationOID); tbl == nil {
 			break
+		} else {
+			return tbl.Delete(r.finalLSN, v.OldRow)
 		}
-		tbl, ok := r.tables[tblName]
-		if !ok {
-			break
-		}
-		if _, ok := r.txTables[tblName]; !ok {
-			r.txTables[tblName] = struct{}{}
-			if err := tbl.Begin(); err != nil {
-				return fmt.Errorf("could not begin tx for table %q: %v", tblName, err)
-			}
-		}
-
-		return tbl.Delete(lsn, v.OldRow)
 	}
 
 	return nil
