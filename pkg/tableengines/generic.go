@@ -13,8 +13,8 @@ import (
 
 	"github.com/jackc/pgx"
 
-	"github.com/ikitiki/pg2ch/pkg/config"
-	"github.com/ikitiki/pg2ch/pkg/message"
+	"github.com/mkabilov/pg2ch/pkg/config"
+	"github.com/mkabilov/pg2ch/pkg/message"
 )
 
 const defaultInactivityMergeTimeout = time.Minute

@@ -9,9 +9,9 @@ import (
 
 	"github.com/jackc/pgx"
 
-	"github.com/ikitiki/pg2ch/pkg/decoder"
-	"github.com/ikitiki/pg2ch/pkg/message"
-	"github.com/ikitiki/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/decoder"
+	"github.com/mkabilov/pg2ch/pkg/message"
+	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
 const (

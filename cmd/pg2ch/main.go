@@ -6,8 +6,8 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/ikitiki/pg2ch/pkg/config"
-	"github.com/ikitiki/pg2ch/pkg/replicator"
+	"github.com/mkabilov/pg2ch/pkg/config"
+	"github.com/mkabilov/pg2ch/pkg/replicator"
 )
 
 var (

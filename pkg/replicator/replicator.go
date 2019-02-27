@@ -12,11 +12,11 @@ import (
 	"github.com/jackc/pgx"
 	"github.com/kshvakov/clickhouse"
 
-	"github.com/ikitiki/pg2ch/pkg/config"
-	"github.com/ikitiki/pg2ch/pkg/consumer"
-	"github.com/ikitiki/pg2ch/pkg/message"
-	"github.com/ikitiki/pg2ch/pkg/tableengines"
-	"github.com/ikitiki/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/config"
+	"github.com/mkabilov/pg2ch/pkg/consumer"
+	"github.com/mkabilov/pg2ch/pkg/message"
+	"github.com/mkabilov/pg2ch/pkg/tableengines"
+	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
 type CHTable interface {

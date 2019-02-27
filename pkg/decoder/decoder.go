@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ikitiki/pg2ch/pkg/message"
-	"github.com/ikitiki/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/message"
+	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
 type decoder struct {

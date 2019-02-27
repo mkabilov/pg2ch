@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx"
 	"github.com/jackc/pgx/pgtype"
 
-	"github.com/ikitiki/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
 type (
