@@ -20,7 +20,7 @@ Run:
 ```yaml
 tables:
     {postgresql table name}:
-        main_table: {clickhouse table name} pgbench_accounts_repl
+        main_table: {clickhouse table name}
         buffer_table: {clickhouse buffer table name} # optional, if not specified, insert directly to the main table
         buffer_row_id: {clickhouse buffer table column name for row id} 
         inactivity_merge_timeout: {interval, default 1m } # merge buffered data after that timeout
