@@ -197,7 +197,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	for pg := range t.pg2ch {
 		columns = append(columns, pg)
 	}
-	query := fmt.Sprintf("copy (select %s from %s) to stdout delimiter ','", strings.Join(columns, ", "), t.pgTableName)
+	query := fmt.Sprintf("copy %s(%s) to stdout (format csv)", t.pgTableName, strings.Join(columns, ", "))
 
 	t.inTx.Store(true)
 	defer t.inTx.Store(false)
