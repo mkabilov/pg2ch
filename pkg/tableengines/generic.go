@@ -158,7 +158,6 @@ func (t *genericTable) stmntPrepare() error {
 		strings.Join(columns, ", "),
 		strings.Join(strings.Split(strings.Repeat("?", len(columns)), ""), ", "))
 
-	log.Printf("query: %v", query)
 	t.chStmnt, err = t.chTx.Prepare(query)
 	if err != nil {
 		return fmt.Errorf("could not prepare statement: %v", err)
@@ -168,7 +167,6 @@ func (t *genericTable) stmntPrepare() error {
 }
 
 func (t *genericTable) stmntExec(params []interface{}) error {
-	log.Printf("exec: %v", params)
 	_, err := t.chStmnt.Exec(params...)
 
 	return err
@@ -361,7 +359,6 @@ func (t *genericTable) merge() error {
 	}
 
 	for _, query := range t.mergeQueries {
-		log.Printf("merge query: %v", query)
 		if _, err := t.chConn.Exec(query); err != nil {
 			return err
 		}

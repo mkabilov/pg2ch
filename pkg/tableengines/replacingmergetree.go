@@ -3,7 +3,6 @@ package tableengines
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/jackc/pgx"
@@ -77,8 +76,6 @@ func (t *ReplacingMergeTree) Delete(lsn utils.LSN, old message.Row) error {
 	for id, val := range t.emptyValues {
 		oldRow[id] = val
 	}
-
-	log.Printf("old row:%v", oldRow)
 
 	return t.processCommandSet(commandSet{oldRow})
 }

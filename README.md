@@ -23,7 +23,7 @@ tables:
         main_table: {clickhouse table name}
         buffer_table: {clickhouse buffer table name} # optional, if not specified, insert directly to the main table
         buffer_row_id: {clickhouse buffer table column name for row id} 
-        inactivity_merge_timeout: {interval, default 1m } # merge buffered data after that timeout
+        inactivity_merge_timeout: {interval, default 1 min} # merge buffered data after that timeout
         engine: {clickhouse table engine: MergeTree, ReplacingMergeTree or CollapsingMergeTree}
         buffer_size: {number of DML(insert/update/delete) commands to store in the memory before flushing to the buffer/main table } 
         merge_treshold: {if buffer table specified, number of buffer flushed before moving data from buffer to the main table}
@@ -104,7 +104,7 @@ pg:
     pg2ch --config config.yaml
 ```
 
-- and in the separate terminal we can simulate load by running `pgbench`:
+- then let's modify our data by running `pgbench`:
 ```bash
     pgbench -U postgres -d pg2ch_test --time 30 --client 10 
 ```
