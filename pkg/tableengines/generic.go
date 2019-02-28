@@ -245,10 +245,10 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		if err := t.truncateMainTable(); err != nil {
 			return fmt.Errorf("could not truncate main table: %v", err)
 		}
-	}
 
-	if err := t.merge(); err != nil {
-		return fmt.Errorf("could not merge: %v", err)
+		if err := t.merge(); err != nil {
+			return fmt.Errorf("could not merge: %v", err)
+		}
 	}
 
 	return nil
