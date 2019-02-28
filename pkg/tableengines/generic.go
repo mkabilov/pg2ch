@@ -185,12 +185,8 @@ func (t *genericTable) fetchCSVRecord(p []byte) (rec []string, n int, err error)
 	}
 
 	rec, err = t.syncCSV.Read()
-	if err != nil {
-		if err == io.EOF {
-			err = nil
-		}
-
-		return
+	if err == io.EOF {
+		err = nil
 	}
 
 	return
