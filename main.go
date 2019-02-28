@@ -40,12 +40,12 @@ func init() {
 func main() {
 	cfg, err := config.New(*configFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "could not load config: %v", err)
+		fmt.Fprintf(os.Stderr, "could not load config: %v\n", err)
 		os.Exit(1)
 	}
 
 	if err := replicator.New(*cfg).Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "could not start: %v", err)
+		fmt.Fprintf(os.Stderr, "could not start: %v\n", err)
 		os.Exit(1)
 	}
 }
