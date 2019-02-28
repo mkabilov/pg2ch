@@ -43,7 +43,12 @@ func (t *CollapsingMergeTreeTable) Write(p []byte) (n int, err error) {
 		return 0, err
 	}
 
-	row := append(t.convertStrings(rec), 1)
+	row, err := t.convertStrings(rec) //TODO: move me to genericTable, e.g. fetchCSVRecord
+	if err != nil {
+		return 0, fmt.Errorf("could not parse record: %v", err)
+	}
+	row = append(row, 1)
+
 	if t.bufferTable != "" {
 		row = append(row, t.bufferRowId)
 	}

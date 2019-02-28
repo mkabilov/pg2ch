@@ -60,7 +60,12 @@ func (t *VersionedCollapsingMergeTree) Write(p []byte) (n int, err error) {
 		return 0, err
 	}
 
-	row := append(t.convertStrings(rec), 1, 0)
+	row, err := t.convertStrings(rec)
+	if err != nil {
+		return 0, fmt.Errorf("could not parse record: %v", err)
+	}
+	row = append(row, 1, 0)
+
 	if t.bufferTable != "" {
 		row = append(row, t.bufferRowId)
 	}

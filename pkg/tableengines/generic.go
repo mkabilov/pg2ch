@@ -94,20 +94,20 @@ func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTabl
 	}
 
 	t := genericTable{
-		stopCh:                 make(chan struct{}),
-		chConn:                 conn,
-		pgTableName:            name,
-		mainTable:              tblCfg.MainTable,
-		bufferTable:            tblCfg.BufferTable,
-		pg2ch:                  pgChColumns,
-		chTypes:                pgChTypes,
-		chColumns:              chColumns,
-		pgColumns:              pgColumns,
-		emptyValues:            emptyValues,
-		bufferSize:             tblCfg.BufferSize,
-		mergeBufferThreshold:   tblCfg.MergeThreshold,
-		bufferMutex:            sync.Mutex{},
-		inTx:                   &atomic.Value{},
+		stopCh:               make(chan struct{}),
+		chConn:               conn,
+		pgTableName:          name,
+		mainTable:            tblCfg.MainTable,
+		bufferTable:          tblCfg.BufferTable,
+		pg2ch:                pgChColumns,
+		chTypes:              pgChTypes,
+		chColumns:            chColumns,
+		pgColumns:            pgColumns,
+		emptyValues:          emptyValues,
+		bufferSize:           tblCfg.BufferSize,
+		mergeBufferThreshold: tblCfg.MergeThreshold,
+		bufferMutex:          sync.Mutex{},
+		inTx:                 &atomic.Value{},
 		mergeInactivityTimeout: tblCfg.InactivityMergeTimeout,
 		bufferRowIdColumn:      tblCfg.BufferRowIdColumn,
 		syncBuf:                syncBuf,
@@ -193,11 +193,7 @@ func (t *genericTable) fetchCSVRecord(p []byte) (rec []string, n int, err error)
 }
 
 func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
-	columns := make([]string, 0)
-	for pg := range t.pg2ch {
-		columns = append(columns, pg)
-	}
-	query := fmt.Sprintf("copy %s(%s) to stdout (format csv)", t.pgTableName, strings.Join(columns, ", "))
+	query := fmt.Sprintf("copy %s(%s) to stdout (format csv)", t.pgTableName, strings.Join(t.pgColumns, ", "))
 
 	t.inTx.Store(true)
 	defer t.inTx.Store(false)
@@ -373,6 +369,14 @@ func (t *genericTable) merge() error {
 }
 
 func convert(val string, valType string) (interface{}, error) {
+	// TODO: mind nullable values
+
+	// hint: copy (select ''::text, null::text) to stdout (format csv);
+	// output: "",
+	if val == "" {
+		return nil, nil
+	}
+
 	switch valType {
 	case "Int8":
 		return strconv.ParseInt(val, 10, 8)
@@ -383,6 +387,12 @@ func convert(val string, valType string) (interface{}, error) {
 	case "Int64":
 		return strconv.ParseInt(val, 10, 64)
 	case "UInt8":
+		if val == "f" { //TODO: dirty hack for boolean values, store pg types instead of ch?
+			return 0, nil
+		} else if val == "t" {
+			return 1, nil
+		}
+
 		return strconv.ParseUint(val, 10, 8)
 	case "UInt16":
 		return strconv.ParseUint(val, 10, 16)
@@ -397,7 +407,7 @@ func convert(val string, valType string) (interface{}, error) {
 	case "String":
 		return val, nil
 	case "DateTime":
-		return time.Parse("2006-01-02 15:04:05", val)
+		return time.Parse("2006-01-02 15:04:05", val[:19])
 	}
 
 	return nil, fmt.Errorf("unknown type: %v", valType)
@@ -427,20 +437,20 @@ func (t *genericTable) convertTuples(row message.Row) []interface{} {
 	return res
 }
 
-func (t *genericTable) convertStrings(tuples []string) []interface{} {
+func (t *genericTable) convertStrings(tuples []string) ([]interface{}, error) {
 	res := make([]interface{}, 0)
 	for i, tuple := range tuples {
 		colName := t.pgColumns[i]
 
 		val, err := convert(tuple, t.chTypes[colName])
 		if err != nil {
-			panic(err)
+			return nil, fmt.Errorf("could not parse %q field with %s type: %v", colName, t.chTypes[colName], err)
 		}
 
 		res = append(res, val)
 	}
 
-	return res
+	return res, nil
 }
 
 func (t *genericTable) Begin() error {
