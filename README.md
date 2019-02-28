@@ -44,8 +44,8 @@ pg: # postgresql connection params
     port: {port}
     database: {database name}
     user: {user}
-    replicationSlotName: {logical replication slot name}
-    publicationName: {postgresql publication name}
+    replication_slot_name: {logical replication slot name}
+    publication_name: {postgresql publication name}
 ```
 
 ### Sample setup:
@@ -97,21 +97,21 @@ pg:
     port: 5432
     database: pg2ch_test
     user: postgres
-    replicationSlotName: pg2ch_slot
-    publicationName: pg2ch_pub
+    replication_slot_name: pg2ch_slot
+    publication_name: pg2ch_pub
 ```
 
-- now we can run pg2ch:
+- run pg2ch to start replication:
 ```bash
     pg2ch --config config.yaml
 ```
 
-- then let's modify our data by running `pgbench`:
+- run `pgbench` to have some test load:
 ```bash
     pgbench -U postgres -d pg2ch_test --time 30 --client 10 
 ```
 - wait for `inactivity_merge_timeout` period (in our case 10 seconds) so that data in the memory gets flushed to the table 
-- and now let's check sums of the `abalance` column both on ClickHouse and PostgreSQL:
+- check the sums of the `abalance` column both on ClickHouse and PostgreSQL:
     - ClickHouse: `SELECT SUM(abalance * sign) FROM pgbench_accounts` ([why multiply by `sign` column?](https://clickhouse.yandex/docs/en/operations/table_engines/collapsingmergetree/#example-of-use)) 
     - PostgreSQL: `SELECT SUM(abalance) FROM pgbench_accounts`
 - the sums must match; if not, please open an issue.

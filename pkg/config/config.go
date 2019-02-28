@@ -28,9 +28,10 @@ var tableEngines = map[TableEngine]string{
 type TableEngine int
 
 type DbConfig struct {
-	pgx.ConnConfig      `yaml:",inline"`
-	ReplicationSlotName string `yaml:"replicationSlotName"`
-	PublicationName     string `yaml:"publicationName"`
+	pgx.ConnConfig `yaml:",inline"`
+
+	ReplicationSlotName string `yaml:"replication_slot_name"`
+	PublicationName     string `yaml:"publication_name"`
 }
 
 type Column struct {

@@ -26,5 +26,5 @@ pg:
     port: 5432
     database: pg2ch_test
     user: postgres
-    replicationSlotName: myslot
-    publicationName: my_pub
+    replication_slot_name: myslot
+    publication_name: my_pub
