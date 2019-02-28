@@ -45,9 +45,9 @@ func (t *ReplacingMergeTree) Write(p []byte) (n int, err error) {
 	if err != nil {
 		return 0, fmt.Errorf("could not parse record: %v", err)
 	}
-	row = append(row, 0)
+	row = append(row, 0) // append version column value
 
-	if t.bufferTable != "" {
+	if t.bufferTable != "" && !t.syncSkipBufferTable {
 		row = append(row, t.bufferRowId)
 	}
 

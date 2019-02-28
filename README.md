@@ -23,6 +23,8 @@ tables:
         main_table: {clickhouse table name}
         buffer_table: {clickhouse buffer table name} # optional, if not specified, insert directly to the main table
         buffer_row_id: {clickhouse buffer table column name for row id} 
+        skip_init_sync: {skip initial copy of the data}
+        init_sync_skip_buffer_table: {if true bypass buffer_table and write directly to the main_table}            
         inactivity_merge_timeout: {interval, default 1 min} # merge buffered data after that timeout
         engine: {clickhouse table engine: MergeTree, ReplacingMergeTree or CollapsingMergeTree}
         buffer_size: {number of DML(insert/update/delete) commands to store in the memory before flushing to the buffer/main table } 

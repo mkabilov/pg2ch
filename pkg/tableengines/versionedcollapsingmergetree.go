@@ -64,9 +64,9 @@ func (t *VersionedCollapsingMergeTree) Write(p []byte) (n int, err error) {
 	if err != nil {
 		return 0, fmt.Errorf("could not parse record: %v", err)
 	}
-	row = append(row, 1, 0)
+	row = append(row, 1, 0) // append sign and version column values
 
-	if t.bufferTable != "" {
+	if t.bufferTable != "" && !t.syncSkipBufferTable {
 		row = append(row, t.bufferRowId)
 	}
 
