@@ -1,9 +1,7 @@
 package tableengines
 
 import (
-	"bytes"
 	"database/sql"
-	"encoding/csv"
 	"fmt"
 	"strings"
 
@@ -57,7 +55,7 @@ func NewVersionedCollapsingMergeTree(conn *sql.DB, name string, tblCfg config.Ta
 }
 
 func (t *VersionedCollapsingMergeTree) Write(p []byte) (n int, err error) {
-	rec, err := csv.NewReader(bytes.NewReader(p)).Read()
+	rec, n, err := t.fetchCSVRecord(p)
 	if err != nil {
 		return 0, err
 	}
@@ -72,7 +70,7 @@ func (t *VersionedCollapsingMergeTree) Write(p []byte) (n int, err error) {
 	}
 	t.bufferRowId++
 
-	return len(p), nil
+	return
 }
 
 func (t *VersionedCollapsingMergeTree) Sync(pgTx *pgx.Tx) error {

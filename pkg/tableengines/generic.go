@@ -1,7 +1,9 @@
 package tableengines
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"log"
@@ -56,9 +58,13 @@ type genericTable struct {
 
 	bufferMutex sync.Mutex
 	inTx        *atomic.Value
+
+	syncBuf *bytes.Buffer
+	syncCSV *csv.Reader
 }
 
 func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTable {
+	syncBuf := bytes.NewBuffer(nil)
 	pgChColumns := make(map[string]string)
 	pgChTypes := make(map[string]string)
 
@@ -104,6 +110,8 @@ func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTabl
 		inTx:                   &atomic.Value{},
 		mergeInactivityTimeout: tblCfg.InactivityMergeTimeout,
 		bufferRowIdColumn:      tblCfg.BufferRowIdColumn,
+		syncBuf:                syncBuf,
+		syncCSV:                csv.NewReader(syncBuf),
 	}
 
 	if t.mergeInactivityTimeout.Seconds() == 0 {
@@ -168,6 +176,24 @@ func (t *genericTable) stmntExec(params []interface{}) error {
 
 func (t *genericTable) begin() (err error) {
 	t.chTx, err = t.chConn.Begin()
+
+	return
+}
+
+func (t *genericTable) fetchCSVRecord(p []byte) (rec []string, n int, err error) {
+	n, err = t.syncBuf.Write(p)
+	if err != nil {
+		return
+	}
+
+	rec, err = t.syncCSV.Read()
+	if err != nil {
+		if err == io.EOF {
+			err = nil
+		}
+
+		return
+	}
 
 	return
 }

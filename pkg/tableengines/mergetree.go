@@ -1,9 +1,7 @@
 package tableengines
 
 import (
-	"bytes"
 	"database/sql"
-	"encoding/csv"
 	"fmt"
 	"strings"
 
@@ -40,7 +38,7 @@ func (t *MergeTreeTable) Sync(pgTx *pgx.Tx) error {
 }
 
 func (t *MergeTreeTable) Write(p []byte) (n int, err error) {
-	rec, err := csv.NewReader(bytes.NewReader(p)).Read()
+	rec, n, err := t.fetchCSVRecord(p)
 	if err != nil {
 		return 0, err
 	}
@@ -55,7 +53,7 @@ func (t *MergeTreeTable) Write(p []byte) (n int, err error) {
 	}
 	t.bufferRowId++
 
-	return len(p), nil
+	return
 }
 
 func (t *MergeTreeTable) Insert(lsn utils.LSN, new message.Row) error {
