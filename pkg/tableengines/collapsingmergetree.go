@@ -38,10 +38,11 @@ func (t *CollapsingMergeTreeTable) Sync(pgTx *pgx.Tx) error {
 }
 
 func (t *CollapsingMergeTreeTable) Write(p []byte) (n int, err error) {
-	rec, n, err := t.fetchCSVRecord(p)
+	rec, err := utils.DecodeCopy(p)
 	if err != nil {
 		return 0, err
 	}
+	n = len(p)
 
 	row, err := t.convertStrings(rec) //TODO: move me to genericTable, e.g. fetchCSVRecord
 	if err != nil {

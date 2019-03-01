@@ -36,10 +36,11 @@ func NewReplacingMergeTree(conn *sql.DB, name string, tblCfg config.Table) *Repl
 }
 
 func (t *ReplacingMergeTree) Write(p []byte) (n int, err error) {
-	rec, n, err := t.fetchCSVRecord(p)
+	rec, err := utils.DecodeCopy(p)
 	if err != nil {
 		return 0, err
 	}
+	n = len(p)
 
 	row, err := t.convertStrings(rec)
 	if err != nil {

@@ -1,9 +1,7 @@
 package tableengines
 
 import (
-	"bytes"
 	"database/sql"
-	"encoding/csv"
 	"fmt"
 	"io"
 	"log"
@@ -61,12 +59,9 @@ type genericTable struct {
 
 	syncSkip            bool
 	syncSkipBufferTable bool
-	syncBuf             *bytes.Buffer
-	syncCSV             *csv.Reader
 }
 
 func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTable {
-	syncBuf := bytes.NewBuffer(nil)
 	pgChColumns := make(map[string]string)
 	columns := make(map[string]config.Column)
 
@@ -112,8 +107,6 @@ func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTabl
 		inTx:                   &atomic.Value{},
 		mergeInactivityTimeout: tblCfg.InactivityMergeTimeout,
 		bufferRowIdColumn:      tblCfg.BufferRowIdColumn,
-		syncBuf:                syncBuf,
-		syncCSV:                csv.NewReader(syncBuf),
 		syncSkip:               tblCfg.SkipInitSync,
 		syncSkipBufferTable:    tblCfg.InitSyncSkipBufferTable,
 	}
@@ -182,26 +175,12 @@ func (t *genericTable) begin() (err error) {
 	return
 }
 
-func (t *genericTable) fetchCSVRecord(p []byte) (rec []string, n int, err error) {
-	n, err = t.syncBuf.Write(p)
-	if err != nil {
-		return
-	}
-
-	rec, err = t.syncCSV.Read()
-	if err == io.EOF {
-		err = nil
-	}
-
-	return
-}
-
 func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	if t.syncSkip {
 		return nil
 	}
 
-	query := fmt.Sprintf("copy %s(%s) to stdout (format csv)", t.pgTableName, strings.Join(t.pgColumns, ", "))
+	query := fmt.Sprintf("copy %s(%s) to stdout", t.pgTableName, strings.Join(t.pgColumns, ", "))
 
 	t.inTx.Store(true)
 	defer t.inTx.Store(false)
@@ -216,7 +195,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		}
 	}
 
-	if !t.syncSkipBufferTable {
+	if t.syncSkipBufferTable {
 		if err := t.truncateMainTable(); err != nil {
 			return fmt.Errorf("could not truncate main table: %v", err)
 		}
@@ -241,7 +220,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		return nil
 	}
 
-	if t.syncSkipBufferTable {
+	if !t.syncSkipBufferTable {
 		if err := t.truncateMainTable(); err != nil {
 			return fmt.Errorf("could not truncate main table: %v", err)
 		}
@@ -385,14 +364,6 @@ func (t *genericTable) merge() error {
 }
 
 func convert(val string, column config.Column) (interface{}, error) {
-	// TODO: mind nullable values
-
-	// hint: copy (select ''::text, null::text) to stdout (format csv);
-	// output: "",
-	if val == "" && column.Nullable {
-		return nil, nil
-	}
-
 	switch column.ChType {
 	case "Int8":
 		return strconv.ParseInt(val, 10, 8)
@@ -453,14 +424,26 @@ func (t *genericTable) convertTuples(row message.Row) []interface{} {
 	return res
 }
 
-func (t *genericTable) convertStrings(tuples []string) ([]interface{}, error) {
+func (t *genericTable) convertStrings(fields []sql.NullString) ([]interface{}, error) {
 	res := make([]interface{}, 0)
-	for i, tuple := range tuples {
-		colName := t.pgColumns[i]
+	for i, field := range fields {
+		pgColName := t.pgColumns[i]
+		column, ok := t.columns[pgColName]
+		if !ok {
+			continue
+		}
 
-		val, err := convert(tuple, t.columns[colName])
+		if !field.Valid {
+			if !column.Nullable {
+				return nil, fmt.Errorf("got null in %s field, which is not nullable on the ClickHouse side", pgColName)
+			}
+			res = append(res, nil)
+			continue
+		}
+
+		val, err := convert(field.String, column)
 		if err != nil {
-			return nil, fmt.Errorf("could not parse %q field with %s type: %v", colName, t.columns[colName].ChType, err)
+			return nil, fmt.Errorf("could not parse %q field with %s type: %v", pgColName, t.columns[pgColName].ChType, err)
 		}
 
 		res = append(res, val)

@@ -38,10 +38,11 @@ func (t *MergeTreeTable) Sync(pgTx *pgx.Tx) error {
 }
 
 func (t *MergeTreeTable) Write(p []byte) (n int, err error) {
-	rec, n, err := t.fetchCSVRecord(p)
+	rec, err := utils.DecodeCopy(p)
 	if err != nil {
 		return 0, err
 	}
+	n = len(p)
 
 	row, err := t.convertStrings(rec)
 	if err != nil {
