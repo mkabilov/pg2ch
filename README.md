@@ -29,7 +29,7 @@ tables:
         engine: {clickhouse table engine: MergeTree, ReplacingMergeTree or CollapsingMergeTree}
         buffer_size: {number of DML(insert/update/delete) commands to store in the memory before flushing to the buffer/main table } 
         merge_treshold: {if buffer table specified, number of buffer flushed before moving data from buffer to the main table}
-        columns: # in the same order as in the postgresql table
+        columns: # in the exact same order as in the postgresql table
             - {postgresql column name}:
                 type: {clickhouse data type Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64|Float32|Float64|String|DateTime}
                 name: {clickhouse column name}
