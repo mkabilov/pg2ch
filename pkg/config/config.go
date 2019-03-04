@@ -109,5 +109,12 @@ func New(filepath string) (*Config, error) {
 		return nil, fmt.Errorf("replication slot name is not specified")
 	}
 
+	connCfg, err := pgx.ParseEnvLibpq()
+	if err != nil {
+		return nil, fmt.Errorf("could not parse lib pq env variabels: %v", err)
+	}
+
+	cfg.Pg.ConnConfig = cfg.Pg.ConnConfig.Merge(connCfg)
+
 	return &cfg, nil
 }
