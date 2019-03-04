@@ -400,7 +400,9 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 			if tbl := r.getTable(oid); tbl == nil {
 				continue
 			} else {
-				return tbl.Truncate()
+				if err := tbl.Truncate(); err != nil {
+					return err
+				}
 			}
 		}
 	}
