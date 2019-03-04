@@ -14,16 +14,12 @@ import (
 
 type MergeTreeTable struct {
 	genericTable
-
-	signColumn string
 }
 
-func NewMergeTree(conn *sql.DB, name string, tblCfg config.Table) *CollapsingMergeTreeTable {
-	t := CollapsingMergeTreeTable{
+func NewMergeTree(conn *sql.DB, name string, tblCfg config.Table) *MergeTreeTable {
+	t := MergeTreeTable{
 		genericTable: newGenericTable(conn, name, tblCfg),
-		signColumn:   tblCfg.SignColumn,
 	}
-	t.chColumns = append(t.chColumns, tblCfg.SignColumn)
 
 	t.mergeQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
 		t.mainTable, strings.Join(t.chColumns, ", "), t.bufferTable, t.bufferRowIdColumn)}
@@ -48,7 +44,6 @@ func (t *MergeTreeTable) Write(p []byte) (n int, err error) {
 	if err != nil {
 		return 0, fmt.Errorf("could not parse record: %v", err)
 	}
-	row = append(row, 1) // append sign column value
 
 	if t.bufferTable != "" && !t.syncSkipBufferTable {
 		row = append(row, t.bufferRowId)
