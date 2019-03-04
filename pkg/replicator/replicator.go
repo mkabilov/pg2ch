@@ -398,7 +398,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 	case message.Truncate:
 		for _, oid := range v.RelationOIDs {
 			if tbl := r.getTable(oid); tbl == nil {
-				break
+				continue
 			} else {
 				return tbl.Truncate()
 			}
