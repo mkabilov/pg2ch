@@ -58,20 +58,13 @@ func (t *MergeTreeTable) Write(p []byte) (n int, err error) {
 }
 
 func (t *MergeTreeTable) Insert(lsn utils.LSN, new message.Row) error {
-	return t.processCommandSet(commandSet{
-		append(t.convertTuples(new), 1),
-	})
+	return t.processCommandSet(commandSet{t.convertTuples(new)})
 }
 
 func (t *MergeTreeTable) Update(lsn utils.LSN, old, new message.Row) error {
-	return t.processCommandSet(commandSet{
-		append(t.convertTuples(old), -1),
-		append(t.convertTuples(new), 1),
-	})
+	return nil
 }
 
 func (t *MergeTreeTable) Delete(lsn utils.LSN, old message.Row) error {
-	return t.processCommandSet(commandSet{
-		append(t.convertTuples(old), -1),
-	})
+	return nil
 }

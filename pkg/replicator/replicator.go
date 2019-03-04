@@ -23,6 +23,7 @@ type CHTable interface {
 	Insert(lsn utils.LSN, new message.Row) error
 	Update(lsn utils.LSN, old message.Row, new message.Row) error
 	Delete(lsn utils.LSN, old message.Row) error
+	Truncate() error
 	Sync(*pgx.Tx) error
 	Close() error
 	Begin() error
@@ -391,6 +392,14 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 			break
 		} else {
 			return tbl.Delete(r.finalLSN, v.OldRow)
+		}
+	case message.Truncate:
+		for _, oid := range v.RelationOIDs {
+			if tbl := r.getTable(oid); tbl == nil {
+				break
+			} else {
+				return tbl.Truncate()
+			}
 		}
 	}
 

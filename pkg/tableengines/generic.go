@@ -17,7 +17,10 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/message"
 )
 
-const defaultInactivityMergeTimeout = time.Minute
+const (
+	defaultInactivityMergeTimeout = time.Minute
+	defaultBufferSize             = 1000
+)
 
 type bufRow struct {
 	rowID int
@@ -113,6 +116,10 @@ func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTabl
 
 	if t.mergeInactivityTimeout.Seconds() == 0 {
 		t.mergeInactivityTimeout = defaultInactivityMergeTimeout
+	}
+
+	if t.bufferSize < 1 {
+		t.bufferSize = defaultBufferSize
 	}
 
 	t.buffer = make([]bufCommand, t.bufferSize)
@@ -463,6 +470,18 @@ func (t *genericTable) Commit() error {
 
 	if err := t.merge(); err != nil {
 		return fmt.Errorf("could not merge: %v", err)
+	}
+
+	return nil
+}
+
+func (t *genericTable) Truncate() error {
+	if err := t.truncateMainTable(); err != nil {
+		return err
+	}
+
+	if t.bufferTable != "" {
+		return t.truncateBufTable()
 	}
 
 	return nil
