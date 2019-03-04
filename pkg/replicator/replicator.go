@@ -150,13 +150,15 @@ func (r *Replicator) Run() error {
 		return fmt.Errorf("table check failed: %v", err)
 	}
 
-	for tableName := range r.cfg.Tables {
+	for tableName, tableCfg := range r.cfg.Tables {
 		tbl, err := r.newTable(tableName)
 		if err != nil {
 			return fmt.Errorf("could not instantiate table: %v", err)
 		}
 
-		log.Printf("Syncing %q table", tableName)
+		if !tableCfg.SkipInitSync {
+			log.Printf("Syncing %q table", tableName)
+		}
 		r.tables[tableName] = tbl
 		if err := tbl.Sync(r.pgTx); err != nil {
 			return fmt.Errorf("could not sync %q: %v", tableName, err)
