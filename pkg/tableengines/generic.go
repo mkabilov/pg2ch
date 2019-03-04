@@ -193,9 +193,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		if err := t.truncateBufTable(); err != nil {
 			return fmt.Errorf("could not truncate buffer table: %v", err)
 		}
-	}
-
-	if t.syncSkipBufferTable {
+	} else {
 		if err := t.truncateMainTable(); err != nil {
 			return fmt.Errorf("could not truncate main table: %v", err)
 		}
@@ -212,15 +210,12 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	if err := t.stmntCloseCommit(); err != nil {
 		return err
 	}
+	rows := t.bufferRowId
 	t.bufferCmdId = 0
 	t.bufferRowId = 0
 	t.bufferFlushCnt++
 
-	if t.bufferTable == "" {
-		return nil
-	}
-
-	if !t.syncSkipBufferTable {
+	if t.bufferTable != "" && !t.syncSkipBufferTable {
 		if err := t.truncateMainTable(); err != nil {
 			return fmt.Errorf("could not truncate main table: %v", err)
 		}
@@ -229,6 +224,8 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 			return fmt.Errorf("could not merge: %v", err)
 		}
 	}
+
+	log.Printf("Pg table %s: %d rows copied to ClickHouse", t.pgTableName, rows)
 
 	return nil
 }

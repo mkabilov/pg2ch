@@ -94,6 +94,38 @@ func (r *Replicator) newTable(tableName string) (CHTable, error) {
 	return nil, fmt.Errorf("%s table engine is not implemented", tbl.Engine)
 }
 
+func (r *Replicator) checkPg() error {
+	var slotExists, pubExists bool
+
+	err := r.pgConn.QueryRow("select "+
+		"exists(select 1 from pg_replication_slots where slot_name = $1) as slot_exists, "+
+		"exists(select 1 from pg_publication where pubname = $2) as pub_exists",
+		r.cfg.Pg.ReplicationSlotName, r.cfg.Pg.PublicationName).Scan(&slotExists, &pubExists)
+
+	if err != nil {
+		return fmt.Errorf("could not query: %v", err)
+	}
+
+	errMsg := ""
+
+	if !slotExists {
+		errMsg += fmt.Sprintf("slot %q does not exist", r.cfg.Pg.ReplicationSlotName)
+	}
+
+	if !pubExists {
+		if errMsg != "" {
+			errMsg += " and "
+		}
+		errMsg += fmt.Sprintf("publication %q does not exist", r.cfg.Pg.PublicationName)
+	}
+
+	if errMsg != "" {
+		return fmt.Errorf(errMsg)
+	}
+
+	return nil
+}
+
 func (r *Replicator) Run() error {
 	if err := r.chConnect(); err != nil {
 		return fmt.Errorf("could not connect to clickhouse: %v", err)
@@ -102,6 +134,10 @@ func (r *Replicator) Run() error {
 
 	if err := r.pgConnect(); err != nil {
 		return fmt.Errorf("could not connecto postgresql: %v", err)
+	}
+
+	if err := r.checkPg(); err != nil {
+		return err
 	}
 
 	if err := r.pgCreateRepSlot(); err != nil {
@@ -119,6 +155,7 @@ func (r *Replicator) Run() error {
 			return fmt.Errorf("could not instantiate table: %v", err)
 		}
 
+		log.Printf("Syncing %q table", tableName)
 		r.tables[tableName] = tbl
 		if err := tbl.Sync(r.pgTx); err != nil {
 			return fmt.Errorf("could not sync %q: %v", tableName, err)
