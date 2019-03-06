@@ -28,7 +28,7 @@ tables:
         inactivity_merge_timeout: {interval, default 1 min} # merge buffered data after that timeout
         engine: {clickhouse table engine: MergeTree, ReplacingMergeTree or CollapsingMergeTree}
         buffer_size: {number of DML(insert/update/delete) commands to store in the memory before flushing to the buffer/main table } 
-        merge_treshold: {if buffer table specified, number of buffer flushed before moving data from buffer to the main table}
+        merge_threshold: {if buffer table specified, number of buffer flushed before moving data from buffer to the main table}
         columns: # in the exact same order as in the postgresql table
             - {postgresql column name}:
                 type: {clickhouse data type Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64|Float32|Float64|String|DateTime}
@@ -78,7 +78,7 @@ tables:
         inactivity_merge_timeout: '10s'
         engine: CollapsingMergeTree
         buffer_size: 1000
-        merge_treshold: 4
+        merge_threshold: 4
         columns:
             - aid:
                 type: Int32
@@ -110,7 +110,7 @@ pg:
 ```bash
     pgbench -U postgres -d pg2ch_test --time 30 --client 10 
 ```
-- wait for `inactivity_merge_timeout` period (in our case 10 seconds) so that data in the memory gets flushed to the table 
+- wait for `inactivity_merge_timeout` period (in our case 10 seconds) so that data in the memory gets flushed to the table in ClickHouse
 - check the sums of the `abalance` column both on ClickHouse and PostgreSQL:
     - ClickHouse: `SELECT SUM(abalance * sign) FROM pgbench_accounts` ([why multiply by `sign` column?](https://clickhouse.yandex/docs/en/operations/table_engines/collapsingmergetree/#example-of-use)) 
     - PostgreSQL: `SELECT SUM(abalance) FROM pgbench_accounts`

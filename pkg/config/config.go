@@ -52,7 +52,7 @@ type Table struct {
 	MainTable               string        `yaml:"main_table"`
 	VerColumn               string        `yaml:"ver_column"`
 	Engine                  TableEngine   `yaml:"engine"`
-	MergeThreshold          int           `yaml:"merge_treshold"`
+	MergeThreshold          int           `yaml:"merge_threshold"`
 	InactivityMergeTimeout  time.Duration `yaml:"inactivity_merge_timeout"`
 	SkipInitSync            bool          `yaml:"skip_init_sync"`
 	InitSyncSkipBufferTable bool          `yaml:"init_sync_skip_buffer_table"`

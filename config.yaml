@@ -6,7 +6,7 @@ tables:
         inactivity_merge_timeout: '30s' # merge buffered data after that timeout
         engine: CollapsingMergeTree
         buffer_size: 1000
-        merge_treshold: 4 # buffers
+        merge_threshold: 4 # buffers
         columns: # in the exact same order as in the pg table
             - aid:
                 type: Int32
