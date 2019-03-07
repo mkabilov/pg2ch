@@ -12,6 +12,8 @@ import (
 )
 
 const (
+	defaultInactivityMergeTimeout = time.Minute
+
 	CollapsingMergeTree TableEngine = iota
 	ReplacingMergeTree
 	VersionedCollapsingMergeTree
@@ -53,15 +55,15 @@ type Table struct {
 	VerColumn               string        `yaml:"ver_column"`
 	Engine                  TableEngine   `yaml:"engine"`
 	MergeThreshold          int           `yaml:"merge_threshold"`
-	InactivityMergeTimeout  time.Duration `yaml:"inactivity_merge_timeout"`
 	SkipInitSync            bool          `yaml:"skip_init_sync"`
 	InitSyncSkipBufferTable bool          `yaml:"init_sync_skip_buffer_table"`
 }
 
 type Config struct {
-	CHConnectionString string           `yaml:"clickhouse"`
-	Pg                 DbConfig         `yaml:"pg"`
-	Tables             map[string]Table `yaml:"tables"`
+	CHConnectionString     string           `yaml:"clickhouse"`
+	Pg                     DbConfig         `yaml:"pg"`
+	Tables                 map[string]Table `yaml:"tables"`
+	InactivityMergeTimeout time.Duration    `yaml:"inactivity_merge_timeout"`
 }
 
 func (t TableEngine) String() string {
@@ -95,7 +97,7 @@ func New(filepath string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not open file: %v", err)
 	}
-	defer fp.Close()
+	defer fp.Close() //TODO: handle err message
 
 	if err := yaml.NewDecoder(fp).Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("could not decode yaml: %v", err)
@@ -112,6 +114,10 @@ func New(filepath string) (*Config, error) {
 	connCfg, err := pgx.ParseEnvLibpq()
 	if err != nil {
 		return nil, fmt.Errorf("could not parse lib pq env variabels: %v", err)
+	}
+
+	if cfg.InactivityMergeTimeout.Seconds() == 0 {
+		cfg.InactivityMergeTimeout = defaultInactivityMergeTimeout
 	}
 
 	cfg.Pg.ConnConfig = cfg.Pg.ConnConfig.Merge(connCfg)

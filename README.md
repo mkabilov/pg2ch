@@ -25,7 +25,6 @@ tables:
         buffer_row_id: {clickhouse buffer table column name for row id} 
         skip_init_sync: {skip initial copy of the data}
         init_sync_skip_buffer_table: {if true bypass buffer_table and write directly to the main_table}            
-        inactivity_merge_timeout: {interval, default 1 min} # merge buffered data after that timeout
         engine: {clickhouse table engine: MergeTree, ReplacingMergeTree or CollapsingMergeTree}
         buffer_size: {number of DML(insert/update/delete) commands to store in the memory before flushing to the buffer/main table } 
         merge_threshold: {if buffer table specified, number of buffer flushed before moving data from buffer to the main table}
@@ -38,6 +37,7 @@ tables:
         sign_column: {clickhouse sign column name for MergeTree and CollapsingMergeTree engines}
         ver_column: {clickhouse version column name for the ReplacingMergeTree engine}
 
+inactivity_merge_timeout: {interval, default 1 min} # merge buffered data after that timeout
 clickhouse: {clickhouse connection string}
 pg: # postgresql connection params
     host: {host name}
@@ -75,7 +75,6 @@ tables:
         main_table: pgbench_accounts
         buffer_table: pgbench_accounts_buf
         buffer_row_id: row_id
-        inactivity_merge_timeout: '10s'
         engine: CollapsingMergeTree
         buffer_size: 1000
         merge_threshold: 4
@@ -91,6 +90,7 @@ tables:
             - filler: # ignore this column
         sign_column: sign
 
+inactivity_merge_timeout: '10s'
 clickhouse: tcp://localhost:9000
 pg:
     host: localhost

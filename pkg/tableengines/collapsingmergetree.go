@@ -28,8 +28,6 @@ func NewCollapsingMergeTree(conn *sql.DB, name string, tblCfg config.Table) *Col
 	t.mergeQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
 		t.mainTable, strings.Join(t.chColumns, ", "), t.bufferTable, t.bufferRowIdColumn)}
 
-	go t.backgroundMerge()
-
 	return &t
 }
 
@@ -62,20 +60,20 @@ func (t *CollapsingMergeTreeTable) Write(p []byte) (n int, err error) {
 	return
 }
 
-func (t *CollapsingMergeTreeTable) Insert(lsn utils.LSN, new message.Row) error {
+func (t *CollapsingMergeTreeTable) Insert(lsn utils.LSN, new message.Row) (bool, error) {
 	return t.processCommandSet(commandSet{
 		append(t.convertTuples(new), 1),
 	})
 }
 
-func (t *CollapsingMergeTreeTable) Update(lsn utils.LSN, old, new message.Row) error {
+func (t *CollapsingMergeTreeTable) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
 	return t.processCommandSet(commandSet{
 		append(t.convertTuples(old), -1),
 		append(t.convertTuples(new), 1),
 	})
 }
 
-func (t *CollapsingMergeTreeTable) Delete(lsn utils.LSN, old message.Row) error {
+func (t *CollapsingMergeTreeTable) Delete(lsn utils.LSN, old message.Row) (bool, error) {
 	return t.processCommandSet(commandSet{
 		append(t.convertTuples(old), -1),
 	})

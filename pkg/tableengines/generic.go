@@ -7,8 +7,6 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx"
@@ -17,10 +15,7 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/message"
 )
 
-const (
-	defaultInactivityMergeTimeout = time.Minute
-	defaultBufferSize             = 1000
-)
+const defaultBufferSize = 1000
 
 type bufRow struct {
 	rowID int
@@ -35,7 +30,6 @@ type genericTable struct {
 	chConn  *sql.DB
 	chTx    *sql.Tx
 	chStmnt *sql.Stmt
-	stopCh  chan struct{}
 
 	pgTableName string
 	mainTable   string
@@ -48,17 +42,13 @@ type genericTable struct {
 	bufferRowIdColumn string
 	emptyValues       map[int]interface{}
 
-	buffer                 []bufCommand
-	bufferSize             int // buffer size
-	bufferCmdId            int // number of commands in the current buffer
-	bufferRowId            int // row id in the buffer
-	bufferFlushCnt         int // number of flushed buffers
-	mergeBufferThreshold   int // number of buffers before merging
-	mergeQueries           []string
-	mergeInactivityTimeout time.Duration
-
-	bufferMutex sync.Mutex
-	inTx        *atomic.Value
+	buffer               []bufCommand
+	bufferSize           int // buffer size
+	bufferCmdId          int // number of commands in the current buffer
+	bufferRowId          int // row id in the buffer
+	bufferFlushCnt       int // number of flushed buffers
+	mergeBufferThreshold int // number of buffers before merging
+	mergeQueries         []string
 
 	syncSkip            bool
 	syncSkipBufferTable bool
@@ -94,28 +84,20 @@ func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTabl
 	}
 
 	t := genericTable{
-		stopCh:                 make(chan struct{}),
-		chConn:                 conn,
-		pgTableName:            name,
-		mainTable:              tblCfg.MainTable,
-		bufferTable:            tblCfg.BufferTable,
-		pg2ch:                  pgChColumns,
-		columns:                columns,
-		chColumns:              chColumns,
-		pgColumns:              pgColumns,
-		emptyValues:            emptyValues,
-		bufferSize:             tblCfg.BufferSize,
-		mergeBufferThreshold:   tblCfg.MergeThreshold,
-		bufferMutex:            sync.Mutex{},
-		inTx:                   &atomic.Value{},
-		mergeInactivityTimeout: tblCfg.InactivityMergeTimeout,
-		bufferRowIdColumn:      tblCfg.BufferRowIdColumn,
-		syncSkip:               tblCfg.SkipInitSync,
-		syncSkipBufferTable:    tblCfg.InitSyncSkipBufferTable,
-	}
-
-	if t.mergeInactivityTimeout.Seconds() == 0 {
-		t.mergeInactivityTimeout = defaultInactivityMergeTimeout
+		chConn:               conn,
+		pgTableName:          name,
+		mainTable:            tblCfg.MainTable,
+		bufferTable:          tblCfg.BufferTable,
+		pg2ch:                pgChColumns,
+		columns:              columns,
+		chColumns:            chColumns,
+		pgColumns:            pgColumns,
+		emptyValues:          emptyValues,
+		bufferSize:           tblCfg.BufferSize,
+		mergeBufferThreshold: tblCfg.MergeThreshold,
+		bufferRowIdColumn:    tblCfg.BufferRowIdColumn,
+		syncSkip:             tblCfg.SkipInitSync,
+		syncSkipBufferTable:  tblCfg.InitSyncSkipBufferTable,
 	}
 
 	if t.bufferSize < 1 {
@@ -189,9 +171,6 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 
 	query := fmt.Sprintf("copy %s(%s) to stdout", t.pgTableName, strings.Join(t.pgColumns, ", "))
 
-	t.inTx.Store(true)
-	defer t.inTx.Store(false)
-
 	if err := t.begin(); err != nil {
 		return fmt.Errorf("could not begin: %v", err)
 	}
@@ -220,15 +199,14 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	rows := t.bufferRowId
 	t.bufferCmdId = 0
 	t.bufferRowId = 0
-	t.bufferFlushCnt++
 
 	if t.bufferTable != "" && !t.syncSkipBufferTable {
 		if err := t.truncateMainTable(); err != nil {
 			return fmt.Errorf("could not truncate main table: %v", err)
 		}
 
-		if err := t.merge(); err != nil {
-			return fmt.Errorf("could not merge: %v", err)
+		if err := t.FlushToMainTable(); err != nil {
+			return fmt.Errorf("could not move from buffer to the main table: %v", err)
 		}
 	}
 
@@ -245,38 +223,11 @@ func (t *genericTable) stmntCloseCommit() error {
 	if err := t.chTx.Commit(); err != nil {
 		return fmt.Errorf("could not commit transaction: %v", err)
 	}
-	t.inTx.Store(false)
 
 	return nil
 }
 
-func (t *genericTable) backgroundMerge() {
-	ticker := time.NewTicker(t.mergeInactivityTimeout)
-
-	for {
-		select {
-		case <-t.stopCh:
-			return
-		case <-ticker.C:
-			if t.inTx.Load().(bool) {
-				break
-			}
-
-			if err := t.flushBuffer(); err != nil {
-				log.Fatalf("could not background flush buffer: %v", err)
-			}
-
-			if err := t.merge(); err != nil {
-				log.Fatalf("could not background merge: %v", err)
-			}
-		}
-	}
-}
-
 func (t *genericTable) bufferAppend(cmdSet commandSet) {
-	t.bufferMutex.Lock()
-	defer t.bufferMutex.Unlock()
-
 	bufItem := make([]bufRow, len(cmdSet))
 	for i := range cmdSet {
 		bufItem[i] = bufRow{rowID: t.bufferRowId, data: cmdSet[i]}
@@ -287,22 +238,25 @@ func (t *genericTable) bufferAppend(cmdSet commandSet) {
 	t.bufferCmdId++
 }
 
-func (t *genericTable) processCommandSet(set commandSet) error {
-	t.bufferAppend(set)
+func (t *genericTable) processCommandSet(set commandSet) (bool, error) {
+	if set != nil {
+		t.bufferAppend(set)
+	}
 
 	if t.bufferCmdId == t.bufferSize {
 		if err := t.flushBuffer(); err != nil {
-			return fmt.Errorf("could not flush buffer: %v", err)
+			return false, fmt.Errorf("could not flush buffer: %v", err)
 		}
 	}
 
-	return nil
+	if t.bufferTable == "" {
+		return false, nil
+	}
+
+	return t.bufferFlushCnt >= t.mergeBufferThreshold, nil
 }
 
 func (t *genericTable) flushBuffer() error {
-	t.bufferMutex.Lock()
-	defer t.bufferMutex.Unlock()
-
 	if t.bufferCmdId == 0 {
 		return nil
 	}
@@ -338,17 +292,14 @@ func (t *genericTable) flushBuffer() error {
 	return nil
 }
 
-func (t *genericTable) merge() error {
+func (t *genericTable) FlushToMainTable() error {
+	if err := t.flushBuffer(); err != nil {
+		return fmt.Errorf("could not flush buffers: %v", err)
+	}
+
 	if t.bufferTable == "" {
 		return nil
 	}
-	t.bufferMutex.Lock()
-	defer t.bufferMutex.Unlock()
-
-	if t.bufferFlushCnt == 0 {
-		return nil
-	}
-
 	for _, query := range t.mergeQueries {
 		if _, err := t.chConn.Exec(query); err != nil {
 			return err
@@ -456,26 +407,9 @@ func (t *genericTable) convertStrings(fields []sql.NullString) ([]interface{}, e
 	return res, nil
 }
 
-func (t *genericTable) Begin() error {
-	t.inTx.Store(true)
-	return nil
-}
-
-func (t *genericTable) Commit() error {
-	defer t.inTx.Store(false)
-
-	if t.bufferFlushCnt < t.mergeBufferThreshold {
-		return nil
-	}
-
-	if err := t.merge(); err != nil {
-		return fmt.Errorf("could not merge: %v", err)
-	}
-
-	return nil
-}
-
 func (t *genericTable) Truncate() error {
+	t.bufferCmdId = 0
+
 	if err := t.truncateMainTable(); err != nil {
 		return err
 	}
@@ -488,15 +422,5 @@ func (t *genericTable) Truncate() error {
 }
 
 func (t *genericTable) Close() error {
-	close(t.stopCh)
-
-	if err := t.flushBuffer(); err != nil {
-		return fmt.Errorf("could not flush buffers: %v", err)
-	}
-
-	if err := t.merge(); err != nil {
-		return fmt.Errorf("could not merge: %v", err)
-	}
-
-	return nil
+	return t.FlushToMainTable()
 }

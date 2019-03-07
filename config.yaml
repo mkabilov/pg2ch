@@ -3,7 +3,6 @@ tables:
         main_table: pgbench_accounts
         buffer_table: pgbench_accounts_buf # optional, if not specified, insert directly to the main table
         buffer_row_id: 'row_id' # column name in the buffer table to store row id
-        inactivity_merge_timeout: '30s' # merge buffered data after that timeout
         engine: CollapsingMergeTree
         buffer_size: 1000
         merge_threshold: 4 # buffers
@@ -24,7 +23,6 @@ tables:
     pgbench_history:
         skip_init_sync: true
         main_table: pgbench_history
-        inactive_merge_timeout: '30s'
         engine: MergeTree
         columns:
             - tid:
@@ -43,6 +41,8 @@ tables:
                 type: DateTime
                 name: mtime
             - filler:
+
+inactivity_merge_timeout: '30s' # merge buffered data after that timeout
 clickhouse: tcp://localhost:9000
 pg:
     host: localhost
