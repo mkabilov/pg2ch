@@ -22,9 +22,9 @@ import (
 )
 
 type ClickHouseTable interface {
-	Insert(lsn utils.LSN, new message.Row) (bool, error)
-	Update(lsn utils.LSN, old message.Row, new message.Row) (bool, error)
-	Delete(lsn utils.LSN, old message.Row) (bool, error)
+	Insert(lsn utils.LSN, new message.Row) (mergeIsNeeded bool, err error)
+	Update(lsn utils.LSN, old message.Row, new message.Row) (mergeIsNeeded bool, err error)
+	Delete(lsn utils.LSN, old message.Row) (mergeIsNeeded bool, err error)
 	Truncate() error
 	Sync(*pgx.Tx) error
 	Close() error
@@ -49,20 +49,22 @@ type Replicator struct {
 	finalLSN utils.LSN
 	startLSN utils.LSN
 
-	inTxMutex     *sync.Mutex
-	inTx          bool
-	mergeIsNeeded bool
-	txTables      map[string]struct{} // touched in the tx tables
+	tablesToMergeMutex *sync.Mutex
+	tableToMerge       map[string]struct{} // tables to be merged
+	inTxTables         map[string]struct{} // tables inside running tx
+	curTxMergeIsNeeded bool                // tables in the current transaction are needed to be merged
 }
 
 func New(cfg config.Config) *Replicator {
 	r := Replicator{
-		cfg:       cfg,
-		tables:    make(map[string]ClickHouseTable),
-		oidName:   make(map[utils.OID]string),
-		errCh:     make(chan error),
-		txTables:  make(map[string]struct{}),
-		inTxMutex: &sync.Mutex{},
+		cfg:     cfg,
+		tables:  make(map[string]ClickHouseTable),
+		oidName: make(map[utils.OID]string),
+		errCh:   make(chan error),
+
+		tablesToMergeMutex: &sync.Mutex{},
+		tableToMerge:       make(map[string]struct{}),
+		inTxTables:         make(map[string]struct{}),
 	}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 
@@ -206,18 +208,14 @@ func (r *Replicator) inactivityMerge() {
 		case <-r.ctx.Done():
 			return
 		case <-ticker.C:
-			r.inTxMutex.Lock()
-			if r.inTx {
-				log.Printf("skipping due to inside tx")
-				r.inTxMutex.Unlock()
-				break
+			r.tablesToMergeMutex.Lock()
+			if err := r.mergeTables(); err != nil {
+				select {
+				case r.errCh <- fmt.Errorf("could not backgound merge tables: %v", err):
+				default:
+				}
 			}
-			r.mergeIsNeeded = true
-
-			if err := r.maybeMergeTables(); err != nil {
-				r.errCh <- fmt.Errorf("could not backgound merge tables: %v", err)
-			}
-			r.inTxMutex.Unlock()
+			r.tablesToMergeMutex.Unlock()
 		}
 	}
 }
@@ -348,7 +346,7 @@ func (r *Replicator) pgCreateRepSlot() error {
 
 func (r *Replicator) waitForShutdown() {
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
+	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGABRT, syscall.SIGQUIT)
 
 loop:
 	for {
@@ -381,53 +379,61 @@ func (r *Replicator) getTable(oid utils.OID) ClickHouseTable {
 		return nil
 	}
 
-	if _, ok := r.txTables[tblName]; !ok {
-		r.txTables[tblName] = struct{}{}
+	// TODO: skip adding tables with no buffer table
+	if _, ok := r.inTxTables[tblName]; !ok {
+		r.inTxTables[tblName] = struct{}{}
+	}
+
+	if _, ok := r.tableToMerge[tblName]; !ok {
+		r.tableToMerge[tblName] = struct{}{}
 	}
 
 	return tbl
 }
 
-func (r *Replicator) maybeMergeTables() error {
-	if !r.mergeIsNeeded {
-		return nil
-	}
+func (r *Replicator) mergeTables() error {
+	for tblName := range r.tableToMerge {
+		if _, ok := r.inTxTables[tblName]; ok {
+			continue
+		}
 
-	for tblName := range r.txTables {
 		if err := r.tables[tblName].FlushToMainTable(); err != nil {
 			return fmt.Errorf("could not commit %q table: %v", tblName, err)
 		}
-	}
 
-	r.mergeIsNeeded = false
+		delete(r.tableToMerge, tblName)
+	}
 
 	return nil
 }
 
 func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
-	if lsn < r.startLSN {
+	if v, ok := msg.(message.Begin); ok {
+		r.finalLSN = v.FinalLSN
+	}
+
+	if r.finalLSN < r.startLSN {
 		return nil
 	}
+	r.tablesToMergeMutex.Lock()
+	defer r.tablesToMergeMutex.Unlock()
 
 	switch v := msg.(type) {
 	case message.Begin:
-		r.inTxMutex.Lock()
-		defer r.inTxMutex.Unlock()
-		r.inTx = true
-
-		r.finalLSN = v.FinalLSN
-		r.txTables = make(map[string]struct{})
+		r.curTxMergeIsNeeded = false
 	case message.Commit:
-		r.consumer.AdvanceLSN(lsn)
-		r.inTxMutex.Lock()
-		defer func() {
-			r.inTx = false
-			r.inTxMutex.Unlock()
-		}()
+		r.advanceLSN(lsn)
 
-		if err := r.maybeMergeTables(); err != nil {
-			return fmt.Errorf("could not merge tables: %v", err)
+		if r.curTxMergeIsNeeded {
+			for tblName := range r.inTxTables {
+				if err := r.tables[tblName].FlushToMainTable(); err != nil {
+					return fmt.Errorf("could not commit %q table: %v", tblName, err)
+				}
+
+				delete(r.tableToMerge, tblName)
+			}
 		}
+		r.inTxTables = make(map[string]struct{})
 	case message.Insert:
 		tbl := r.getTable(v.RelationOID)
 		if tbl == nil {
@@ -437,7 +443,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 		if mergeIsNeeded, err := tbl.Insert(r.finalLSN, v.NewRow); err != nil {
 			return fmt.Errorf("could not insert: %v", err)
 		} else {
-			r.mergeIsNeeded = r.mergeIsNeeded || mergeIsNeeded
+			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
 		}
 	case message.Update:
 		tbl := r.getTable(v.RelationOID)
@@ -448,7 +454,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 		if mergeIsNeeded, err := tbl.Update(r.finalLSN, v.OldRow, v.NewRow); err != nil {
 			return fmt.Errorf("could not update: %v", err)
 		} else {
-			r.mergeIsNeeded = r.mergeIsNeeded || mergeIsNeeded
+			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
 		}
 	case message.Delete:
 		tbl := r.getTable(v.RelationOID)
@@ -459,7 +465,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 		if mergeIsNeeded, err := tbl.Delete(r.finalLSN, v.OldRow); err != nil {
 			return fmt.Errorf("could not delete: %v", err)
 		} else {
-			r.mergeIsNeeded = r.mergeIsNeeded || mergeIsNeeded
+			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
 		}
 	case message.Truncate:
 		for _, oid := range v.RelationOIDs {
@@ -474,4 +480,43 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 	}
 
 	return nil
+}
+
+func (r *Replicator) storeLSN() (err error) {
+	var (
+		tx *sql.Tx
+		st *sql.Stmt
+	)
+	tx, err = r.chConn.Begin()
+	if err != nil {
+		return fmt.Errorf("could not begin: %v", err)
+	}
+	defer func() {
+		err = tx.Commit()
+	}()
+
+	st, err = tx.Prepare("INSERT INTO lsn_position(oid, lsn) values (?, ?)")
+	if err != nil {
+		return fmt.Errorf("could not prepare: %v", err)
+	}
+	defer func() {
+		err = st.Close()
+	}()
+
+	if _, err := st.Exec(1, uint64(r.finalLSN)); err != nil {
+		return fmt.Errorf("could not exec: %v", err)
+	}
+
+	return
+}
+
+func (r *Replicator) advanceLSN(lsn utils.LSN) {
+	//if err := r.storeLSN(); err != nil {
+	//	select {
+	//	case r.errCh <- err:
+	//	default:
+	//	}
+	//}
+
+	r.consumer.AdvanceLSN(lsn)
 }

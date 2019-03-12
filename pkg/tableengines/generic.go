@@ -7,6 +7,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx"
@@ -42,6 +43,7 @@ type genericTable struct {
 	bufferRowIdColumn string
 	emptyValues       map[int]interface{}
 
+	flushMutex           *sync.Mutex
 	buffer               []bufCommand
 	bufferSize           int // buffer size
 	bufferCmdId          int // number of commands in the current buffer
@@ -98,6 +100,7 @@ func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTabl
 		bufferRowIdColumn:    tblCfg.BufferRowIdColumn,
 		syncSkip:             tblCfg.SkipInitSync,
 		syncSkipBufferTable:  tblCfg.InitSyncSkipBufferTable,
+		flushMutex:           &sync.Mutex{},
 	}
 
 	if t.bufferSize < 1 {
@@ -205,6 +208,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 			return fmt.Errorf("could not truncate main table: %v", err)
 		}
 
+		t.bufferFlushCnt++
 		if err := t.FlushToMainTable(); err != nil {
 			return fmt.Errorf("could not move from buffer to the main table: %v", err)
 		}
@@ -244,6 +248,9 @@ func (t *genericTable) processCommandSet(set commandSet) (bool, error) {
 	}
 
 	if t.bufferCmdId == t.bufferSize {
+		t.flushMutex.Lock()
+		defer t.flushMutex.Unlock()
+
 		if err := t.flushBuffer(); err != nil {
 			return false, fmt.Errorf("could not flush buffer: %v", err)
 		}
@@ -293,11 +300,14 @@ func (t *genericTable) flushBuffer() error {
 }
 
 func (t *genericTable) FlushToMainTable() error {
+	t.flushMutex.Lock()
+	defer t.flushMutex.Unlock()
+
 	if err := t.flushBuffer(); err != nil {
 		return fmt.Errorf("could not flush buffers: %v", err)
 	}
 
-	if t.bufferTable == "" {
+	if t.bufferTable == "" || t.bufferFlushCnt == 0 {
 		return nil
 	}
 	for _, query := range t.mergeQueries {
@@ -309,10 +319,8 @@ func (t *genericTable) FlushToMainTable() error {
 	t.bufferFlushCnt = 0
 	t.bufferRowId = 0
 
-	if t.bufferTable != "" {
-		if err := t.truncateBufTable(); err != nil {
-			return fmt.Errorf("could not truncate buffer table: %v", err)
-		}
+	if err := t.truncateBufTable(); err != nil {
+		return fmt.Errorf("could not truncate buffer table: %v", err)
 	}
 
 	return nil
