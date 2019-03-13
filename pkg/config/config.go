@@ -64,6 +64,7 @@ type Config struct {
 	Pg                     DbConfig         `yaml:"pg"`
 	Tables                 map[string]Table `yaml:"tables"`
 	InactivityMergeTimeout time.Duration    `yaml:"inactivity_merge_timeout"`
+	LsnStateFilepath       string           `yaml:"lsnStateFilepath"`
 }
 
 func (t TableEngine) String() string {

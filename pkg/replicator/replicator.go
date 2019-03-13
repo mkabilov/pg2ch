@@ -1,8 +1,10 @@
 package replicator
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx"
 	"github.com/kshvakov/clickhouse"
+	"gopkg.in/yaml.v2"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/consumer"
@@ -39,7 +42,6 @@ type Replicator struct {
 	errCh    chan error
 
 	pgConn *pgx.Conn
-	pgTx   *pgx.Tx
 	chConn *sql.DB
 
 	tables       map[string]ClickHouseTable
@@ -52,8 +54,15 @@ type Replicator struct {
 	tablesToMergeMutex *sync.Mutex
 	tableToMerge       map[string]struct{} // tables to be merged
 	inTxTables         map[string]struct{} // tables inside running tx
-	curTxMergeIsNeeded bool                // tables in the current transaction are needed to be merged
+	curTxMergeIsNeeded bool                // if tables in the current transaction are needed to be merged
+	stateLSNfp         *os.File
 }
+
+type state struct {
+	StartLSN utils.LSN `yaml:"start_lsn"`
+}
+
+var errNoStateFile = errors.New("no state file")
 
 func New(cfg config.Config) *Replicator {
 	r := Replicator{
@@ -102,10 +111,10 @@ func (r *Replicator) newTable(tableName string) (ClickHouseTable, error) {
 	return nil, fmt.Errorf("%s table engine is not implemented", tbl.Engine)
 }
 
-func (r *Replicator) checkPg() error {
+func (r *Replicator) checkSlotAndPub(tx *pgx.Tx) error {
 	var slotExists, pubExists bool
 
-	err := r.pgConn.QueryRow("select "+
+	err := tx.QueryRow("select "+
 		"exists(select 1 from pg_replication_slots where slot_name = $1) as slot_exists, "+
 		"exists(select 1 from pg_publication where pubname = $2) as pub_exists",
 		r.cfg.Pg.ReplicationSlotName, r.cfg.Pg.PublicationName).Scan(&slotExists, &pubExists)
@@ -134,51 +143,148 @@ func (r *Replicator) checkPg() error {
 	return nil
 }
 
+func (r *Replicator) syncTables(tx *pgx.Tx) error {
+	if err := r.pgCreateRepSlot(tx); err != nil {
+		return fmt.Errorf("could not create replication slot: %v", err)
+	}
+
+	for tableName, tbl := range r.tables {
+		if !r.cfg.Tables[tableName].SkipInitSync {
+			log.Printf("Syncing %q table", tableName)
+		}
+
+		if err := tbl.Sync(tx); err != nil {
+			return fmt.Errorf("could not sync %q: %v", tableName, err)
+		}
+	}
+
+	if err := r.pgDropRepSlot(tx); err != nil {
+		return fmt.Errorf("could not drop replication slot: %v", err)
+	}
+
+	return nil
+}
+
+func (r *Replicator) begin() (*pgx.Tx, error) {
+	tx, err := r.pgConn.BeginEx(r.ctx, &pgx.TxOptions{
+		IsoLevel:   pgx.RepeatableRead,
+		AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, fmt.Errorf("could not start pg transaction: %v", err)
+	}
+
+	return tx, nil
+}
+
+func (r *Replicator) commit(tx *pgx.Tx) error {
+	return tx.Commit()
+}
+
+func (r *Replicator) getCurrentState() error {
+	var (
+		s   state
+		err error
+	)
+
+	r.stateLSNfp, err = os.OpenFile(r.cfg.LsnStateFilepath, os.O_RDWR, os.ModePerm)
+	if os.IsNotExist(err) {
+		r.stateLSNfp, err = os.OpenFile(r.cfg.LsnStateFilepath, os.O_WRONLY|os.O_CREATE, os.ModePerm)
+		if err != nil {
+			return fmt.Errorf("could not create file: %v", err)
+		}
+
+		return errNoStateFile
+	}
+
+	if err := yaml.NewDecoder(r.stateLSNfp).Decode(&s); err != nil {
+		log.Printf("could not decode: %v", err)
+		return errNoStateFile
+	}
+
+	if !s.StartLSN.IsValid() {
+		return errNoStateFile
+	}
+
+	r.startLSN = s.StartLSN
+
+	return nil
+}
+
+func (r *Replicator) saveCurrentState() error {
+	buf := bytes.NewBuffer(nil)
+
+	if err := yaml.NewEncoder(buf).Encode(state{StartLSN: r.startLSN}); err != nil {
+		return fmt.Errorf("could not encode: %v", err)
+	}
+	if _, err := r.stateLSNfp.Seek(0, 0); err != nil {
+		return fmt.Errorf("could not seek: %v", err)
+	}
+
+	n, err := buf.WriteTo(r.stateLSNfp)
+	if err != nil {
+		return fmt.Errorf("could not write to file: %v", err)
+	}
+
+	if err := r.stateLSNfp.Truncate(n); err != nil {
+		return fmt.Errorf("could not truncate: %v", err)
+	}
+
+	return nil
+}
+
 func (r *Replicator) Run() error {
 	if err := r.chConnect(); err != nil {
 		return fmt.Errorf("could not connect to clickhouse: %v", err)
 	}
 	defer r.chDisconnect()
 
-	if err := r.pgConnect(); err != nil {
-		return fmt.Errorf("could not connecto postgresql: %v", err)
-	}
-
-	if err := r.checkPg(); err != nil {
-		return err
-	}
-
-	if err := r.pgCreateRepSlot(); err != nil {
-		return fmt.Errorf("could not create replication slot: %v", err)
-	}
-	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Pg.ConnConfig, r.cfg.Pg.ReplicationSlotName, r.cfg.Pg.PublicationName, r.startLSN)
-
-	if err := r.fetchTableOIDs(); err != nil {
-		return fmt.Errorf("table check failed: %v", err)
-	}
-
-	for tableName, tableCfg := range r.cfg.Tables {
+	for tableName := range r.cfg.Tables {
 		tbl, err := r.newTable(tableName)
 		if err != nil {
 			return fmt.Errorf("could not instantiate table: %v", err)
 		}
 
-		if !tableCfg.SkipInitSync {
-			log.Printf("Syncing %q table", tableName)
-		}
 		r.tables[tableName] = tbl
-		if err := tbl.Sync(r.pgTx); err != nil {
-			return fmt.Errorf("could not sync %q: %v", tableName, err)
-		}
 	}
 
-	if err := r.pgDropRepSlot(); err != nil {
-		return fmt.Errorf("could not drop replication slot: %v", err)
+	if err := r.pgConnect(); err != nil {
+		return fmt.Errorf("could not connecto postgresql: %v", err)
+	}
+
+	tx, err := r.begin()
+	if err != nil {
+		return err
+	}
+
+	if err := r.getCurrentState(); err == errNoStateFile {
+		if err := r.syncTables(tx); err != nil {
+			return fmt.Errorf("could not sync tables: %v", err)
+		}
+		if err := r.saveCurrentState(); err != nil {
+			return fmt.Errorf("could not init state file: %v", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("could not get start LSN: %v", err)
+	}
+
+	// in case of init sync, the replication slot must be created, which must be called before any query
+	if err := r.checkSlotAndPub(tx); err != nil {
+		return err
+	}
+
+	if err := r.fetchTables(tx); err != nil {
+		return fmt.Errorf("table check failed: %v", err)
+	}
+
+	if err := r.commit(tx); err != nil {
+		return err
 	}
 
 	if err := r.pgConn.Close(); err != nil { // logical replication consumer uses it's own connection
 		return fmt.Errorf("could not close pg connection: %v", err)
 	}
+
+	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Pg.ConnConfig, r.cfg.Pg.ReplicationSlotName, r.cfg.Pg.PublicationName, r.startLSN)
 
 	if err := r.consumer.Run(r); err != nil {
 		return err
@@ -195,6 +301,14 @@ func (r *Replicator) Run() error {
 		if err := tbl.Close(); err != nil {
 			log.Printf("could not close %s: %v", tblName, err)
 		}
+	}
+
+	if err := r.saveCurrentState(); err != nil {
+		log.Printf("could not save current state: %v", err)
+	}
+
+	if err := r.stateLSNfp.Close(); err != nil {
+		log.Printf("could not close state file: %v", err)
 	}
 
 	return nil
@@ -231,8 +345,8 @@ func (r *Replicator) logErrCh() {
 	}
 }
 
-func (r *Replicator) fetchTableOIDs() error {
-	rows, err := r.pgTx.Query(`
+func (r *Replicator) fetchTables(tx *pgx.Tx) error {
+	rows, err := tx.Query(`
 			select c.oid,
 				   c.relname,
 				   c.relreplident
@@ -254,8 +368,7 @@ func (r *Replicator) fetchTableOIDs() error {
 			replicaIdentity message.ReplicaIdentity
 		)
 
-		err = rows.Scan(&oid, &name, &replicaIdentity)
-		if err != nil {
+		if err := rows.Scan(&oid, &name, &replicaIdentity); err != nil {
 			return fmt.Errorf("could not scan: %v", err)
 		}
 
@@ -312,21 +425,14 @@ func (r *Replicator) pgConnect() error {
 	return nil
 }
 
-func (r *Replicator) pgDropRepSlot() error {
-	_, err := r.pgTx.Exec(fmt.Sprintf("DROP_REPLICATION_SLOT %s", r.tempSlotName))
+func (r *Replicator) pgDropRepSlot(tx *pgx.Tx) error {
+	_, err := tx.Exec(fmt.Sprintf("DROP_REPLICATION_SLOT %s", r.tempSlotName))
 
 	return err
 }
 
-func (r *Replicator) pgCreateRepSlot() error {
+func (r *Replicator) pgCreateRepSlot(tx *pgx.Tx) error {
 	var basebackupLSN, snapshotName, plugin sql.NullString
-
-	tx, err := r.pgConn.BeginEx(r.ctx, &pgx.TxOptions{
-		IsoLevel:   pgx.RepeatableRead,
-		AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return fmt.Errorf("could not start pg transaction: %v", err)
-	}
 
 	row := tx.QueryRow(fmt.Sprintf("CREATE_REPLICATION_SLOT %s TEMPORARY LOGICAL %s USE_SNAPSHOT",
 		fmt.Sprintf("tempslot_%d", r.pgConn.PID()), utils.OutputPlugin))
@@ -338,8 +444,6 @@ func (r *Replicator) pgCreateRepSlot() error {
 	if err := r.startLSN.Parse(basebackupLSN.String); err != nil {
 		return fmt.Errorf("could not parse LSN: %v", err)
 	}
-
-	r.pgTx = tx
 
 	return nil
 }
@@ -412,7 +516,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 		r.finalLSN = v.FinalLSN
 	}
 
-	if r.finalLSN < r.startLSN {
+	if r.finalLSN <= r.startLSN {
 		return nil
 	}
 	r.tablesToMergeMutex.Lock()
@@ -422,7 +526,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 	case message.Begin:
 		r.curTxMergeIsNeeded = false
 	case message.Commit:
-		r.advanceLSN(lsn)
+		r.advanceLSN(r.finalLSN)
 
 		if r.curTxMergeIsNeeded {
 			for tblName := range r.inTxTables {
@@ -482,41 +586,14 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 	return nil
 }
 
-func (r *Replicator) storeLSN() (err error) {
-	var (
-		tx *sql.Tx
-		st *sql.Stmt
-	)
-	tx, err = r.chConn.Begin()
-	if err != nil {
-		return fmt.Errorf("could not begin: %v", err)
-	}
-	defer func() {
-		err = tx.Commit()
-	}()
-
-	st, err = tx.Prepare("INSERT INTO lsn_position(oid, lsn) values (?, ?)")
-	if err != nil {
-		return fmt.Errorf("could not prepare: %v", err)
-	}
-	defer func() {
-		err = st.Close()
-	}()
-
-	if _, err := st.Exec(1, uint64(r.finalLSN)); err != nil {
-		return fmt.Errorf("could not exec: %v", err)
-	}
-
-	return
-}
-
 func (r *Replicator) advanceLSN(lsn utils.LSN) {
-	//if err := r.storeLSN(); err != nil {
-	//	select {
-	//	case r.errCh <- err:
-	//	default:
-	//	}
-	//}
+	r.startLSN = lsn
+	if err := r.saveCurrentState(); err != nil {
+		select {
+		case r.errCh <- err:
+		default:
+		}
+	}
 
 	r.consumer.AdvanceLSN(lsn)
 }

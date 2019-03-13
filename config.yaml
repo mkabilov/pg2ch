@@ -42,7 +42,8 @@ tables:
                 name: mtime
             - filler:
 
-inactivity_merge_timeout: '30s' # merge buffered data after that timeout
+lsnStateFilepath: state.yaml
+inactivity_merge_timeout: '10s' # merge buffered data after that timeout
 clickhouse: tcp://localhost:9000
 pg:
     host: localhost

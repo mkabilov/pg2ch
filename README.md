@@ -46,6 +46,8 @@ pg: # postgresql connection params
     user: {user}
     replication_slot_name: {logical replication slot name}
     publication_name: {postgresql publication name}
+    
+lsnStateFilepath: {state file to store applied LSN in}
 ```
 
 ### Sample setup:
@@ -99,6 +101,8 @@ pg:
     user: postgres
     replication_slot_name: pg2ch_slot
     publication_name: pg2ch_pub
+    
+lsnStateFilepath: 'state.yaml'
 ```
 
 - run pg2ch to start replication:
