@@ -526,8 +526,6 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 	case message.Begin:
 		r.curTxMergeIsNeeded = false
 	case message.Commit:
-		r.advanceLSN(r.finalLSN)
-
 		if r.curTxMergeIsNeeded {
 			for tblName := range r.inTxTables {
 				if err := r.tables[tblName].FlushToMainTable(); err != nil {
@@ -538,6 +536,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 			}
 		}
 		r.inTxTables = make(map[string]struct{})
+		r.advanceLSN(r.finalLSN)
 	case message.Insert:
 		tbl := r.getTable(v.RelationOID)
 		if tbl == nil {
