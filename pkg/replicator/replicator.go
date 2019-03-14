@@ -232,6 +232,10 @@ func (r *Replicator) saveCurrentState() error {
 		return fmt.Errorf("could not truncate: %v", err)
 	}
 
+	if err := utils.SyncFileAndDirectory(r.stateLSNfp); err != nil {
+		return fmt.Errorf("could not sync state file %q: %v", r.cfg.LsnStateFilepath, err)
+	}
+
 	return nil
 }
 
