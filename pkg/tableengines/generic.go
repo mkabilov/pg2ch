@@ -1,6 +1,7 @@
 package tableengines
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io"
@@ -16,7 +17,11 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/message"
 )
 
-const defaultBufferSize = 1000
+const (
+	defaultBufferSize = 1000
+	attemptInterval   = time.Second
+	maxAttempts       = 100
+)
 
 type bufRow struct {
 	rowID int
@@ -28,6 +33,7 @@ type commandSet [][]interface{}
 type bufCommand []bufRow
 
 type genericTable struct {
+	ctx     context.Context
 	chConn  *sql.DB
 	chTx    *sql.Tx
 	chStmnt *sql.Stmt
@@ -56,7 +62,7 @@ type genericTable struct {
 	syncSkipBufferTable bool
 }
 
-func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTable {
+func newGenericTable(ctx context.Context, chConn *sql.DB, name string, tblCfg config.Table) genericTable {
 	pgChColumns := make(map[string]string)
 	columns := make(map[string]config.Column)
 
@@ -86,7 +92,8 @@ func newGenericTable(conn *sql.DB, name string, tblCfg config.Table) genericTabl
 	}
 
 	t := genericTable{
-		chConn:               conn,
+		ctx:                  ctx,
+		chConn:               chConn,
 		pgTableName:          name,
 		mainTable:            tblCfg.MainTable,
 		bufferTable:          tblCfg.BufferTable,
@@ -121,6 +128,10 @@ func (t *genericTable) truncateMainTable() error {
 }
 
 func (t *genericTable) truncateBufTable() error {
+	if t.bufferTable == "" {
+		return nil
+	}
+
 	if _, err := t.chConn.Exec(fmt.Sprintf("truncate table %s", t.bufferTable)); err != nil {
 		return err
 	}
@@ -264,6 +275,29 @@ func (t *genericTable) processCommandSet(set commandSet) (bool, error) {
 }
 
 func (t *genericTable) flushBuffer() error {
+	var err error
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		err = t.attemptFlushBuffer()
+		if err == nil {
+			if attempt > 0 {
+				log.Printf("succeeded after %v attempts", attempt)
+			}
+			break
+		}
+
+		log.Printf("could not flush buffer: %v, retrying after %v", err, attemptInterval)
+		select {
+		case <-t.ctx.Done():
+			return fmt.Errorf("abort retrying")
+		case <-time.After(attemptInterval):
+		}
+	}
+
+	return err
+}
+
+func (t *genericTable) attemptFlushBuffer() error {
 	if t.bufferCmdId == 0 {
 		return nil
 	}
@@ -422,11 +456,11 @@ func (t *genericTable) Truncate() error {
 		return err
 	}
 
-	if t.bufferTable != "" {
-		return t.truncateBufTable()
-	}
+	return t.truncateBufTable()
+}
 
-	return nil
+func (t *genericTable) Init() error {
+	return t.truncateBufTable()
 }
 
 func (t *genericTable) Close() error {

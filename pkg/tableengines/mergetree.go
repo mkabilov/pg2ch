@@ -1,6 +1,7 @@
 package tableengines
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -16,9 +17,9 @@ type MergeTreeTable struct {
 	genericTable
 }
 
-func NewMergeTree(conn *sql.DB, name string, tblCfg config.Table) *MergeTreeTable {
+func NewMergeTree(ctx context.Context, conn *sql.DB, name string, tblCfg config.Table) *MergeTreeTable {
 	t := MergeTreeTable{
-		genericTable: newGenericTable(conn, name, tblCfg),
+		genericTable: newGenericTable(ctx, conn, name, tblCfg),
 	}
 
 	t.mergeQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",

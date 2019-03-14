@@ -1,6 +1,7 @@
 package tableengines
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -18,9 +19,9 @@ type ReplacingMergeTree struct {
 	verColumn string
 }
 
-func NewReplacingMergeTree(conn *sql.DB, name string, tblCfg config.Table) *ReplacingMergeTree {
+func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, name string, tblCfg config.Table) *ReplacingMergeTree {
 	t := ReplacingMergeTree{
-		genericTable: newGenericTable(conn, name, tblCfg),
+		genericTable: newGenericTable(ctx, conn, name, tblCfg),
 		verColumn:    tblCfg.VerColumn,
 	}
 	t.chColumns = append(t.chColumns, tblCfg.VerColumn)

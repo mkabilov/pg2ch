@@ -1,6 +1,7 @@
 package tableengines
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -37,9 +38,9 @@ type VersionedCollapsingMergeTree struct {
 	verColumn  string
 }
 
-func NewVersionedCollapsingMergeTree(conn *sql.DB, name string, tblCfg config.Table) *VersionedCollapsingMergeTree {
+func NewVersionedCollapsingMergeTree(ctx context.Context, conn *sql.DB, name string, tblCfg config.Table) *VersionedCollapsingMergeTree {
 	t := VersionedCollapsingMergeTree{
-		genericTable: newGenericTable(conn, name, tblCfg),
+		genericTable: newGenericTable(ctx, conn, name, tblCfg),
 		signColumn:   tblCfg.SignColumn,
 		verColumn:    tblCfg.VerColumn,
 	}

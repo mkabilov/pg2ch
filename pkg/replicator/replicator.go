@@ -31,6 +31,7 @@ type ClickHouseTable interface {
 	Truncate() error
 	Sync(*pgx.Tx) error
 	Close() error
+	Init() error
 	FlushToMainTable() error
 }
 
@@ -49,10 +50,10 @@ type Replicator struct {
 	tempSlotName string
 
 	finalLSN utils.LSN
-	startLSN utils.LSN
+	startLSN utils.LSN // lsn to start consuming changes from
 
 	tablesToMergeMutex *sync.Mutex
-	tableToMerge       map[string]struct{} // tables to be merged
+	tablesToMerge      map[string]struct{} // tables to be merged
 	inTxTables         map[string]struct{} // tables inside running tx
 	curTxMergeIsNeeded bool                // if tables in the current transaction are needed to be merged
 	stateLSNfp         *os.File
@@ -72,7 +73,7 @@ func New(cfg config.Config) *Replicator {
 		errCh:   make(chan error),
 
 		tablesToMergeMutex: &sync.Mutex{},
-		tableToMerge:       make(map[string]struct{}),
+		tablesToMerge:      make(map[string]struct{}),
 		inTxTables:         make(map[string]struct{}),
 	}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
@@ -91,27 +92,27 @@ func (r *Replicator) newTable(tableName string) (ClickHouseTable, error) {
 	//		return nil, fmt.Errorf("VersionedCollapsingMergeTree requires version column to be set")
 	//	}
 	//
-	//	return tableengines.NewVersionedCollapsingMergeTree(r.chConn, tableName, tbl), nil
+	//	return tableengines.NewVersionedCollapsingMergeTree(r.ctx, r.chConn, tableName, tbl), nil
 	case config.ReplacingMergeTree:
 		if tbl.VerColumn == "" {
 			return nil, fmt.Errorf("ReplacingMergeTree requires version column to be set")
 		}
 
-		return tableengines.NewReplacingMergeTree(r.chConn, tableName, tbl), nil
+		return tableengines.NewReplacingMergeTree(r.ctx, r.chConn, tableName, tbl), nil
 	case config.MergeTree:
-		return tableengines.NewMergeTree(r.chConn, tableName, tbl), nil
+		return tableengines.NewMergeTree(r.ctx, r.chConn, tableName, tbl), nil
 	case config.CollapsingMergeTree:
 		if tbl.SignColumn == "" {
 			return nil, fmt.Errorf("CollapsingMergeTree requires sign column to be set")
 		}
 
-		return tableengines.NewCollapsingMergeTree(r.chConn, tableName, tbl), nil
+		return tableengines.NewCollapsingMergeTree(r.ctx, r.chConn, tableName, tbl), nil
 	}
 
 	return nil, fmt.Errorf("%s table engine is not implemented", tbl.Engine)
 }
 
-func (r *Replicator) checkSlotAndPub(tx *pgx.Tx) error {
+func (r *Replicator) checkPgSlotAndPub(tx *pgx.Tx) error {
 	var slotExists, pubExists bool
 
 	err := tx.QueryRow("select "+
@@ -144,7 +145,8 @@ func (r *Replicator) checkSlotAndPub(tx *pgx.Tx) error {
 }
 
 func (r *Replicator) syncTables(tx *pgx.Tx) error {
-	if err := r.pgCreateRepSlot(tx); err != nil {
+	lsn, err := r.pgCreateRepSlot(tx)
+	if err != nil {
 		return fmt.Errorf("could not create replication slot: %v", err)
 	}
 
@@ -161,11 +163,12 @@ func (r *Replicator) syncTables(tx *pgx.Tx) error {
 	if err := r.pgDropRepSlot(tx); err != nil {
 		return fmt.Errorf("could not drop replication slot: %v", err)
 	}
+	r.startLSN, r.finalLSN = lsn, lsn
 
 	return nil
 }
 
-func (r *Replicator) begin() (*pgx.Tx, error) {
+func (r *Replicator) pgBegin() (*pgx.Tx, error) {
 	tx, err := r.pgConn.BeginEx(r.ctx, &pgx.TxOptions{
 		IsoLevel:   pgx.RepeatableRead,
 		AccessMode: pgx.ReadOnly})
@@ -176,7 +179,7 @@ func (r *Replicator) begin() (*pgx.Tx, error) {
 	return tx, nil
 }
 
-func (r *Replicator) commit(tx *pgx.Tx) error {
+func (r *Replicator) pgCommit(tx *pgx.Tx) error {
 	return tx.Commit()
 }
 
@@ -213,7 +216,7 @@ func (r *Replicator) getCurrentState() error {
 func (r *Replicator) saveCurrentState() error {
 	buf := bytes.NewBuffer(nil)
 
-	if err := yaml.NewEncoder(buf).Encode(state{StartLSN: r.startLSN}); err != nil {
+	if err := yaml.NewEncoder(buf).Encode(state{StartLSN: r.finalLSN}); err != nil {
 		return fmt.Errorf("could not encode: %v", err)
 	}
 	if _, err := r.stateLSNfp.Seek(0, 0); err != nil {
@@ -251,12 +254,12 @@ func (r *Replicator) Run() error {
 		return fmt.Errorf("could not connecto postgresql: %v", err)
 	}
 
-	tx, err := r.begin()
+	tx, err := r.pgBegin()
 	if err != nil {
 		return err
 	}
 
-	if err := r.getCurrentState(); err == errNoStateFile {
+	if err := r.getCurrentState(); err == errNoStateFile { // sync is needed
 		if err := r.syncTables(tx); err != nil {
 			return fmt.Errorf("could not sync tables: %v", err)
 		}
@@ -268,20 +271,26 @@ func (r *Replicator) Run() error {
 	}
 
 	// in case of init sync, the replication slot must be created, which must be called before any query
-	if err := r.checkSlotAndPub(tx); err != nil {
+	if err := r.checkPgSlotAndPub(tx); err != nil {
 		return err
 	}
 
-	if err := r.fetchTables(tx); err != nil {
+	if err := r.fetchPgTablesInfo(tx); err != nil {
 		return fmt.Errorf("table check failed: %v", err)
 	}
 
-	if err := r.commit(tx); err != nil {
+	if err := r.pgCommit(tx); err != nil {
 		return err
 	}
 
 	if err := r.pgConn.Close(); err != nil { // logical replication consumer uses it's own connection
 		return fmt.Errorf("could not close pg connection: %v", err)
+	}
+
+	for tblName, tbl := range r.tables {
+		if err := tbl.Init(); err != nil {
+			fmt.Printf("could not init %s: %v", tblName, err)
+		}
 	}
 
 	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Pg.ConnConfig, r.cfg.Pg.ReplicationSlotName, r.cfg.Pg.PublicationName, r.startLSN)
@@ -306,6 +315,8 @@ func (r *Replicator) Run() error {
 	if err := r.saveCurrentState(); err != nil {
 		log.Printf("could not save current state: %v", err)
 	}
+
+	r.consumer.AdvanceLSN(r.finalLSN)
 
 	if err := r.stateLSNfp.Close(); err != nil {
 		log.Printf("could not close state file: %v", err)
@@ -345,7 +356,7 @@ func (r *Replicator) logErrCh() {
 	}
 }
 
-func (r *Replicator) fetchTables(tx *pgx.Tx) error {
+func (r *Replicator) fetchPgTablesInfo(tx *pgx.Tx) error {
 	rows, err := tx.Query(`
 			select c.oid,
 				   c.relname,
@@ -431,21 +442,24 @@ func (r *Replicator) pgDropRepSlot(tx *pgx.Tx) error {
 	return err
 }
 
-func (r *Replicator) pgCreateRepSlot(tx *pgx.Tx) error {
-	var basebackupLSN, snapshotName, plugin sql.NullString
+func (r *Replicator) pgCreateRepSlot(tx *pgx.Tx) (utils.LSN, error) {
+	var (
+		basebackupLSN, snapshotName, plugin sql.NullString
+		lsn                                 utils.LSN
+	)
 
 	row := tx.QueryRow(fmt.Sprintf("CREATE_REPLICATION_SLOT %s TEMPORARY LOGICAL %s USE_SNAPSHOT",
 		fmt.Sprintf("tempslot_%d", r.pgConn.PID()), utils.OutputPlugin))
 
 	if err := row.Scan(&r.tempSlotName, &basebackupLSN, &snapshotName, &plugin); err != nil {
-		return fmt.Errorf("could not scan: %v", err)
+		return utils.InvalidLSN, fmt.Errorf("could not scan: %v", err)
 	}
 
-	if err := r.startLSN.Parse(basebackupLSN.String); err != nil {
-		return fmt.Errorf("could not parse LSN: %v", err)
+	if err := lsn.Parse(basebackupLSN.String); err != nil {
+		return utils.InvalidLSN, fmt.Errorf("could not parse LSN: %v", err)
 	}
 
-	return nil
+	return lsn, nil
 }
 
 func (r *Replicator) waitForShutdown() {
@@ -488,15 +502,15 @@ func (r *Replicator) getTable(oid utils.OID) ClickHouseTable {
 		r.inTxTables[tblName] = struct{}{}
 	}
 
-	if _, ok := r.tableToMerge[tblName]; !ok {
-		r.tableToMerge[tblName] = struct{}{}
+	if _, ok := r.tablesToMerge[tblName]; !ok {
+		r.tablesToMerge[tblName] = struct{}{}
 	}
 
 	return tbl
 }
 
 func (r *Replicator) mergeTables() error {
-	for tblName := range r.tableToMerge {
+	for tblName := range r.tablesToMerge {
 		if _, ok := r.inTxTables[tblName]; ok {
 			continue
 		}
@@ -505,8 +519,9 @@ func (r *Replicator) mergeTables() error {
 			return fmt.Errorf("could not commit %q table: %v", tblName, err)
 		}
 
-		delete(r.tableToMerge, tblName)
+		delete(r.tablesToMerge, tblName)
 	}
+	r.advanceLSN()
 
 	return nil
 }
@@ -527,16 +542,11 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 		r.curTxMergeIsNeeded = false
 	case message.Commit:
 		if r.curTxMergeIsNeeded {
-			for tblName := range r.inTxTables {
-				if err := r.tables[tblName].FlushToMainTable(); err != nil {
-					return fmt.Errorf("could not commit %q table: %v", tblName, err)
-				}
-
-				delete(r.tableToMerge, tblName)
+			if err := r.mergeTables(); err != nil {
+				return fmt.Errorf("could not merge tables: %v", err)
 			}
 		}
 		r.inTxTables = make(map[string]struct{})
-		r.advanceLSN(r.finalLSN)
 	case message.Insert:
 		tbl := r.getTable(v.RelationOID)
 		if tbl == nil {
@@ -585,14 +595,15 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 	return nil
 }
 
-func (r *Replicator) advanceLSN(lsn utils.LSN) {
-	r.startLSN = lsn
+func (r *Replicator) advanceLSN() {
 	if err := r.saveCurrentState(); err != nil {
 		select {
 		case r.errCh <- err:
 		default:
 		}
+
+		return
 	}
 
-	r.consumer.AdvanceLSN(lsn)
+	r.consumer.AdvanceLSN(r.finalLSN)
 }

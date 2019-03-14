@@ -1,6 +1,7 @@
 package tableengines
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -18,9 +19,9 @@ type CollapsingMergeTreeTable struct {
 	signColumn string
 }
 
-func NewCollapsingMergeTree(conn *sql.DB, name string, tblCfg config.Table) *CollapsingMergeTreeTable {
+func NewCollapsingMergeTree(ctx context.Context, conn *sql.DB, name string, tblCfg config.Table) *CollapsingMergeTreeTable {
 	t := CollapsingMergeTreeTable{
-		genericTable: newGenericTable(conn, name, tblCfg),
+		genericTable: newGenericTable(ctx, conn, name, tblCfg),
 		signColumn:   tblCfg.SignColumn,
 	}
 	t.chColumns = append(t.chColumns, tblCfg.SignColumn)
