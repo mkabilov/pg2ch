@@ -281,7 +281,7 @@ func (t *genericTable) flushBuffer() error {
 		err = t.attemptFlushBuffer()
 		if err == nil {
 			if attempt > 0 {
-				log.Printf("succeeded after %v attempts", attempt)
+				log.Printf("succeeded buffer flush after %v attempts", attempt)
 			}
 			break
 		}
@@ -333,6 +333,19 @@ func (t *genericTable) attemptFlushBuffer() error {
 	return nil
 }
 
+func (t *genericTable) mergeIntoMainTable() error {
+	for _, query := range t.mergeQueries {
+		if _, err := t.chConn.Exec(query); err != nil {
+			return err
+		}
+	}
+
+	t.bufferFlushCnt = 0
+	t.bufferRowId = 0
+
+	return nil
+}
+
 func (t *genericTable) FlushToMainTable() error {
 	t.flushMutex.Lock()
 	defer t.flushMutex.Unlock()
@@ -344,14 +357,23 @@ func (t *genericTable) FlushToMainTable() error {
 	if t.bufferTable == "" || t.bufferFlushCnt == 0 {
 		return nil
 	}
-	for _, query := range t.mergeQueries {
-		if _, err := t.chConn.Exec(query); err != nil {
-			return err
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		err := t.mergeIntoMainTable()
+		if err == nil {
+			if attempt > 0 {
+				log.Printf("succeeded merge after %v attempts", attempt)
+			}
+			break
+		}
+
+		log.Printf("could not merge: %v, retrying after %v", err, attemptInterval)
+		select {
+		case <-t.ctx.Done():
+			return fmt.Errorf("abort retrying")
+		case <-time.After(attemptInterval):
 		}
 	}
-
-	t.bufferFlushCnt = 0
-	t.bufferRowId = 0
 
 	if err := t.truncateBufTable(); err != nil {
 		return fmt.Errorf("could not truncate buffer table: %v", err)
