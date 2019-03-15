@@ -106,7 +106,7 @@ func newGenericTable(ctx context.Context, chConn *sql.DB, name string, tblCfg co
 		mergeBufferThreshold: tblCfg.MergeThreshold,
 		bufferRowIdColumn:    tblCfg.BufferRowIdColumn,
 		syncSkip:             tblCfg.SkipInitSync,
-		syncSkipBufferTable:  tblCfg.InitSyncSkipBufferTable,
+		syncSkipBufferTable:  tblCfg.SkipBufferTable,
 		flushMutex:           &sync.Mutex{},
 	}
 
