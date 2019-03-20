@@ -11,31 +11,39 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-const (
-	defaultInactivityMergeTimeout = time.Minute
+const defaultInactivityMergeTimeout = time.Minute
 
-	CollapsingMergeTree TableEngine = iota
+type tableEngine int
+
+const (
+	// CollapsingMergeTree represents CollapsingMergeTree table engine
+	CollapsingMergeTree tableEngine = iota
+
+	//ReplacingMergeTree represents ReplacingMergeTree table engine
 	ReplacingMergeTree
+
+	//VersionedCollapsingMergeTree represents VersionedCollapsingMergeTree table engine
 	VersionedCollapsingMergeTree
+
+	//MergeTree represents MergeTree table engine
 	MergeTree
 )
 
-var tableEngines = map[TableEngine]string{
+var tableEngines = map[tableEngine]string{
 	CollapsingMergeTree:          "CollapsingMergeTree",
 	ReplacingMergeTree:           "ReplacingMergeTree",
 	VersionedCollapsingMergeTree: "VersionedCollapsingMergeTree",
 	MergeTree:                    "MergeTree",
 }
 
-type TableEngine int
-
-type DbConfig struct {
+type dbConfig struct {
 	pgx.ConnConfig `yaml:",inline"`
 
 	ReplicationSlotName string `yaml:"replication_slot_name"`
 	PublicationName     string `yaml:"publication_name"`
 }
 
+// Column contains information about the table column
 type Column struct {
 	ChName     string  `yaml:"name"`
 	ChType     string  `yaml:"type"`
@@ -43,39 +51,43 @@ type Column struct {
 	Nullable   bool    `yaml:"nullable"`
 }
 
-type ColumnMapping []map[string]Column
+type columnMapping []map[string]Column
 
+// Table contains information about the table
 type Table struct {
-	Columns           ColumnMapping `yaml:"columns"`
+	Columns           columnMapping `yaml:"columns"`
 	SignColumn        string        `yaml:"sign_column"`
 	BufferRowIdColumn string        `yaml:"buffer_row_id"`
 	BufferTable       string        `yaml:"buffer_table"`
 	BufferSize        int           `yaml:"buffer_size"`
 	MainTable         string        `yaml:"main_table"`
 	VerColumn         string        `yaml:"ver_column"`
-	Engine            TableEngine   `yaml:"engine"`
+	Engine            tableEngine   `yaml:"engine"`
 	MergeThreshold    int           `yaml:"merge_threshold"`
 	SkipInitSync      bool          `yaml:"skip_init_sync"`
 	SkipBufferTable   bool          `yaml:"skip_buffer_table"`
 }
 
+// Config contains config
 type Config struct {
 	CHConnectionString     string           `yaml:"clickhouse"`
-	Pg                     DbConfig         `yaml:"pg"`
+	Pg                     dbConfig         `yaml:"pg"`
 	Tables                 map[string]Table `yaml:"tables"`
 	InactivityMergeTimeout time.Duration    `yaml:"inactivity_merge_timeout"`
 	LsnStateFilepath       string           `yaml:"lsnStateFilepath"`
 }
 
-func (t TableEngine) String() string {
+func (t tableEngine) String() string {
 	return tableEngines[t]
 }
 
-func (t TableEngine) MarshalYAML() (interface{}, error) {
+// MarshalYAML ...
+func (t tableEngine) MarshalYAML() (interface{}, error) {
 	return tableEngines[t], nil
 }
 
-func (t *TableEngine) UnmarshalYAML(unmarshal func(interface{}) error) error {
+// UnmarshalYAML ...
+func (t *tableEngine) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var val string
 	if err := unmarshal(&val); err != nil {
 		return err
@@ -91,6 +103,7 @@ func (t *TableEngine) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return fmt.Errorf("unknown table engine: %q", val)
 }
 
+// New instantiates config
 func New(filepath string) (*Config, error) {
 	var cfg Config
 
