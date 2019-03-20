@@ -13,12 +13,13 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
-type MergeTreeTable struct {
+type mergeTreeTable struct {
 	genericTable
 }
 
-func NewMergeTree(ctx context.Context, conn *sql.DB, name string, tblCfg config.Table) *MergeTreeTable {
-	t := MergeTreeTable{
+// NewMergeTree instantiates mergeTreeTable
+func NewMergeTree(ctx context.Context, conn *sql.DB, name string, tblCfg config.Table) *mergeTreeTable {
+	t := mergeTreeTable{
 		genericTable: newGenericTable(ctx, conn, name, tblCfg),
 	}
 
@@ -28,11 +29,13 @@ func NewMergeTree(ctx context.Context, conn *sql.DB, name string, tblCfg config.
 	return &t
 }
 
-func (t *MergeTreeTable) Sync(pgTx *pgx.Tx) error {
+// Sync performs initial sync of the data; pgTx is a transaction in which temporary replication slot is created
+func (t *mergeTreeTable) Sync(pgTx *pgx.Tx) error {
 	return t.genSync(pgTx, t)
 }
 
-func (t *MergeTreeTable) Write(p []byte) (n int, err error) {
+// Write implements io.Writer which is used during the Sync process, see genSync method
+func (t *mergeTreeTable) Write(p []byte) (n int, err error) {
 	rec, err := utils.DecodeCopy(p)
 	if err != nil {
 		return 0, err
@@ -56,14 +59,17 @@ func (t *MergeTreeTable) Write(p []byte) (n int, err error) {
 	return
 }
 
-func (t *MergeTreeTable) Insert(lsn utils.LSN, new message.Row) (bool, error) {
+// Insert handles incoming insert DML operation
+func (t *mergeTreeTable) Insert(lsn utils.LSN, new message.Row) (bool, error) {
 	return t.processCommandSet(commandSet{t.convertTuples(new)})
 }
 
-func (t *MergeTreeTable) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
+// Update handles incoming update DML operation
+func (t *mergeTreeTable) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
 	return t.processCommandSet(nil)
 }
 
-func (t *MergeTreeTable) Delete(lsn utils.LSN, old message.Row) (bool, error) {
+// Delete handles incoming delete DML operation
+func (t *mergeTreeTable) Delete(lsn utils.LSN, old message.Row) (bool, error) {
 	return t.processCommandSet(nil)
 }

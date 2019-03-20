@@ -13,14 +13,15 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
-type ReplacingMergeTree struct {
+type replacingMergeTree struct {
 	genericTable
 
 	verColumn string
 }
 
-func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, name string, tblCfg config.Table) *ReplacingMergeTree {
-	t := ReplacingMergeTree{
+// NewReplacingMergeTree instantiates replacingMergeTree
+func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, name string, tblCfg config.Table) *replacingMergeTree {
+	t := replacingMergeTree{
 		genericTable: newGenericTable(ctx, conn, name, tblCfg),
 		verColumn:    tblCfg.VerColumn,
 	}
@@ -32,7 +33,13 @@ func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, name string, tblCf
 	return &t
 }
 
-func (t *ReplacingMergeTree) Write(p []byte) (n int, err error) {
+// Sync performs initial sync of the data; pgTx is a transaction in which temporary replication slot is created
+func (t *replacingMergeTree) Sync(pgTx *pgx.Tx) error {
+	return t.genSync(pgTx, t)
+}
+
+// Write implements io.Writer which is used during the Sync process, see genSync method
+func (t *replacingMergeTree) Write(p []byte) (n int, err error) {
 	rec, err := utils.DecodeCopy(p)
 	if err != nil {
 		return 0, err
@@ -57,23 +64,22 @@ func (t *ReplacingMergeTree) Write(p []byte) (n int, err error) {
 	return
 }
 
-func (t *ReplacingMergeTree) Sync(pgTx *pgx.Tx) error {
-	return t.genSync(pgTx, t)
-}
-
-func (t *ReplacingMergeTree) Insert(lsn utils.LSN, new message.Row) (bool, error) {
+// Insert handles incoming insert DML operation
+func (t *replacingMergeTree) Insert(lsn utils.LSN, new message.Row) (bool, error) {
 	return t.processCommandSet(commandSet{
 		append(t.convertTuples(new), uint64(lsn)),
 	})
 }
 
-func (t *ReplacingMergeTree) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
+// Update handles incoming update DML operation
+func (t *replacingMergeTree) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
 	return t.processCommandSet(commandSet{
 		append(t.convertTuples(new), uint64(lsn)),
 	})
 }
 
-func (t *ReplacingMergeTree) Delete(lsn utils.LSN, old message.Row) (bool, error) {
+// Delete handles incoming delete DML operation
+func (t *replacingMergeTree) Delete(lsn utils.LSN, old message.Row) (bool, error) {
 	oldRow := append(t.convertTuples(old), uint64(lsn))
 
 	for id, val := range t.emptyValues {

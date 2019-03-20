@@ -17,6 +17,7 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/message"
 )
 
+// Generic table is a "parent" struct for all the table engines
 const (
 	defaultBufferSize = 1000
 	attemptInterval   = time.Second
@@ -346,6 +347,7 @@ func (t *genericTable) mergeIntoMainTable() error {
 	return nil
 }
 
+//FlushToMainTable flushes data from buffer table to the main one
 func (t *genericTable) FlushToMainTable() error {
 	t.flushMutex.Lock()
 	defer t.flushMutex.Unlock()
@@ -471,6 +473,7 @@ func (t *genericTable) convertStrings(fields []sql.NullString) ([]interface{}, e
 	return res, nil
 }
 
+// Truncate truncates main and buffer(if used) tables
 func (t *genericTable) Truncate() error {
 	t.bufferCmdId = 0
 
@@ -481,10 +484,7 @@ func (t *genericTable) Truncate() error {
 	return t.truncateBufTable()
 }
 
+// Init performs initialization
 func (t *genericTable) Init() error {
 	return t.truncateBufTable()
-}
-
-func (t *genericTable) Close() error {
-	return t.FlushToMainTable()
 }

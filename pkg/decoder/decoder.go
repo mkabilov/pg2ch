@@ -55,10 +55,10 @@ func (d *decoder) timestamp() time.Time {
 func (d *decoder) rowInfo(char byte) bool {
 	if d.buf.Next(1)[0] == char {
 		return true
-	} else {
-		d.buf.UnreadByte()
-		return false
 	}
+
+	d.buf.UnreadByte()
+	return false
 }
 
 func (d *decoder) tupledata() []message.Tuple {

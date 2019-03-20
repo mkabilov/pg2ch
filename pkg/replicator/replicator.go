@@ -30,7 +30,6 @@ type ClickHouseTable interface {
 	Delete(lsn utils.LSN, old message.Row) (mergeIsNeeded bool, err error)
 	Truncate() error
 	Sync(*pgx.Tx) error
-	Close() error
 	Init() error
 	FlushToMainTable() error
 }
@@ -311,8 +310,8 @@ func (r *Replicator) Run() error {
 	r.consumer.Wait()
 
 	for tblName, tbl := range r.tables {
-		if err := tbl.Close(); err != nil {
-			log.Printf("could not close %s: %v", tblName, err)
+		if err := tbl.FlushToMainTable(); err != nil {
+			log.Printf("could not flush %s to main table: %v", tblName, err)
 		}
 	}
 

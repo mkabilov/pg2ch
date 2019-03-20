@@ -31,15 +31,16 @@ import (
 :C
 */
 
-type VersionedCollapsingMergeTree struct {
+type versionedCollapsingMergeTree struct {
 	genericTable
 
 	signColumn string
 	verColumn  string
 }
 
-func NewVersionedCollapsingMergeTree(ctx context.Context, conn *sql.DB, name string, tblCfg config.Table) *VersionedCollapsingMergeTree {
-	t := VersionedCollapsingMergeTree{
+// NewVersionedCollapsingMergeTree instantiates versionedCollapsingMergeTree
+func NewVersionedCollapsingMergeTree(ctx context.Context, conn *sql.DB, name string, tblCfg config.Table) *versionedCollapsingMergeTree {
+	t := versionedCollapsingMergeTree{
 		genericTable: newGenericTable(ctx, conn, name, tblCfg),
 		signColumn:   tblCfg.SignColumn,
 		verColumn:    tblCfg.VerColumn,
@@ -53,7 +54,13 @@ func NewVersionedCollapsingMergeTree(ctx context.Context, conn *sql.DB, name str
 	return &t
 }
 
-func (t *VersionedCollapsingMergeTree) Write(p []byte) (n int, err error) {
+// Sync performs initial sync of the data; pgTx is a transaction in which temporary replication slot is created
+func (t *versionedCollapsingMergeTree) Sync(pgTx *pgx.Tx) error {
+	return t.genSync(pgTx, t)
+}
+
+// Write implements io.Writer which is used during the Sync process, see genSync method
+func (t *versionedCollapsingMergeTree) Write(p []byte) (n int, err error) {
 	rec, err := utils.DecodeCopy(p)
 	if err != nil {
 		return 0, err
@@ -78,24 +85,23 @@ func (t *VersionedCollapsingMergeTree) Write(p []byte) (n int, err error) {
 	return
 }
 
-func (t *VersionedCollapsingMergeTree) Sync(pgTx *pgx.Tx) error {
-	return t.genSync(pgTx, t)
-}
-
-func (t *VersionedCollapsingMergeTree) Insert(lsn utils.LSN, new message.Row) (bool, error) {
+// Insert handles incoming insert DML operation
+func (t *versionedCollapsingMergeTree) Insert(lsn utils.LSN, new message.Row) (bool, error) {
 	return t.processCommandSet(commandSet{
 		append(t.convertTuples(new), 1, uint64(lsn)),
 	})
 }
 
-func (t *VersionedCollapsingMergeTree) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
+// Update handles incoming update DML operation
+func (t *versionedCollapsingMergeTree) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
 	return t.processCommandSet(commandSet{
 		append(t.convertTuples(old), -1, uint64(lsn)),
 		append(t.convertTuples(new), 1, uint64(lsn)),
 	})
 }
 
-func (t *VersionedCollapsingMergeTree) Delete(lsn utils.LSN, old message.Row) (bool, error) {
+// Delete handles incoming delete DML operation
+func (t *versionedCollapsingMergeTree) Delete(lsn utils.LSN, old message.Row) (bool, error) {
 	return t.processCommandSet(commandSet{
 		append(t.convertTuples(old), -1, uint64(lsn)),
 	})

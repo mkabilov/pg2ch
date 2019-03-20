@@ -70,9 +70,9 @@ func QuoteLiteral(str string) string {
 
 	if needsEscapeChar {
 		return `E'` + res + `'`
-	} else {
-		return `'` + res + `'`
 	}
+
+	return `'` + res + `'`
 }
 
 // CreateMissingPublication creates missing publication
