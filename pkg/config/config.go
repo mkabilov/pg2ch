@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx"
-
 	"gopkg.in/yaml.v2"
 )
 
@@ -63,7 +62,7 @@ type Table struct {
 	MainTable         string        `yaml:"main_table"`
 	VerColumn         string        `yaml:"ver_column"`
 	Engine            tableEngine   `yaml:"engine"`
-	MergeThreshold    int           `yaml:"merge_threshold"`
+	FlushThreshold    int           `yaml:"flush_threshold"`
 	SkipInitSync      bool          `yaml:"skip_init_sync"`
 	SkipBufferTable   bool          `yaml:"skip_buffer_table"`
 }
@@ -73,7 +72,7 @@ type Config struct {
 	CHConnectionString     string           `yaml:"clickhouse"`
 	Pg                     dbConfig         `yaml:"pg"`
 	Tables                 map[string]Table `yaml:"tables"`
-	InactivityMergeTimeout time.Duration    `yaml:"inactivity_merge_timeout"`
+	InactivityFlushTimeout time.Duration    `yaml:"inactivity_flush_timeout"`
 	LsnStateFilepath       string           `yaml:"lsnStateFilepath"`
 }
 
@@ -130,8 +129,8 @@ func New(filepath string) (*Config, error) {
 		return nil, fmt.Errorf("could not parse lib pq env variabels: %v", err)
 	}
 
-	if cfg.InactivityMergeTimeout.Seconds() == 0 {
-		cfg.InactivityMergeTimeout = defaultInactivityMergeTimeout
+	if cfg.InactivityFlushTimeout.Seconds() == 0 {
+		cfg.InactivityFlushTimeout = defaultInactivityMergeTimeout
 	}
 
 	cfg.Pg.ConnConfig = cfg.Pg.ConnConfig.Merge(connCfg)

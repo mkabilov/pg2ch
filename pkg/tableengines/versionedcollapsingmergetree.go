@@ -48,7 +48,7 @@ func NewVersionedCollapsingMergeTree(ctx context.Context, conn *sql.DB, name str
 
 	t.chColumns = append(t.chColumns, t.signColumn, t.verColumn)
 
-	t.mergeQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
+	t.flushQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
 		t.mainTable, strings.Join(t.chColumns, ", "), t.bufferTable, t.bufferRowIdColumn)}
 
 	return &t

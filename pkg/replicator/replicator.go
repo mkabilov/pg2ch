@@ -329,7 +329,7 @@ func (r *Replicator) Run() error {
 }
 
 func (r *Replicator) inactivityMerge() {
-	ticker := time.NewTicker(r.cfg.InactivityMergeTimeout)
+	ticker := time.NewTicker(r.cfg.InactivityFlushTimeout)
 
 	for {
 		select {

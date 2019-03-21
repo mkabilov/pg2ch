@@ -56,8 +56,8 @@ type genericTable struct {
 	bufferCmdId          int // number of commands in the current buffer
 	bufferRowId          int // row id in the buffer
 	bufferFlushCnt       int // number of flushed buffers
-	mergeBufferThreshold int // number of buffers before merging
-	mergeQueries         []string
+	flushBufferThreshold int // number of buffers before flushing
+	flushQueries         []string
 
 	syncSkip            bool
 	syncSkipBufferTable bool
@@ -104,7 +104,7 @@ func newGenericTable(ctx context.Context, chConn *sql.DB, name string, tblCfg co
 		pgColumns:            pgColumns,
 		emptyValues:          emptyValues,
 		bufferSize:           tblCfg.BufferSize,
-		mergeBufferThreshold: tblCfg.MergeThreshold,
+		flushBufferThreshold: tblCfg.FlushThreshold,
 		bufferRowIdColumn:    tblCfg.BufferRowIdColumn,
 		syncSkip:             tblCfg.SkipInitSync,
 		syncSkipBufferTable:  tblCfg.SkipBufferTable,
@@ -272,7 +272,7 @@ func (t *genericTable) processCommandSet(set commandSet) (bool, error) {
 		return false, nil
 	}
 
-	return t.bufferFlushCnt >= t.mergeBufferThreshold, nil
+	return t.bufferFlushCnt >= t.flushBufferThreshold, nil
 }
 
 func (t *genericTable) flushBuffer() error {
@@ -334,8 +334,8 @@ func (t *genericTable) attemptFlushBuffer() error {
 	return nil
 }
 
-func (t *genericTable) mergeIntoMainTable() error {
-	for _, query := range t.mergeQueries {
+func (t *genericTable) tryFlushToMainTable() error { //TODO: consider better name
+	for _, query := range t.flushQueries {
 		if _, err := t.chConn.Exec(query); err != nil {
 			return err
 		}
@@ -361,15 +361,15 @@ func (t *genericTable) FlushToMainTable() error {
 	}
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		err := t.mergeIntoMainTable()
+		err := t.tryFlushToMainTable()
 		if err == nil {
 			if attempt > 0 {
-				log.Printf("succeeded merge after %v attempts", attempt)
+				log.Printf("succeeded flush to main table after %v attempts", attempt)
 			}
 			break
 		}
 
-		log.Printf("could not merge: %v, retrying after %v", err, attemptInterval)
+		log.Printf("could not flush: %v, retrying after %v", err, attemptInterval)
 		select {
 		case <-t.ctx.Done():
 			return fmt.Errorf("abort retrying")
