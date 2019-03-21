@@ -1,0 +1,30 @@
+tables:
+    pgbench_accounts:
+        main_table: pgbench_accounts
+        buffer_table: pgbench_accounts_buf
+        buffer_row_id: row_id
+        engine: CollapsingMergeTree
+        sign_column: sign
+        buffer_size: 1000
+        flush_threshold: 3
+        columns:
+            - aid:
+                type: Int32
+                name: aid
+            - bid:
+                type: Int32
+                name: bid
+            - abalance:
+                type: Int32
+                name: abalance
+            - filler:
+lsnStateFilepath: state.yaml
+inactivity_flush_timeout: '30s'
+clickhouse: tcp://localhost:9000
+pg:
+    host: localhost
+    port: 5432
+    database: pg2ch
+    user: postgres
+    replication_slot_name: myslot
+    publication_name: my_pub
