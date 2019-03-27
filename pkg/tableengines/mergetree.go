@@ -18,13 +18,17 @@ type mergeTreeTable struct {
 }
 
 // NewMergeTree instantiates mergeTreeTable
-func NewMergeTree(ctx context.Context, conn *sql.DB, name string, tblCfg config.Table) *mergeTreeTable {
+func NewMergeTree(ctx context.Context, conn *sql.DB, name config.NamespacedName, tblCfg config.Table) *mergeTreeTable {
 	t := mergeTreeTable{
 		genericTable: newGenericTable(ctx, conn, name, tblCfg),
 	}
 
+	if t.bufferTable == "" {
+		return &t
+	}
+
 	t.flushQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
-		t.mainTable, strings.Join(t.chColumns, ", "), t.bufferTable, t.bufferRowIdColumn)}
+		t.mainTable, strings.Join(t.chUsedColumns, ", "), t.bufferTable, t.bufferRowIdColumn)}
 
 	return &t
 }

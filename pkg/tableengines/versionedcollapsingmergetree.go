@@ -39,17 +39,17 @@ type versionedCollapsingMergeTree struct {
 }
 
 // NewVersionedCollapsingMergeTree instantiates versionedCollapsingMergeTree
-func NewVersionedCollapsingMergeTree(ctx context.Context, conn *sql.DB, name string, tblCfg config.Table) *versionedCollapsingMergeTree {
+func NewVersionedCollapsingMergeTree(ctx context.Context, conn *sql.DB, name config.NamespacedName, tblCfg config.Table) *versionedCollapsingMergeTree {
 	t := versionedCollapsingMergeTree{
 		genericTable: newGenericTable(ctx, conn, name, tblCfg),
 		signColumn:   tblCfg.SignColumn,
 		verColumn:    tblCfg.VerColumn,
 	}
 
-	t.chColumns = append(t.chColumns, t.signColumn, t.verColumn)
+	t.chUsedColumns = append(t.chUsedColumns, t.signColumn, t.verColumn)
 
 	t.flushQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
-		t.mainTable, strings.Join(t.chColumns, ", "), t.bufferTable, t.bufferRowIdColumn)}
+		t.mainTable, strings.Join(t.chUsedColumns, ", "), t.bufferTable, t.bufferRowIdColumn)}
 
 	return &t
 }

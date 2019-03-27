@@ -1,30 +1,40 @@
 tables:
     pgbench_accounts:
         main_table: pgbench_accounts
-        buffer_table: pgbench_accounts_buf
-        buffer_row_id: row_id
         engine: CollapsingMergeTree
         sign_column: sign
-        buffer_size: 1000
-        flush_threshold: 3
-        columns:
-            - aid:
-                type: Int32
-                name: aid
-            - bid:
-                type: Int32
-                name: bid
-            - abalance:
-                type: Int32
-                name: abalance
-            - filler:
-lsnStateFilepath: state.yaml
-inactivity_flush_timeout: '30s'
-clickhouse: tcp://localhost:9000
-pg:
+        memory_buffer_size: 1000
+
+#    public.pgbench_history:
+#        main_table: pgbench_history
+#        buffer_table: pgbench_history_buf
+#        buffer_table_row_id: row_id
+#        flush_threshold: 3
+#        engine: MergeTree
+#        memory_buffer_size: 1000
+#        columns:
+#            tid: ch_tid
+#            bid: ch_bid
+#            aid: ch_aid
+#            delta: ch_delta
+#            mtime: ch_mtime
+#            filler: ch_filler
+
+clickhouse:
+    host: localhost
+    port: 9000
+    database: default
+    username: default
+    params:
+        debug: false
+
+postgres:
     host: localhost
     port: 5432
     database: pg2ch
     user: postgres
     replication_slot_name: myslot
     publication_name: my_pub
+
+lsnStateFilepath: state.yaml
+inactivity_flush_timeout: '30s'

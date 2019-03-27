@@ -28,17 +28,25 @@ tables:
         engine: {clickhouse table engine: MergeTree, ReplacingMergeTree or CollapsingMergeTree}
         buffer_size: {number of DML(insert/update/delete) commands to store in the memory before flushing to the buffer/main table } 
         merge_threshold: {if buffer table specified, number of buffer flushed before moving data from buffer to the main table}
-        columns: # in the exact same order as in the postgresql table
-            - {postgresql column name}:
-                type: {clickhouse data type Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64|Float32|Float64|String|DateTime}
-                name: {clickhouse column name}
-                empty_value: {value used for ReplacingMergeTree engine to discard deleted row value}
-            - {postgresql column name}: # column will be ignored if no properties specified
-        sign_column: {clickhouse sign column name for MergeTree and CollapsingMergeTree engines}
+        columns: # postgres - clickhouse column name mapping, 
+                 # if not present, all the columns are expected to be on the clickhouse side with the exact same names 
+            {postgresql column name}: {clickhouse column name}
+        empty_values: # in case of ReplacingMergeTree those values will be used to discard deleted rows
+            {clickhouse column name}: {value to be used}
+        sign_column: {clickhouse sign column name for MergeTree and CollapsingMergeTree engines only}
         ver_column: {clickhouse version column name for the ReplacingMergeTree engine}
 
 inactivity_merge_timeout: {interval, default 1 min} # merge buffered data after that timeout
-clickhouse: {clickhouse connection string}
+clickhouse:
+    host: {clickhouse host, default 127.0.0.1}
+    port: {tcp port, default 9000}
+    database: {database name}
+    username: {username}
+    password: {password}
+    params:
+        {extra param name}:{extra param value}
+        ...
+
 pg: # postgresql connection params
     host: {host name}
     port: {port}
@@ -81,19 +89,17 @@ tables:
         buffer_size: 1000
         merge_threshold: 4
         columns:
-            - aid:
-                type: Int32
-                name: aid
-            - bid: # ignore this column
-            - abalance:
-                type: Int32
-                name: abalance
-                empty_value: '0'
-            - filler: # ignore this column
+            aid: aid
+            abalance: abalance
         sign_column: sign
 
 inactivity_merge_timeout: '10s'
-clickhouse: tcp://localhost:9000
+
+clickhouse:
+    host: localhost
+    port: 9000
+    database: default
+    username: default
 pg:
     host: localhost
     port: 5432

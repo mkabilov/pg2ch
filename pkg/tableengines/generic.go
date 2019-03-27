@@ -39,20 +39,22 @@ type genericTable struct {
 	chTx    *sql.Tx
 	chStmnt *sql.Stmt
 
-	pgTableName string
+	pgTableName config.NamespacedName
 	mainTable   string
 	bufferTable string
 
-	chColumns         []string
-	pgColumns         []string
-	pg2ch             map[string]string
-	columns           map[string]config.Column
+	pgColumns []string
+
+	chUsedColumns []string
+	pgUsedColumns []string
+	columnMapping map[string]config.ChColumn
+
 	bufferRowIdColumn string
 	emptyValues       map[int]interface{}
 
 	flushMutex           *sync.Mutex
 	buffer               []bufCommand
-	bufferSize           int // buffer size
+	memoryBufferSize     int // buffer size
 	bufferCmdId          int // number of commands in the current buffer
 	bufferRowId          int // row id in the buffer
 	bufferFlushCnt       int // number of flushed buffers
@@ -63,59 +65,48 @@ type genericTable struct {
 	syncSkipBufferTable bool
 }
 
-func newGenericTable(ctx context.Context, chConn *sql.DB, name string, tblCfg config.Table) genericTable {
-	pgChColumns := make(map[string]string)
-	columns := make(map[string]config.Column)
-
-	pgColumns := make([]string, len(tblCfg.Columns))
-	chColumns := make([]string, 0)
-	emptyValues := make(map[int]interface{})
-	for colId, column := range tblCfg.Columns {
-		for pgName, chProps := range column {
-			pgColumns[colId] = pgName
-
-			if chProps.EmptyValue != nil {
-				val, err := convert(*chProps.EmptyValue, chProps)
-				if err != nil {
-					log.Fatalf("wrong value for %q empty value: %v", pgName, err)
-				}
-				emptyValues[colId] = val
-			}
-
-			if chProps.ChName == "" {
-				continue
-			}
-
-			pgChColumns[pgName] = chProps.ChName
-			columns[pgName] = chProps
-			chColumns = append(chColumns, chProps.ChName)
-		}
-	}
-
+func newGenericTable(ctx context.Context, chConn *sql.DB, name config.NamespacedName, tblCfg config.Table) genericTable {
 	t := genericTable{
 		ctx:                  ctx,
 		chConn:               chConn,
 		pgTableName:          name,
 		mainTable:            tblCfg.MainTable,
 		bufferTable:          tblCfg.BufferTable,
-		pg2ch:                pgChColumns,
-		columns:              columns,
-		chColumns:            chColumns,
-		pgColumns:            pgColumns,
-		emptyValues:          emptyValues,
-		bufferSize:           tblCfg.BufferSize,
+		columnMapping:        make(map[string]config.ChColumn),
+		chUsedColumns:        make([]string, 0),
+		pgColumns:            tblCfg.PgColumns,
+		pgUsedColumns:        make([]string, 0),
+		emptyValues:          make(map[int]interface{}),
+		memoryBufferSize:     tblCfg.MemoryBufferSize,
 		flushBufferThreshold: tblCfg.FlushThreshold,
-		bufferRowIdColumn:    tblCfg.BufferRowIdColumn,
+		bufferRowIdColumn:    tblCfg.BufferTableRowIdColumn,
 		syncSkip:             tblCfg.SkipInitSync,
 		syncSkipBufferTable:  tblCfg.SkipBufferTable,
 		flushMutex:           &sync.Mutex{},
 	}
 
-	if t.bufferSize < 1 {
-		t.bufferSize = defaultBufferSize
+	if t.memoryBufferSize < 1 {
+		t.memoryBufferSize = defaultBufferSize
 	}
+	t.buffer = make([]bufCommand, t.memoryBufferSize)
 
-	t.buffer = make([]bufCommand, t.bufferSize)
+	for pgColId, pgColName := range tblCfg.PgColumns {
+		chCol, ok := tblCfg.ColumnMapping[pgColName]
+		if !ok {
+			continue
+		}
+
+		if emptyVal, ok := tblCfg.EmptyValues[chCol.Name]; ok {
+			if val, err := convert(emptyVal, chCol.BaseType); err == nil {
+				t.emptyValues[pgColId] = val
+			} else {
+				log.Fatalf("wrong value for %q empty value: %v", chCol.Name, err)
+			}
+		}
+		t.columnMapping[pgColName] = chCol
+		t.chUsedColumns = append(t.chUsedColumns, chCol.Name)
+		t.pgUsedColumns = append(t.pgUsedColumns, pgColName)
+	}
 
 	return t
 }
@@ -146,7 +137,7 @@ func (t *genericTable) stmntPrepare(sync bool) error {
 		err       error
 	)
 
-	columns := t.chColumns
+	columns := t.chUsedColumns
 	if t.bufferTable != "" && ((sync && !t.syncSkipBufferTable) || !sync) {
 		tableName = t.bufferTable
 		columns = append(columns, t.bufferRowIdColumn)
@@ -184,7 +175,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		return nil
 	}
 
-	query := fmt.Sprintf("copy %s(%s) to stdout", t.pgTableName, strings.Join(t.pgColumns, ", "))
+	query := fmt.Sprintf("copy %s(%s) to stdout", t.pgTableName.String(), strings.Join(t.pgUsedColumns, ", "))
 
 	if err := t.begin(); err != nil {
 		return fmt.Errorf("could not begin: %v", err)
@@ -204,7 +195,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		return fmt.Errorf("could not prepare: %v", err)
 	}
 
-	if err := pgTx.CopyToWriter(w, query); err != nil {
+	if _, err := pgTx.CopyToWriter(w, query); err != nil {
 		return fmt.Errorf("could not copy: %v", err)
 	}
 
@@ -226,7 +217,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		}
 	}
 
-	log.Printf("Pg table %s: %d rows copied to ClickHouse", t.pgTableName, rows)
+	log.Printf("Pg table %s: %d rows copied to ClickHouse", t.pgTableName.String(), rows)
 
 	return nil
 }
@@ -259,7 +250,7 @@ func (t *genericTable) processCommandSet(set commandSet) (bool, error) {
 		t.bufferAppend(set)
 	}
 
-	if t.bufferCmdId == t.bufferSize {
+	if t.bufferCmdId == t.memoryBufferSize {
 		t.flushMutex.Lock()
 		defer t.flushMutex.Unlock()
 
@@ -384,8 +375,8 @@ func (t *genericTable) FlushToMainTable() error {
 	return nil
 }
 
-func convert(val string, column config.Column) (interface{}, error) {
-	switch column.ChType {
+func convert(val string, chType string) (interface{}, error) {
+	switch chType {
 	case "Int8":
 		return strconv.ParseInt(val, 10, 8)
 	case "Int16":
@@ -412,21 +403,22 @@ func convert(val string, column config.Column) (interface{}, error) {
 		return strconv.ParseFloat(val, 32)
 	case "Float64":
 		return strconv.ParseFloat(val, 64)
+	case "FixedString":
+		fallthrough
 	case "String":
 		return val, nil
 	case "DateTime":
 		return time.Parse("2006-01-02 15:04:05", val[:19])
 	}
 
-	return nil, fmt.Errorf("unknown type: %v", column.ChType)
+	return nil, fmt.Errorf("unknown type: %v", chType)
 }
 
 func (t *genericTable) convertTuples(row message.Row) []interface{} {
 	res := make([]interface{}, 0)
 	for i, col := range row {
 		colName := t.pgColumns[i]
-
-		if _, ok := t.pg2ch[colName]; !ok {
+		if _, ok := t.columnMapping[colName]; !ok {
 			continue
 		}
 
@@ -434,7 +426,7 @@ func (t *genericTable) convertTuples(row message.Row) []interface{} {
 			continue
 		}
 
-		val, err := convert(string(col.Value), t.columns[colName])
+		val, err := convert(string(col.Value), t.columnMapping[colName].BaseType)
 		if err != nil {
 			panic(err)
 		}
@@ -445,26 +437,24 @@ func (t *genericTable) convertTuples(row message.Row) []interface{} {
 	return res
 }
 
+// gets row from the copy
 func (t *genericTable) convertStrings(fields []sql.NullString) ([]interface{}, error) {
 	res := make([]interface{}, 0)
 	for i, field := range fields {
-		pgColName := t.pgColumns[i]
-		column, ok := t.columns[pgColName]
-		if !ok {
-			continue
-		}
+		pgColName := t.pgUsedColumns[i]
+		column := t.columnMapping[pgColName]
 
 		if !field.Valid {
-			if !column.Nullable {
+			if !column.IsNullable {
 				return nil, fmt.Errorf("got null in %s field, which is not nullable on the ClickHouse side", pgColName)
 			}
 			res = append(res, nil)
 			continue
 		}
 
-		val, err := convert(field.String, column)
+		val, err := convert(field.String, column.BaseType)
 		if err != nil {
-			return nil, fmt.Errorf("could not parse %q field with %s type: %v", pgColName, t.columns[pgColName].ChType, err)
+			return nil, fmt.Errorf("could not parse %q field with %s type: %v", pgColName, column.BaseType, err)
 		}
 
 		res = append(res, val)

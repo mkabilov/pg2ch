@@ -20,15 +20,15 @@ type replacingMergeTree struct {
 }
 
 // NewReplacingMergeTree instantiates replacingMergeTree
-func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, name string, tblCfg config.Table) *replacingMergeTree {
+func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, name config.NamespacedName, tblCfg config.Table) *replacingMergeTree {
 	t := replacingMergeTree{
 		genericTable: newGenericTable(ctx, conn, name, tblCfg),
 		verColumn:    tblCfg.VerColumn,
 	}
-	t.chColumns = append(t.chColumns, tblCfg.VerColumn)
+	t.chUsedColumns = append(t.chUsedColumns, tblCfg.VerColumn)
 
 	t.flushQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
-		t.mainTable, strings.Join(t.chColumns, ", "), t.bufferTable, t.bufferRowIdColumn)}
+		t.mainTable, strings.Join(t.chUsedColumns, ", "), t.bufferTable, t.bufferRowIdColumn)}
 
 	return &t
 }

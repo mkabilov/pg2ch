@@ -3,6 +3,12 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/cloudflare/golz4"
+  packages = ["."]
+  revision = "ef862a3cdc58a6f1fee4e3af3d44fbe279194cde"
+
+[[projects]]
+  branch = "master"
   name = "github.com/jackc/pgx"
   packages = [
     ".",
@@ -12,21 +18,24 @@
     "pgproto3",
     "pgtype"
   ]
-  revision = "6067cfab4f674940e745d14579632430c2c33b32"
+  revision = "31500c15b3a8a98bc6c1b8606e655b0498f30671"
 
 [[projects]]
   name = "github.com/kshvakov/clickhouse"
   packages = [
     ".",
     "lib/binary",
+    "lib/cityhash102",
     "lib/column",
     "lib/data",
+    "lib/leakypool",
+    "lib/lz4",
     "lib/protocol",
     "lib/types",
     "lib/writebuffer"
   ]
-  revision = "5572ee69225d9a4fdacb5e385b8b03b13c077426"
-  version = "v1.3.5"
+  revision = "1d87030de2a38bbe8c05e1b13f5b2f27466fd5a8"
+  version = "v1.3.6"
 
 [[projects]]
   name = "github.com/pkg/errors"
@@ -43,6 +52,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "ba395a1e0b34808779fe95f0a8ebf545c705c6eee23ca5aa810cd6489ad6df9a"
+  inputs-digest = "6752079078989b97b379e41434fe20cd7c51b440393dde8bd5d09488b099896e"
   solver-name = "gps-cdcl"
   solver-version = 1
