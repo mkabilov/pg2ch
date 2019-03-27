@@ -16,6 +16,8 @@ const (
 	publicSchema                  = "public"
 	defaultClickHousePort         = 9000
 	defaultClickHouseHost         = "127.0.0.1"
+	defaultPostgresPort           = 5432
+	defaultPostgresHost           = "127.0.0.1"
 )
 
 type tableEngine int
@@ -190,6 +192,14 @@ func New(filepath string) (*Config, error) {
 	}
 
 	cfg.Postgres.ConnConfig = cfg.Postgres.ConnConfig.Merge(connCfg)
+
+	if cfg.Postgres.Port == 0 {
+		cfg.Postgres.Port = defaultPostgresPort
+	}
+
+	if cfg.Postgres.Host == "" {
+		cfg.Postgres.Host = defaultPostgresHost
+	}
 
 	if cfg.ClickHouse.Port == 0 {
 		cfg.ClickHouse.Port = defaultClickHousePort

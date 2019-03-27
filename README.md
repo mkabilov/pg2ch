@@ -26,7 +26,7 @@ tables:
         skip_init_sync: {skip initial copy of the data}
         skip_buffer_table: {if true bypass buffer_table and write directly to the main_table}            
         engine: {clickhouse table engine: MergeTree, ReplacingMergeTree or CollapsingMergeTree}
-        buffer_size: {number of DML(insert/update/delete) commands to store in the memory before flushing to the buffer/main table } 
+        memory_buffer_size: {number of DML(insert/update/delete) commands to store in the memory before flushing to the buffer/main table } 
         merge_threshold: {if buffer table specified, number of buffer flushed before moving data from buffer to the main table}
         columns: # postgres - clickhouse column name mapping, 
                  # if not present, all the columns are expected to be on the clickhouse side with the exact same names 
@@ -48,8 +48,8 @@ clickhouse:
         ...
 
 pg: # postgresql connection params
-    host: {host name}
-    port: {port}
+    host: {host name, default 127.0.0.1}
+    port: {port, default 5432}
     database: {database name}
     user: {user}
     replication_slot_name: {logical replication slot name}
@@ -86,7 +86,7 @@ tables:
         buffer_table: pgbench_accounts_buf
         buffer_row_id: row_id
         engine: CollapsingMergeTree
-        buffer_size: 1000
+        memory_buffer_size: 1000
         merge_threshold: 4
         columns:
             aid: aid
