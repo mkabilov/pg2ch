@@ -10,9 +10,6 @@ import (
 // OID describes pg oid
 type OID uint32
 
-// InvalidOID describes invalid oid
-const InvalidOID OID = 0
-
 // String implements Stringer
 func (o OID) String() string {
 	return fmt.Sprintf("%d", uint32(o))

@@ -45,17 +45,17 @@ type Replicator struct {
 	pgConn *pgx.Conn
 	chConn *sql.DB
 
-	tables       map[config.NamespacedName]clickHouseTable
-	oidName      map[utils.OID]config.NamespacedName
+	tables       map[config.PgTableName]clickHouseTable
+	oidName      map[utils.OID]config.PgTableName
 	tempSlotName string
 
 	finalLSN utils.LSN
 	startLSN utils.LSN // lsn to start consuming changes from
 
 	tablesToMergeMutex *sync.Mutex
-	tablesToMerge      map[config.NamespacedName]struct{} // tables to be merged
-	inTxTables         map[config.NamespacedName]struct{} // tables inside running tx
-	curTxMergeIsNeeded bool                               // if tables in the current transaction are needed to be merged
+	tablesToMerge      map[config.PgTableName]struct{} // tables to be merged
+	inTxTables         map[config.PgTableName]struct{} // tables inside running tx
+	curTxMergeIsNeeded bool                            // if tables in the current transaction are needed to be merged
 	stateLSNfp         *os.File
 }
 
@@ -68,44 +68,44 @@ var errNoStateFile = errors.New("no state file")
 func New(cfg config.Config) *Replicator {
 	r := Replicator{
 		cfg:     cfg,
-		tables:  make(map[config.NamespacedName]clickHouseTable),
-		oidName: make(map[utils.OID]config.NamespacedName),
+		tables:  make(map[config.PgTableName]clickHouseTable),
+		oidName: make(map[utils.OID]config.PgTableName),
 		errCh:   make(chan error),
 
 		tablesToMergeMutex: &sync.Mutex{},
-		tablesToMerge:      make(map[config.NamespacedName]struct{}),
-		inTxTables:         make(map[config.NamespacedName]struct{}),
+		tablesToMerge:      make(map[config.PgTableName]struct{}),
+		inTxTables:         make(map[config.PgTableName]struct{}),
 	}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 
 	return &r
 }
 
-func (r *Replicator) newTable(tblName config.NamespacedName, tblConfig config.Table) (clickHouseTable, error) {
+func (r *Replicator) newTable(tblName config.PgTableName, tblConfig config.Table) (clickHouseTable, error) {
 	switch tblConfig.Engine {
 	//case config.VersionedCollapsingMergeTree:
-	//	if tbl.SignColumn == "" {
+	//	if tblConfig.SignColumn == "" {
 	//		return nil, fmt.Errorf("VersionedCollapsingMergeTree requires sign column to be set")
 	//	}
-	//	if tbl.VerColumn == "" {
+	//	if tblConfig.VerColumn == "" {
 	//		return nil, fmt.Errorf("VersionedCollapsingMergeTree requires version column to be set")
 	//	}
 	//
-	//	return tableengines.NewVersionedCollapsingMergeTree(r.ctx, r.chConn, tableName, tbl), nil
+	//	return tableengines.NewVersionedCollapsingMergeTree(r.ctx, r.chConn, tblConfig), nil
 	case config.ReplacingMergeTree:
 		if tblConfig.VerColumn == "" {
 			return nil, fmt.Errorf("ReplacingMergeTree requires version column to be set")
 		}
 
-		return tableengines.NewReplacingMergeTree(r.ctx, r.chConn, tblName, tblConfig), nil
+		return tableengines.NewReplacingMergeTree(r.ctx, r.chConn, tblConfig), nil
 	case config.MergeTree:
-		return tableengines.NewMergeTree(r.ctx, r.chConn, tblName, tblConfig), nil
+		return tableengines.NewMergeTree(r.ctx, r.chConn, tblConfig), nil
 	case config.CollapsingMergeTree:
 		if tblConfig.SignColumn == "" {
 			return nil, fmt.Errorf("CollapsingMergeTree requires sign column to be set")
 		}
 
-		return tableengines.NewCollapsingMergeTree(r.ctx, r.chConn, tblName, tblConfig), nil
+		return tableengines.NewCollapsingMergeTree(r.ctx, r.chConn, tblConfig), nil
 	}
 
 	return nil, fmt.Errorf("%s table engine is not implemented", tblConfig.Engine)
@@ -198,8 +198,14 @@ func (r *Replicator) getCurrentState() error {
 		return errNoStateFile
 	}
 
+	if stat, err := r.stateLSNfp.Stat(); err != nil {
+		return fmt.Errorf("could not get file stats: %v", err)
+	} else if stat.Size() == 0 {
+		return errNoStateFile
+	}
+
 	if err := yaml.NewDecoder(r.stateLSNfp).Decode(&s); err != nil {
-		log.Printf("could not decode: %v", err)
+		log.Printf("could not decode state yaml: %v", err)
 		return errNoStateFile
 	}
 
@@ -240,14 +246,19 @@ func (r *Replicator) saveCurrentState() error {
 
 func (r *Replicator) initTables(tx *pgx.Tx) error {
 	for tblName := range r.cfg.Tables {
-		tblConfig, err := r.tableConfig(tx, tblName)
+		tblConfig, err := r.fetchTableInfo(tx, tblName)
 		if err != nil {
 			return fmt.Errorf("could not get %s table config: %v", tblName.String(), err)
 		}
+		tblConfig.PgTableName = tblName
 
 		tbl, err := r.newTable(tblName, tblConfig)
 		if err != nil {
 			return fmt.Errorf("could not instantiate table: %v", err)
+		}
+
+		if err := tbl.Init(); err != nil {
+			fmt.Printf("could not init %s: %v", tblName.String(), err)
 		}
 
 		r.tables[tblName] = tbl
@@ -299,12 +310,6 @@ func (r *Replicator) Run() error {
 
 	if err := r.pgConn.Close(); err != nil { // logical replication consumer uses it's own connection
 		return fmt.Errorf("could not close pg connection: %v", err)
-	}
-
-	for tblName, tbl := range r.tables {
-		if err := tbl.Init(); err != nil {
-			fmt.Printf("could not init %s: %v", tblName.String(), err)
-		}
 	}
 
 	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Postgres.ConnConfig, r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.startLSN)
@@ -398,7 +403,7 @@ func (r *Replicator) fetchPgTablesInfo(tx *pgx.Tx) error {
 			return fmt.Errorf("could not scan: %v", err)
 		}
 
-		fqName := config.NamespacedName{SchemaName: schemaName, TableName: tableName}
+		fqName := config.PgTableName{SchemaName: schemaName, TableName: tableName}
 
 		if _, ok := r.cfg.Tables[fqName]; ok && replicaIdentity != message.ReplicaIdentityFull {
 			return fmt.Errorf("table %s must have FULL replica identity(currently it is %q)", tableName, replicaIdentity)
@@ -564,7 +569,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 				return fmt.Errorf("could not merge tables: %v", err)
 			}
 		}
-		r.inTxTables = make(map[config.NamespacedName]struct{})
+		r.inTxTables = make(map[config.PgTableName]struct{})
 	case message.Insert:
 		tbl := r.getTable(v.RelationOID)
 		if tbl == nil {
@@ -626,33 +631,33 @@ func (r *Replicator) advanceLSN() {
 	r.consumer.AdvanceLSN(r.finalLSN)
 }
 
-func (r *Replicator) tableConfig(tx *pgx.Tx, tblName config.NamespacedName) (config.Table, error) {
+func (r *Replicator) fetchTableInfo(tx *pgx.Tx, tblName config.PgTableName) (config.Table, error) {
 	var err error
 	cfg := r.cfg.Tables[tblName]
 
-	cfg.PgColumns, err = r.tablePgColumns(tx, tblName)
+	cfg.TupleColumns, cfg.PgColumns, err = utils.TablePgColumns(tx, tblName)
 	if err != nil {
 		return cfg, fmt.Errorf("could not get columns for %s postgres table: %v", tblName.String(), err)
 	}
 
-	chColumns, err := r.tableChColumns(cfg.MainTable)
+	chColumns, err := utils.TableChColumns(r.chConn, r.cfg.ClickHouse.Database, cfg.ChMainTable)
 	if err != nil {
-		return cfg, fmt.Errorf("could not get columns for %q clickhouse table: %v", cfg.MainTable, err)
+		return cfg, fmt.Errorf("could not get columns for %q clickhouse table: %v", cfg.ChMainTable, err)
 	}
 
 	cfg.ColumnMapping = make(map[string]config.ChColumn)
 	if len(cfg.Columns) > 0 {
 		for pgCol, chCol := range cfg.Columns {
 			if chColCfg, ok := chColumns[chCol]; !ok {
-				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", chCol, cfg.MainTable)
+				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", chCol, cfg.ChMainTable)
 			} else {
 				cfg.ColumnMapping[pgCol] = chColCfg
 			}
 		}
 	} else {
-		for _, pgCol := range cfg.PgColumns {
+		for _, pgCol := range cfg.TupleColumns {
 			if chColCfg, ok := chColumns[pgCol]; !ok {
-				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", pgCol, cfg.MainTable)
+				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", pgCol, cfg.ChMainTable)
 			} else {
 				cfg.ColumnMapping[pgCol] = chColCfg
 			}
@@ -662,73 +667,98 @@ func (r *Replicator) tableConfig(tx *pgx.Tx, tblName config.NamespacedName) (con
 	return cfg, nil
 }
 
-func (r *Replicator) tableChColumns(chTableName string) (map[string]config.ChColumn, error) {
-	result := make(map[string]config.ChColumn)
+//GenerateChDDL generates clickhouse table DDLs
+//TODO: refactor me
+func (r *Replicator) GenerateChDDL() error {
+	if err := r.pgConnect(); err != nil {
+		return fmt.Errorf("could not connect to pg: %v", err)
+	}
 
-	rows, err := r.chConn.Query("select name, type from system.columns where database = ? and table = ?",
-		r.cfg.ClickHouse.Database, chTableName)
-
+	tx, err := r.pgBegin()
 	if err != nil {
-		return nil, fmt.Errorf("could not query: %v", err)
+		return fmt.Errorf("could not start transaction on pg side: %v", err)
 	}
 
-	for rows.Next() {
-		var colName, colType string
+	for tblName := range r.cfg.Tables {
+		var (
+			pkColumnNumb int
+			engineParams string
+			orderBy      string
+		)
 
-		if err := rows.Scan(&colName, &colType); err != nil {
-			return nil, fmt.Errorf("could not scan: %v", err)
+		tblCfg := r.cfg.Tables[tblName]
+
+		tblCfg.TupleColumns, tblCfg.PgColumns, err = utils.TablePgColumns(tx, tblName)
+		if err != nil {
+			return fmt.Errorf("could not get columns for %s postgres table: %v", tblName.String(), err)
 		}
 
-		chCol := parseChType(colType)
-		chCol.Name = colName
-		result[colName] = chCol
-	}
-
-	return result, nil
-}
-
-func (r *Replicator) tablePgColumns(tx *pgx.Tx, tblName config.NamespacedName) ([]string, error) {
-	columns := make([]string, 0)
-
-	rows, err := tx.Query(`select a.attname from pg_class c
-inner join pg_namespace n on n.oid = c.relnamespace
-inner join pg_attribute a on a.attrelid = c.oid
-where n.nspname = $1 and c.relname = $2 
-	and a.attnum > 0 and a.attisdropped = false
-order by attnum`, tblName.SchemaName, tblName.TableName)
-	if err != nil {
-		return nil, fmt.Errorf("could not query: %v", err)
-	}
-
-	for rows.Next() {
-		var colName string
-
-		if err := rows.Scan(&colName); err != nil {
-			return nil, fmt.Errorf("could not scan: %v", err)
+		if len(tblCfg.Columns) == 0 {
+			tblCfg.Columns = make(map[string]string)
+			for _, pgCol := range tblCfg.TupleColumns {
+				tblCfg.Columns[pgCol] = pgCol
+			}
 		}
 
-		columns = append(columns, colName)
-	}
+		chColumnDDLs := make([]string, 0)
+		for _, pgColName := range tblCfg.TupleColumns {
+			chColName, ok := tblCfg.Columns[pgColName]
+			if !ok {
+				continue
+			}
 
-	return columns, nil
-}
+			pgCol := tblCfg.PgColumns[pgColName]
+			chColDDL, err := utils.ToClickHouseType(pgCol)
+			if err != nil {
+				return fmt.Errorf("could not get clickhouse column definition: %v", err)
+			}
+			if pgCol.PkCol > 0 && pgCol.PkCol > pkColumnNumb {
+				pkColumnNumb = pgCol.PkCol
+			}
 
-func parseChType(chType string) (col config.ChColumn) {
-	col = config.ChColumn{BaseType: chType, IsArray: false, IsNullable: false}
-
-	if ln := len(chType); ln >= 7 {
-		if strings.HasPrefix(chType, "Array(Nullable(") {
-			col = config.ChColumn{BaseType: chType[15 : ln-2], IsArray: true, IsNullable: true}
-		} else if strings.HasPrefix(chType, "Array(") {
-			col = config.ChColumn{BaseType: chType[6 : ln-1], IsArray: true, IsNullable: false}
-		} else if strings.HasPrefix(chType, "Nullable(") {
-			col = config.ChColumn{BaseType: chType[9 : ln-1], IsArray: false, IsNullable: true}
+			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s %s", chColName, chColDDL))
 		}
+		pkColumns := make([]string, pkColumnNumb)
+
+		for pgColName := range tblCfg.Columns {
+			pgCol := tblCfg.PgColumns[pgColName]
+			if pgCol.PkCol < 1 {
+				continue
+			}
+
+			pkColumns[pgCol.PkCol-1] = pgColName
+		}
+
+		switch tblCfg.Engine {
+		case config.ReplacingMergeTree:
+			engineParams = tblCfg.VerColumn
+			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s UInt64", engineParams))
+		case config.CollapsingMergeTree:
+			engineParams = tblCfg.SignColumn
+			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s Int8", engineParams))
+		}
+
+		tableDDL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = %s(%s)",
+			tblCfg.ChMainTable,
+			strings.Join(chColumnDDLs, ",\n"),
+			tblCfg.Engine.String(), engineParams)
+
+		if len(pkColumns) > 0 {
+			orderBy = fmt.Sprintf(" ORDER BY(%s)", strings.Join(pkColumns, ", "))
+		}
+		tableDDL += orderBy
+
+		fmt.Println(tableDDL)
+
+		if tblCfg.ChBufferTable != "" {
+			fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree()%s;",
+				tblCfg.ChBufferTable,
+				strings.Join(
+					append(chColumnDDLs, fmt.Sprintf("    %s UInt64", tblCfg.BufferTableRowIdColumn)), ",\n"),
+				orderBy)
+		}
+
 	}
 
-	if strings.HasPrefix(col.BaseType, "FixedString(") {
-		col.BaseType = "FixedString"
-	}
-
-	return
+	return nil
 }

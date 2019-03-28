@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	configFile = flag.String("config", "config.yaml", "path to the config file")
-	Version    = "devel"
-	Revision   = "devel"
+	configFile    = flag.String("config", "config.yaml", "path to the config file")
+	generateChDDL = flag.Bool("generate-ch-ddl", false, "generates clickhouse's tables ddl")
+	Version       = "devel"
+	Revision      = "devel"
 
 	GoVersion = runtime.Version()
 )
@@ -44,8 +45,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := replicator.New(*cfg).Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "could not start: %v\n", err)
-		os.Exit(1)
+	repl := replicator.New(*cfg)
+	if *generateChDDL {
+		if err := repl.GenerateChDDL(); err != nil {
+			fmt.Fprintf(os.Stderr, "could not create tables on the clickhouse side: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		if err := repl.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "could not start: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }

@@ -18,6 +18,8 @@ const (
 	defaultClickHouseHost         = "127.0.0.1"
 	defaultPostgresPort           = 5432
 	defaultPostgresHost           = "127.0.0.1"
+	defaultRowIdColumn            = "row_id"
+	defaultMaxBufferLength        = 1000
 )
 
 type tableEngine int
@@ -50,28 +52,30 @@ type pgConnConfig struct {
 	PublicationName     string `yaml:"publication_name"`
 }
 
-// NamespacedName represents namespaced name
-type NamespacedName struct {
+// PgTableName represents namespaced name
+type PgTableName struct {
 	SchemaName string
 	TableName  string
 }
 
 // Table contains information about the table
 type Table struct {
-	BufferTableRowIdColumn string            `yaml:"buffer_table_row_id"`
-	BufferTable            string            `yaml:"buffer_table"`
-	MemoryBufferSize       int               `yaml:"memory_buffer_size"`
-	MainTable              string            `yaml:"main_table"`
-	VerColumn              string            `yaml:"ver_column"`
-	SignColumn             string            `yaml:"sign_column"`
-	Engine                 tableEngine       `yaml:"engine"`
-	FlushThreshold         int               `yaml:"flush_threshold"`
-	SkipInitSync           bool              `yaml:"skip_init_sync"`
-	SkipBufferTable        bool              `yaml:"skip_buffer_table"`
-	EmptyValues            map[string]string `yaml:"empty_values"`
-	Columns                map[string]string `yaml:"columns"`
+	BufferTableRowIdColumn  string            `yaml:"buffer_table_row_id"`
+	ChBufferTable           string            `yaml:"buffer_table"`
+	ChMainTable             string            `yaml:"main_table"`
+	MaxBufferLength         int               `yaml:"max_buffer_length"`
+	VerColumn               string            `yaml:"ver_column"`
+	SignColumn              string            `yaml:"sign_column"`
+	Engine                  tableEngine       `yaml:"engine"`
+	FlushThreshold          int               `yaml:"flush_threshold"`
+	InitSyncSkip            bool              `yaml:"init_sync_skip"`
+	InitSyncSkipBufferTable bool              `yaml:"init_sync_skip_buffer_table"`
+	EmptyValues             map[string]string `yaml:"empty_values"`
+	Columns                 map[string]string `yaml:"columns"`
 
-	PgColumns     []string            `yaml:"-"`
+	PgTableName   PgTableName         `yaml:"-"`
+	TupleColumns  []string            `yaml:"-"`
+	PgColumns     map[string]PgColumn `yaml:"-"`
 	ColumnMapping map[string]ChColumn `yaml:"-"`
 }
 
@@ -86,19 +90,29 @@ type chConnConfig struct {
 
 // Config contains config
 type Config struct {
-	ClickHouse             chConnConfig             `yaml:"clickhouse"`
-	Postgres               pgConnConfig             `yaml:"postgres"`
-	Tables                 map[NamespacedName]Table `yaml:"tables"`
-	InactivityFlushTimeout time.Duration            `yaml:"inactivity_flush_timeout"`
-	LsnStateFilepath       string                   `yaml:"lsnStateFilepath"`
+	ClickHouse             chConnConfig          `yaml:"clickhouse"`
+	Postgres               pgConnConfig          `yaml:"postgres"`
+	Tables                 map[PgTableName]Table `yaml:"tables"`
+	InactivityFlushTimeout time.Duration         `yaml:"inactivity_flush_timeout"`
+	LsnStateFilepath       string                `yaml:"lsnStateFilepath"`
+}
+
+type Column struct {
+	BaseType   string
+	IsArray    bool
+	IsNullable bool
+	Ext        []int
+}
+
+type PgColumn struct {
+	Column
+	PkCol int
 }
 
 // ChColumn describes ClickHouse column
 type ChColumn struct {
-	Name       string
-	BaseType   string
-	IsArray    bool
-	IsNullable bool
+	Column
+	Name string
 }
 
 func (t tableEngine) String() string {
@@ -127,7 +141,7 @@ func (t *tableEngine) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return fmt.Errorf("unknown table engine: %q", val)
 }
 
-func (tn *NamespacedName) UnmarshalYAML(unmarshal func(interface{}) error) error {
+func (tn *PgTableName) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var val string
 
 	if err := unmarshal(&val); err != nil {
@@ -136,12 +150,12 @@ func (tn *NamespacedName) UnmarshalYAML(unmarshal func(interface{}) error) error
 
 	parts := strings.Split(val, ".")
 	if ln := len(parts); ln == 2 {
-		*tn = NamespacedName{
+		*tn = PgTableName{
 			SchemaName: parts[0],
 			TableName:  parts[1],
 		}
 	} else if ln == 1 {
-		*tn = NamespacedName{
+		*tn = PgTableName{
 			SchemaName: publicSchema,
 			TableName:  parts[0],
 		}
@@ -152,7 +166,7 @@ func (tn *NamespacedName) UnmarshalYAML(unmarshal func(interface{}) error) error
 	return nil
 }
 
-func (tn *NamespacedName) String() string {
+func (tn *PgTableName) String() string {
 	if tn.SchemaName == publicSchema {
 		return fmt.Sprintf("%q", tn.TableName)
 	}
@@ -210,6 +224,28 @@ func New(filepath string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// UnmarshalYAML ...
+func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	type alias Table
+
+	var val alias
+	if err := unmarshal(&val); err != nil {
+		return err
+	}
+
+	if val.ChBufferTable != "" && val.BufferTableRowIdColumn == "" {
+		val.BufferTableRowIdColumn = defaultRowIdColumn
+	}
+
+	if val.MaxBufferLength == 0 {
+		val.MaxBufferLength = defaultMaxBufferLength
+	}
+
+	*t = Table(val)
+
+	return nil
 }
 
 // ConnectionString returns clickhouse connection string

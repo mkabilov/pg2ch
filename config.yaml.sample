@@ -3,22 +3,7 @@ tables:
         main_table: pgbench_accounts
         engine: CollapsingMergeTree
         sign_column: sign
-        memory_buffer_size: 1000
-
-#    public.pgbench_history:
-#        main_table: pgbench_history
-#        buffer_table: pgbench_history_buf
-#        buffer_table_row_id: row_id
-#        flush_threshold: 3
-#        engine: MergeTree
-#        memory_buffer_size: 1000
-#        columns:
-#            tid: ch_tid
-#            bid: ch_bid
-#            aid: ch_aid
-#            delta: ch_delta
-#            mtime: ch_mtime
-#            filler: ch_filler
+        max_buffer_length: 1000
 
 clickhouse:
     host: localhost
@@ -33,7 +18,7 @@ postgres:
     port: 5432
     database: pg2ch
     user: postgres
-    replication_slot_name: myslot
+    replication_slot_name: my_slot
     publication_name: my_pub
 
 lsnStateFilepath: state.yaml

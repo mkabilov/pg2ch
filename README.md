@@ -23,10 +23,10 @@ tables:
         main_table: {clickhouse table name}
         buffer_table: {clickhouse buffer table name} # optional, if not specified, insert directly to the main table
         buffer_row_id: {clickhouse buffer table column name for row id} 
-        skip_init_sync: {skip initial copy of the data}
-        skip_buffer_table: {if true bypass buffer_table and write directly to the main_table}            
+        init_sync_skip: {skip initial copy of the data}
+        init_sync_skip_buffer_table: {if true bypass buffer_table and write directly to the main_table on initial sync copy}            
         engine: {clickhouse table engine: MergeTree, ReplacingMergeTree or CollapsingMergeTree}
-        memory_buffer_size: {number of DML(insert/update/delete) commands to store in the memory before flushing to the buffer/main table } 
+        max_buffer_length: {number of DML(insert/update/delete) commands to store in the memory before flushing to the buffer/main table } 
         merge_threshold: {if buffer table specified, number of buffer flushed before moving data from buffer to the main table}
         columns: # postgres - clickhouse column name mapping, 
                  # if not present, all the columns are expected to be on the clickhouse side with the exact same names 
@@ -86,7 +86,7 @@ tables:
         buffer_table: pgbench_accounts_buf
         buffer_row_id: row_id
         engine: CollapsingMergeTree
-        memory_buffer_size: 1000
+        max_buffer_length: 1000
         merge_threshold: 4
         columns:
             aid: aid

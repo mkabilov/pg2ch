@@ -39,9 +39,9 @@ type versionedCollapsingMergeTree struct {
 }
 
 // NewVersionedCollapsingMergeTree instantiates versionedCollapsingMergeTree
-func NewVersionedCollapsingMergeTree(ctx context.Context, conn *sql.DB, name config.NamespacedName, tblCfg config.Table) *versionedCollapsingMergeTree {
+func NewVersionedCollapsingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table) *versionedCollapsingMergeTree {
 	t := versionedCollapsingMergeTree{
-		genericTable: newGenericTable(ctx, conn, name, tblCfg),
+		genericTable: newGenericTable(ctx, conn, tblCfg),
 		signColumn:   tblCfg.SignColumn,
 		verColumn:    tblCfg.VerColumn,
 	}
@@ -49,7 +49,7 @@ func NewVersionedCollapsingMergeTree(ctx context.Context, conn *sql.DB, name con
 	t.chUsedColumns = append(t.chUsedColumns, t.signColumn, t.verColumn)
 
 	t.flushQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
-		t.mainTable, strings.Join(t.chUsedColumns, ", "), t.bufferTable, t.bufferRowIdColumn)}
+		t.cfg.ChMainTable, strings.Join(t.chUsedColumns, ", "), t.cfg.ChBufferTable, t.cfg.BufferTableRowIdColumn)}
 
 	return &t
 }
@@ -60,29 +60,16 @@ func (t *versionedCollapsingMergeTree) Sync(pgTx *pgx.Tx) error {
 }
 
 // Write implements io.Writer which is used during the Sync process, see genSync method
-func (t *versionedCollapsingMergeTree) Write(p []byte) (n int, err error) {
-	rec, err := utils.DecodeCopy(p)
+func (t *versionedCollapsingMergeTree) Write(p []byte) (int, error) {
+	var row []interface{}
+
+	row, n, err := t.convertIntoRow(p)
 	if err != nil {
 		return 0, err
 	}
-	n = len(p)
-
-	row, err := t.convertStrings(rec)
-	if err != nil {
-		return 0, fmt.Errorf("could not parse record: %v", err)
-	}
 	row = append(row, 1, 0) // append sign and version column values
 
-	if t.bufferTable != "" && !t.syncSkipBufferTable {
-		row = append(row, t.bufferRowId)
-	}
-
-	if err := t.stmntExec(row); err != nil {
-		return 0, fmt.Errorf("could not insert: %v", err)
-	}
-	t.bufferRowId++
-
-	return
+	return n, t.insertRow(row)
 }
 
 // Insert handles incoming insert DML operation
