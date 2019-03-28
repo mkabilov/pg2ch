@@ -11,18 +11,22 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mkabilov/pg2ch/pkg/utils"
-
 	"github.com/jackc/pgx"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
+	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
 // Generic table is a "parent" struct for all the table engines
 const (
 	attemptInterval = time.Second
 	maxAttempts     = 100
+)
+
+const (
+	pgTrue  = "t"
+	pgFalse = "f"
 )
 
 type bufRow struct {
@@ -394,39 +398,43 @@ func (t *genericTable) FlushToMainTable() error {
 
 func convert(val string, chType config.ChColumn, pgType config.PgColumn) (interface{}, error) {
 	switch chType.BaseType {
-	case "Int8":
+	case utils.ChInt8:
 		return strconv.ParseInt(val, 10, 8)
-	case "Int16":
+	case utils.ChInt16:
 		return strconv.ParseInt(val, 10, 16)
-	case "Int32":
+	case utils.ChInt32:
 		return strconv.ParseInt(val, 10, 32)
-	case "Int64":
+	case utils.ChInt64:
 		return strconv.ParseInt(val, 10, 64)
-	case "UInt8":
-		if val == "f" { //TODO: dirty hack for boolean values, store pg types instead of ch?
-			return 0, nil
-		} else if val == "t" {
-			return 1, nil
+	case utils.ChUInt8:
+		if pgType.BaseType == utils.PgBoolean {
+			if val == pgTrue {
+				return 1, nil
+			} else if val == pgFalse {
+				return 0, nil
+			}
 		}
 
-		return strconv.ParseUint(val, 10, 8)
-	case "UInt16":
+		return nil, fmt.Errorf("can't convert %v to %v", pgType.BaseType, chType.BaseType)
+	case utils.ChUInt16:
 		return strconv.ParseUint(val, 10, 16)
-	case "UInt32":
+	case utils.ChUint32:
 		return strconv.ParseUint(val, 10, 32)
-	case "UInt64":
+	case utils.ChUint64:
 		return strconv.ParseUint(val, 10, 64)
-	case "Float32":
+	case utils.ChFloat32:
 		return strconv.ParseFloat(val, 32)
-	case "Float64":
+	case utils.ChDecimal:
+		//TODO
+	case utils.ChFloat64:
 		return strconv.ParseFloat(val, 64)
-	case "FixedString":
+	case utils.ChFixedString:
 		fallthrough
-	case "String":
+	case utils.ChString:
 		return val, nil
-	case "Date":
+	case utils.ChDate:
 		return time.Parse("2006-01-02", val[:10])
-	case "DateTime":
+	case utils.ChDateTime:
 		return time.Parse("2006-01-02 15:04:05", val[:19])
 	}
 
