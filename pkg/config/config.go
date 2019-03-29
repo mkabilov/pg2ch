@@ -20,6 +20,8 @@ const (
 	defaultPostgresHost           = "127.0.0.1"
 	defaultRowIdColumn            = "row_id"
 	defaultMaxBufferLength        = 1000
+	defaultSignColumn             = "sign"
+	defaultVerColumn              = "ver"
 )
 
 type tableEngine int
@@ -237,6 +239,14 @@ func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 	if val.ChBufferTable != "" && val.BufferTableRowIdColumn == "" {
 		val.BufferTableRowIdColumn = defaultRowIdColumn
+	}
+
+	if val.SignColumn == "" && (val.Engine == CollapsingMergeTree || val.Engine == VersionedCollapsingMergeTree) {
+		val.SignColumn = defaultSignColumn
+	}
+
+	if val.VerColumn == "" && (val.Engine == ReplacingMergeTree || val.Engine == VersionedCollapsingMergeTree) {
+		val.VerColumn = defaultVerColumn
 	}
 
 	if val.MaxBufferLength == 0 {

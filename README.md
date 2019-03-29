@@ -34,11 +34,12 @@ tables:
             {postgresql column name}: {clickhouse column name}
         empty_values: # in case of ReplacingMergeTree those values will be used to discard deleted rows
             {clickhouse column name}: {value to be used}
-        sign_column: {clickhouse sign column name for MergeTree and CollapsingMergeTree engines only}
-        ver_column: {clickhouse version column name for the ReplacingMergeTree engine}
+        sign_column: {clickhouse sign column name for MergeTree and CollapsingMergeTree engines only, default "sign"}
+        ver_column: {clickhouse version column name for the ReplacingMergeTree engine, default "ver"}
 
 inactivity_merge_timeout: {interval, default 1 min} # merge buffered data after that timeout
-clickhouse:
+
+clickhouse: # clickhouse tcp protocol connection params
     host: {clickhouse host, default 127.0.0.1}
     port: {tcp port, default 9000}
     database: {database name}
