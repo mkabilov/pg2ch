@@ -111,11 +111,11 @@ func strToIntArray(str []string) ([]int, error) {
 }
 
 func parseChType(chType string) (col config.Column) {
-	col = config.Column{BaseType: chType, IsArray: false, IsNullable: false}
-
 	if strings.HasPrefix(chType, "LowCardinality(") {
 		chType = chType[15 : len(chType)-1]
 	}
+
+	col = config.Column{BaseType: chType, IsArray: false, IsNullable: false}
 
 	if ln := len(chType); ln >= 7 {
 		if strings.HasPrefix(chType, "Array(Nullable(") {
