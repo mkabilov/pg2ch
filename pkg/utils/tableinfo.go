@@ -123,6 +123,10 @@ func parseChType(chType string) (col config.Column) {
 		}
 	}
 
+	if strings.HasPrefix(col.BaseType, "LowCardinality(") {
+		col.BaseType = col.BaseType[15 : len(col.BaseType)-1]
+	}
+
 	if strings.HasPrefix(col.BaseType, "FixedString(") {
 		col.BaseType = "FixedString"
 	}

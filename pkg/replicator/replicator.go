@@ -145,7 +145,7 @@ func (r *Replicator) checkPgSlotAndPub(tx *pgx.Tx) error {
 func (r *Replicator) createReplSlotAndInitTables(tx *pgx.Tx) error {
 	lsn, err := r.pgCreateTempRepSlot(tx)
 	if err != nil {
-		return fmt.Errorf("could not create replication slot: %v", err)
+		return fmt.Errorf("could not create temporary replication slot: %v", err)
 	}
 
 	if err := r.initTables(tx); err != nil {
