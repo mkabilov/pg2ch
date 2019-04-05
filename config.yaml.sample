@@ -1,19 +1,9 @@
 tables:
-    stats_appsflyer_raw_new:
+    pgbench_accounts:
+        main_table: pgbench_accounts
         engine: CollapsingMergeTree
-        main_table: stats_appsflyer_raw_new
-    core_appsflyermapping:
-        engine: CollapsingMergeTree
-        main_table: core_appsflyermapping
-    stats_appsflyer_raw_adset_space:
-        engine: CollapsingMergeTree
-        main_table: stats_appsflyer_raw_adset_space
-    stats_appsflyer_raw_country_space:
-        engine: CollapsingMergeTree
-        main_table: stats_appsflyer_raw_country_space
-    stats_appsflyer_raw_event_space:
-        engine: CollapsingMergeTree
-        main_table: stats_appsflyer_raw_event_space
+        sign_column: sign
+        max_buffer_length: 1000
 
 clickhouse:
     host: localhost
