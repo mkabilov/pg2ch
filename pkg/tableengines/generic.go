@@ -48,7 +48,7 @@ type genericTable struct {
 
 	chUsedColumns  []string
 	pgUsedColumns  []string
-	columnMapping  map[string]config.ChColumn // key - pg column names
+	columnMapping  map[string]config.ChColumn // [pg column name]ch column description
 	emptyValues    map[int]interface{}
 	flushMutex     *sync.Mutex
 	buffer         []bufCommand
@@ -56,6 +56,7 @@ type genericTable struct {
 	bufferRowId    int // row id in the buffer
 	bufferFlushCnt int // number of flushed buffers
 	flushQueries   []string
+	tupleColumns   []message.Column // Columns description taken from RELATION rep message
 }
 
 func newGenericTable(ctx context.Context, chConn *sql.DB, tblCfg config.Table) genericTable {
@@ -251,13 +252,13 @@ func (t *genericTable) processCommandSet(set commandSet) (bool, error) {
 	return t.bufferFlushCnt >= t.cfg.FlushThreshold, nil
 }
 
-func (t *genericTable) convertIntoRow(p []byte) ([]interface{}, int, error) {
+func (t *genericTable) syncConvertIntoRow(p []byte) ([]interface{}, int, error) {
 	rec, err := utils.DecodeCopy(p)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	row, err := t.convertStrings(rec)
+	row, err := t.syncConvertStrings(rec)
 	if err != nil {
 		return nil, 0, fmt.Errorf("could not parse record: %v", err)
 	}
@@ -442,20 +443,20 @@ func convert(val string, chType config.ChColumn, pgType config.PgColumn) (interf
 }
 
 func (t *genericTable) convertTuples(row message.Row) []interface{} {
+	var err error
 	res := make([]interface{}, 0)
-	for i, col := range row {
-		colName := t.cfg.TupleColumns[i]
-		if _, ok := t.columnMapping[colName]; !ok {
+
+	for colId, col := range t.tupleColumns {
+		var val interface{}
+		if _, ok := t.columnMapping[col.Name]; !ok {
 			continue
 		}
 
-		if col.Kind != message.TupleText {
-			continue
-		}
-
-		val, err := convert(string(col.Value), t.columnMapping[colName], t.cfg.PgColumns[colName])
-		if err != nil {
-			panic(err)
+		if row[colId].Kind != message.TupleNull {
+			val, err = convert(string(row[colId].Value), t.columnMapping[col.Name], t.cfg.PgColumns[col.Name])
+			if err != nil {
+				panic(err)
+			}
 		}
 
 		res = append(res, val)
@@ -465,7 +466,7 @@ func (t *genericTable) convertTuples(row message.Row) []interface{} {
 }
 
 // gets row from the copy
-func (t *genericTable) convertStrings(fields []sql.NullString) ([]interface{}, error) {
+func (t *genericTable) syncConvertStrings(fields []sql.NullString) ([]interface{}, error) {
 	res := make([]interface{}, 0)
 	for i, field := range fields {
 		pgColName := t.pgUsedColumns[i]
@@ -504,4 +505,11 @@ func (t *genericTable) Truncate() error {
 // Init performs initialization
 func (t *genericTable) Init() error {
 	return t.truncateBufTable()
+}
+
+// Relation processes relation message
+func (t *genericTable) Relation(lsn utils.LSN, rel message.Relation) error {
+	t.tupleColumns = rel.Columns
+
+	return nil
 }

@@ -42,7 +42,7 @@ func (t *collapsingMergeTreeTable) Sync(pgTx *pgx.Tx) error {
 func (t *collapsingMergeTreeTable) Write(p []byte) (int, error) {
 	var row []interface{}
 
-	row, n, err := t.convertIntoRow(p)
+	row, n, err := t.syncConvertIntoRow(p)
 	if err != nil {
 		return 0, err
 	}

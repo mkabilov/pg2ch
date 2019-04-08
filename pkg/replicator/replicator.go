@@ -28,6 +28,7 @@ type clickHouseTable interface {
 	Insert(lsn utils.LSN, new message.Row) (mergeIsNeeded bool, err error)
 	Update(lsn utils.LSN, old message.Row, new message.Row) (mergeIsNeeded bool, err error)
 	Delete(lsn utils.LSN, old message.Row) (mergeIsNeeded bool, err error)
+	Relation(lsn utils.LSN, relation message.Relation) error
 	Truncate() error
 	Sync(*pgx.Tx) error
 	Init() error
@@ -82,15 +83,6 @@ func New(cfg config.Config) *Replicator {
 
 func (r *Replicator) newTable(tblName config.PgTableName, tblConfig config.Table) (clickHouseTable, error) {
 	switch tblConfig.Engine {
-	//case config.VersionedCollapsingMergeTree:
-	//	if tblConfig.SignColumn == "" {
-	//		return nil, fmt.Errorf("VersionedCollapsingMergeTree requires sign column to be set")
-	//	}
-	//	if tblConfig.VerColumn == "" {
-	//		return nil, fmt.Errorf("VersionedCollapsingMergeTree requires version column to be set")
-	//	}
-	//
-	//	return tableengines.NewVersionedCollapsingMergeTree(r.ctx, r.chConn, tblConfig), nil
 	case config.ReplacingMergeTree:
 		if tblConfig.VerColumn == "" {
 			return nil, fmt.Errorf("ReplacingMergeTree requires version column to be set")
@@ -245,7 +237,7 @@ func (r *Replicator) saveCurrentState() error {
 
 func (r *Replicator) initTables(tx *pgx.Tx) error {
 	for tblName := range r.cfg.Tables {
-		tblConfig, err := r.fetchTableInfo(tx, tblName)
+		tblConfig, err := r.fetchTableConfig(tx, tblName)
 		if err != nil {
 			return fmt.Errorf("could not get %s table config: %v", tblName.String(), err)
 		}
@@ -569,6 +561,15 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 			}
 		}
 		r.inTxTables = make(map[config.PgTableName]struct{})
+	case message.Relation:
+		tbl := r.getTable(v.OID)
+		if tbl == nil {
+			break
+		}
+
+		if err := tbl.Relation(lsn, v); err != nil {
+			return fmt.Errorf("could not process relation message: %v", err)
+		}
 	case message.Insert:
 		tbl := r.getTable(v.RelationOID)
 		if tbl == nil {
@@ -630,7 +631,7 @@ func (r *Replicator) advanceLSN() {
 	r.consumer.AdvanceLSN(r.finalLSN)
 }
 
-func (r *Replicator) fetchTableInfo(tx *pgx.Tx, tblName config.PgTableName) (config.Table, error) {
+func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (config.Table, error) {
 	var err error
 	cfg := r.cfg.Tables[tblName]
 

@@ -76,7 +76,7 @@ type Table struct {
 	Columns                 map[string]string `yaml:"columns"`
 
 	PgTableName   PgTableName         `yaml:"-"`
-	TupleColumns  []string            `yaml:"-"`
+	TupleColumns  []string            `yaml:"-"` // columns in the order they are in the table
 	PgColumns     map[string]PgColumn `yaml:"-"`
 	ColumnMapping map[string]ChColumn `yaml:"-"`
 }
