@@ -497,7 +497,7 @@ func (r *Replicator) pgCreateTempRepSlot(tx *pgx.Tx) (utils.LSN, error) {
 	)
 
 	row := tx.QueryRow(fmt.Sprintf("CREATE_REPLICATION_SLOT %s TEMPORARY LOGICAL %s USE_SNAPSHOT",
-		fmt.Sprintf("tempslot_%d", r.pgConn.PID()), utils.OutputPlugin))
+		fmt.Sprintf("clickhouse_tempslot_%d", r.pgConn.PID()), utils.OutputPlugin))
 
 	if err := row.Scan(&r.tempSlotName, &basebackupLSN, &snapshotName, &plugin); err != nil {
 		return utils.InvalidLSN, fmt.Errorf("could not scan: %v", err)
