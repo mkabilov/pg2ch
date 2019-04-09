@@ -144,6 +144,7 @@ func (t *tableEngine) UnmarshalYAML(unmarshal func(interface{}) error) error {
 }
 
 func (tn *PgTableName) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	//TODO: improve parser, use regexp
 	var val string
 
 	if err := unmarshal(&val); err != nil {
@@ -168,12 +169,16 @@ func (tn *PgTableName) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
+func (tn PgTableName) MarshalYAML() (interface{}, error) {
+	return tn.String(), nil
+}
+
 func (tn *PgTableName) String() string {
 	if tn.SchemaName == publicSchema {
-		return fmt.Sprintf("%q", tn.TableName)
+		return fmt.Sprintf("%s", tn.TableName)
 	}
 
-	return fmt.Sprintf(`%q.%q`, tn.SchemaName, tn.TableName)
+	return fmt.Sprintf(`%s.%s`, tn.SchemaName, tn.TableName)
 }
 
 // New instantiates config

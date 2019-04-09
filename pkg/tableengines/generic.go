@@ -508,8 +508,7 @@ func (t *genericTable) Init() error {
 }
 
 // Relation processes relation message
-func (t *genericTable) Relation(lsn utils.LSN, rel message.Relation) error {
+func (t *genericTable) Relation(rel message.Relation) {
+	//TODO: suggest alter table message for adding/deleting new/old columns on clickhouse side
 	t.tupleColumns = rel.Columns
-
-	return nil
 }

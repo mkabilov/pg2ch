@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -28,7 +27,7 @@ type clickHouseTable interface {
 	Insert(lsn utils.LSN, new message.Row) (mergeIsNeeded bool, err error)
 	Update(lsn utils.LSN, old message.Row, new message.Row) (mergeIsNeeded bool, err error)
 	Delete(lsn utils.LSN, old message.Row) (mergeIsNeeded bool, err error)
-	Relation(lsn utils.LSN, relation message.Relation) error
+	Relation(relation message.Relation)
 	Truncate() error
 	Sync(*pgx.Tx) error
 	Init() error
@@ -49,8 +48,9 @@ type Replicator struct {
 	oidName      map[utils.OID]config.PgTableName
 	tempSlotName string
 
-	finalLSN utils.LSN
-	startLSN utils.LSN // lsn to start consuming changes from
+	finalLSN        utils.LSN
+	tableLSN        map[config.PgTableName]utils.LSN
+	saveStateNeeded bool
 
 	tablesToMergeMutex *sync.Mutex
 	tablesToMerge      map[config.PgTableName]struct{} // tables to be merged
@@ -60,10 +60,8 @@ type Replicator struct {
 }
 
 type state struct {
-	StartLSN utils.LSN `yaml:"start_lsn"`
+	Tables map[config.PgTableName]utils.LSN `yaml:"tables"`
 }
-
-var errNoStateFile = errors.New("no state file")
 
 func New(cfg config.Config) *Replicator {
 	r := Replicator{
@@ -75,6 +73,7 @@ func New(cfg config.Config) *Replicator {
 		tablesToMergeMutex: &sync.Mutex{},
 		tablesToMerge:      make(map[config.PgTableName]struct{}),
 		inTxTables:         make(map[config.PgTableName]struct{}),
+		tableLSN:           make(map[config.PgTableName]utils.LSN),
 	}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 
@@ -145,15 +144,21 @@ func (r *Replicator) createReplSlotAndInitTables(tx *pgx.Tx) error {
 	}
 
 	for tblName, tbl := range r.tables {
+		if _, ok := r.tableLSN[tblName]; ok {
+			continue
+		}
+
 		if err := tbl.Sync(tx); err != nil {
 			return fmt.Errorf("could not sync %s: %v", tblName.String(), err)
 		}
+		r.tableLSN[tblName] = lsn
+		r.saveStateNeeded = true
 	}
 
 	if err := r.pgDropRepSlot(tx); err != nil {
 		return fmt.Errorf("could not drop replication slot: %v", err)
 	}
-	r.startLSN, r.finalLSN = lsn, lsn
+	r.finalLSN = lsn
 
 	return nil
 }
@@ -186,33 +191,35 @@ func (r *Replicator) getCurrentState() error {
 			return fmt.Errorf("could not create file: %v", err)
 		}
 
-		return errNoStateFile
+		return nil
 	}
 
 	if stat, err := r.stateLSNfp.Stat(); err != nil {
 		return fmt.Errorf("could not get file stats: %v", err)
 	} else if stat.Size() == 0 {
-		return errNoStateFile
+		return nil
 	}
 
 	if err := yaml.NewDecoder(r.stateLSNfp).Decode(&s); err != nil {
 		log.Printf("could not decode state yaml: %v", err)
-		return errNoStateFile
+		return nil
 	}
 
-	if !s.StartLSN.IsValid() {
-		return errNoStateFile
+	if len(s.Tables) != 0 {
+		r.tableLSN = s.Tables
 	}
-
-	r.startLSN = s.StartLSN
 
 	return nil
 }
 
 func (r *Replicator) saveCurrentState() error {
+	if !r.saveStateNeeded {
+		return nil
+	}
+
 	buf := bytes.NewBuffer(nil)
 
-	if err := yaml.NewEncoder(buf).Encode(state{StartLSN: r.finalLSN}); err != nil {
+	if err := yaml.NewEncoder(buf).Encode(state{Tables: r.tableLSN}); err != nil {
 		return fmt.Errorf("could not encode: %v", err)
 	}
 	if _, err := r.stateLSNfp.Seek(0, 0); err != nil {
@@ -231,6 +238,7 @@ func (r *Replicator) saveCurrentState() error {
 	if err := utils.SyncFileAndDirectory(r.stateLSNfp); err != nil {
 		return fmt.Errorf("could not sync state file %q: %v", r.cfg.LsnStateFilepath, err)
 	}
+	r.saveStateNeeded = false
 
 	return nil
 }
@@ -258,6 +266,21 @@ func (r *Replicator) initTables(tx *pgx.Tx) error {
 	return nil
 }
 
+func (r *Replicator) minLSN() utils.LSN {
+	result := utils.InvalidLSN
+	if len(r.tableLSN) == 0 {
+		return result
+	}
+
+	for _, lsn := range r.tableLSN {
+		if !result.IsValid() || lsn < result {
+			result = lsn
+		}
+	}
+
+	return result
+}
+
 func (r *Replicator) Run() error {
 	if err := r.chConnect(); err != nil {
 		return fmt.Errorf("could not connect to clickhouse: %v", err)
@@ -273,15 +296,25 @@ func (r *Replicator) Run() error {
 		return err
 	}
 
-	if err := r.getCurrentState(); err == errNoStateFile { // sync is needed
+	if err := r.getCurrentState(); err != nil {
+		return fmt.Errorf("could not get start lsn positions: %v", err)
+	}
+
+	syncNeeded := false
+	for tblName := range r.cfg.Tables {
+		if _, ok := r.tableLSN[tblName]; !ok {
+			syncNeeded = true
+			break
+		}
+	}
+
+	if syncNeeded {
 		if err := r.createReplSlotAndInitTables(tx); err != nil {
 			return fmt.Errorf("could not sync tables: %v", err)
 		}
 		if err := r.saveCurrentState(); err != nil {
 			return fmt.Errorf("could not init state file: %v", err)
 		}
-	} else if err != nil {
-		return fmt.Errorf("could not get start LSN: %v", err)
 	} else if err := r.initTables(tx); err != nil {
 		return fmt.Errorf("could not init tables: %v", err)
 	}
@@ -303,7 +336,9 @@ func (r *Replicator) Run() error {
 		return fmt.Errorf("could not close pg connection: %v", err)
 	}
 
-	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Postgres.ConnConfig, r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.startLSN)
+	startLSN := r.minLSN()
+
+	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Postgres.ConnConfig, r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, startLSN)
 
 	if err := r.consumer.Run(r); err != nil {
 		return err
@@ -326,7 +361,7 @@ func (r *Replicator) Run() error {
 		log.Printf("could not save current state: %v", err)
 	}
 
-	r.consumer.AdvanceLSN(r.finalLSN)
+	r.consumer.AdvanceLSN(startLSN)
 
 	if err := r.stateLSNfp.Close(); err != nil {
 		log.Printf("could not close state file: %v", err)
@@ -499,15 +534,25 @@ loop:
 	}
 }
 
-func (r *Replicator) getTable(oid utils.OID) clickHouseTable {
+// TODO: merge with getTable
+func (r *Replicator) skipTableMessage(tblName config.PgTableName) bool {
+	lsn, ok := r.tableLSN[tblName]
+	if !ok {
+		return false
+	}
+
+	return r.finalLSN <= lsn
+}
+
+func (r *Replicator) getTable(oid utils.OID) (config.PgTableName, clickHouseTable) {
 	tblName, ok := r.oidName[oid]
 	if !ok {
-		return nil
+		return config.PgTableName{}, nil
 	}
 
 	tbl, ok := r.tables[tblName]
 	if !ok {
-		return nil
+		return config.PgTableName{}, nil
 	}
 
 	// TODO: skip adding tables with no buffer table
@@ -519,10 +564,11 @@ func (r *Replicator) getTable(oid utils.OID) clickHouseTable {
 		r.tablesToMerge[tblName] = struct{}{}
 	}
 
-	return tbl
+	return tblName, tbl
 }
 
 func (r *Replicator) mergeTables() error {
+	r.saveStateNeeded = r.saveStateNeeded || len(r.tablesToMerge) > 0
 	for tblName := range r.tablesToMerge {
 		if _, ok := r.inTxTables[tblName]; ok {
 			continue
@@ -533,6 +579,7 @@ func (r *Replicator) mergeTables() error {
 		}
 
 		delete(r.tablesToMerge, tblName)
+		r.tableLSN[tblName] = r.finalLSN
 	}
 	r.advanceLSN()
 
@@ -541,18 +588,12 @@ func (r *Replicator) mergeTables() error {
 
 // HandleMessage processes the incoming wal message
 func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
-	if v, ok := msg.(message.Begin); ok {
-		r.finalLSN = v.FinalLSN
-	}
-
-	if r.finalLSN <= r.startLSN {
-		return nil
-	}
 	r.tablesToMergeMutex.Lock()
 	defer r.tablesToMergeMutex.Unlock()
 
 	switch v := msg.(type) {
 	case message.Begin:
+		r.finalLSN = v.FinalLSN
 		r.curTxMergeIsNeeded = false
 	case message.Commit:
 		if r.curTxMergeIsNeeded {
@@ -562,17 +603,15 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 		}
 		r.inTxTables = make(map[config.PgTableName]struct{})
 	case message.Relation:
-		tbl := r.getTable(v.OID)
-		if tbl == nil {
+		tblName, tbl := r.getTable(v.OID)
+		if tbl == nil || r.skipTableMessage(tblName) {
 			break
 		}
 
-		if err := tbl.Relation(lsn, v); err != nil {
-			return fmt.Errorf("could not process relation message: %v", err)
-		}
+		tbl.Relation(v)
 	case message.Insert:
-		tbl := r.getTable(v.RelationOID)
-		if tbl == nil {
+		tblName, tbl := r.getTable(v.RelationOID)
+		if tbl == nil || r.skipTableMessage(tblName) {
 			break
 		}
 
@@ -582,8 +621,8 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
 		}
 	case message.Update:
-		tbl := r.getTable(v.RelationOID)
-		if tbl == nil {
+		tblName, tbl := r.getTable(v.RelationOID)
+		if tbl == nil || r.skipTableMessage(tblName) {
 			break
 		}
 
@@ -593,8 +632,8 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
 		}
 	case message.Delete:
-		tbl := r.getTable(v.RelationOID)
-		if tbl == nil {
+		tblName, tbl := r.getTable(v.RelationOID)
+		if tbl == nil || r.skipTableMessage(tblName) {
 			break
 		}
 
@@ -605,7 +644,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 		}
 	case message.Truncate:
 		for _, oid := range v.RelationOIDs {
-			if tbl := r.getTable(oid); tbl == nil {
+			if tblName, tbl := r.getTable(oid); tbl == nil || r.skipTableMessage(tblName) {
 				continue
 			} else {
 				if err := tbl.Truncate(); err != nil {
@@ -628,7 +667,7 @@ func (r *Replicator) advanceLSN() {
 		return
 	}
 
-	r.consumer.AdvanceLSN(r.finalLSN)
+	r.consumer.AdvanceLSN(r.minLSN())
 }
 
 func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (config.Table, error) {
