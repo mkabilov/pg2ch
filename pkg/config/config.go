@@ -72,6 +72,7 @@ type Table struct {
 	FlushThreshold          int               `yaml:"flush_threshold"`
 	InitSyncSkip            bool              `yaml:"init_sync_skip"`
 	InitSyncSkipBufferTable bool              `yaml:"init_sync_skip_buffer_table"`
+	InitSyncSkipTruncate    bool              `yaml:"init_sync_skip_truncate"`
 	EmptyValues             map[string]string `yaml:"empty_values"`
 	Columns                 map[string]string `yaml:"columns"`
 

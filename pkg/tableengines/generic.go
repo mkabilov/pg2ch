@@ -171,8 +171,10 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	} else {
 		log.Printf("Copy from %s postgres table to %q clickhouse table started",
 			t.cfg.PgTableName.String(), t.cfg.ChMainTable)
-		if err := t.truncateMainTable(); err != nil {
-			return fmt.Errorf("could not truncate main table: %v", err)
+		if !t.cfg.InitSyncSkipTruncate {
+			if err := t.truncateMainTable(); err != nil {
+				return fmt.Errorf("could not truncate main table: %v", err)
+			}
 		}
 	}
 
@@ -193,8 +195,10 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	t.bufferRowId = 0
 
 	if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
-		if err := t.truncateMainTable(); err != nil {
-			return fmt.Errorf("could not truncate main table: %v", err)
+		if !t.cfg.InitSyncSkipTruncate {
+			if err := t.truncateMainTable(); err != nil {
+				return fmt.Errorf("could not truncate main table: %v", err)
+			}
 		}
 
 		t.bufferFlushCnt++

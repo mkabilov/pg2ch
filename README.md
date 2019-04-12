@@ -25,7 +25,8 @@ tables:
         buffer_row_id: {clickhouse buffer table column name for row id} 
         init_sync_skip: {skip initial copy of the data}
         init_sync_skip_buffer_table: {if true bypass buffer_table and write directly to the main_table on initial sync copy}
-                                     # makes sense in case of huge tables            
+                                     # makes sense in case of huge tables        
+        init_sync_skip_truncate: {skip truncate of the main_table during init sync}                                 
         engine: {clickhouse table engine: MergeTree, ReplacingMergeTree or CollapsingMergeTree}
         max_buffer_length: {number of DML(insert/update/delete) commands to store in the memory before flushing to the buffer/main table } 
         merge_threshold: {if buffer table specified, number of buffer flushed before moving data from buffer to the main table}
