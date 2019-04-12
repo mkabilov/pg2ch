@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 )
@@ -39,20 +40,21 @@ var pgToChMap = map[string]string{
 func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
 	chType, ok := pgToChMap[pgColumn.BaseType]
 	if !ok {
-		return "", fmt.Errorf("could not convert type %s", pgColumn.BaseType)
+		log.Printf("pg type %q will be treated as String", pgColumn.BaseType)
+		chType = ChString
 	}
 
 	switch pgColumn.BaseType {
-	case "decimal":
+	case PgDecimal:
 		fallthrough
-	case "numeric":
+	case PgNumeric:
 		if pgColumn.Ext == nil {
 			return "", fmt.Errorf("precision must be specified for the numeric type")
 		}
 		chType = fmt.Sprintf("%s(%d, %d)", chType, pgColumn.Ext[0], pgColumn.Ext[1])
-	case "character":
+	case PgCharacter:
 		fallthrough
-	case "char":
+	case PgChar:
 		if pgColumn.Ext == nil {
 			return "", fmt.Errorf("length must be specified for character type")
 		}
