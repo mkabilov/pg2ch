@@ -184,9 +184,9 @@ func (r *Replicator) getCurrentState() error {
 		err error
 	)
 
-	r.stateLSNfp, err = os.OpenFile(r.cfg.LsnStateFilepath, os.O_RDWR, os.ModePerm)
+	r.stateLSNfp, err = os.OpenFile(r.cfg.LsnStateFilepath, os.O_RDWR, os.FileMode(0666))
 	if os.IsNotExist(err) {
-		r.stateLSNfp, err = os.OpenFile(r.cfg.LsnStateFilepath, os.O_WRONLY|os.O_CREATE, os.ModePerm)
+		r.stateLSNfp, err = os.OpenFile(r.cfg.LsnStateFilepath, os.O_WRONLY|os.O_CREATE, os.FileMode(0666))
 		if err != nil {
 			return fmt.Errorf("could not create file: %v", err)
 		}
