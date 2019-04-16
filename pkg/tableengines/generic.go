@@ -336,7 +336,7 @@ func (t *genericTable) attemptFlushBuffer() error {
 			}
 
 			if err := t.stmntExec(row); err != nil {
-				return fmt.Errorf("could not exec: %v", err)
+				return fmt.Errorf("could not exec(%#v): %v", row, err)
 			}
 		}
 	}
