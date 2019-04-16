@@ -232,9 +232,6 @@ func (t *genericTable) bufferAppend(cmdSet commandSet) {
 		t.bufferRowId++
 	}
 
-	log.Printf("appending new item: %#v", bufItem)
-	log.Printf("new buffer length: %v", t.bufferRowId)
-
 	t.buffer[t.bufferCmdId] = bufItem
 	t.bufferCmdId++
 }
