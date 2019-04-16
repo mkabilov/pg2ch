@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
+	"github.com/mkabilov/pg2ch/pkg/message"
 )
 
 func TableChColumns(chConn *sql.DB, databaseName, chTableName string) (map[string]config.ChColumn, error) {
@@ -38,8 +39,8 @@ func TableChColumns(chConn *sql.DB, databaseName, chTableName string) (map[strin
 }
 
 // TablePgColumns returns postgresql table's columns structure
-func TablePgColumns(tx *pgx.Tx, tblName config.PgTableName) ([]string, map[string]config.PgColumn, error) {
-	columns := make([]string, 0)
+func TablePgColumns(tx *pgx.Tx, tblName config.PgTableName) ([]message.Column, map[string]config.PgColumn, error) {
+	columns := make([]message.Column, 0)
 	pgColumns := make(map[string]config.PgColumn)
 
 	rows, err := tx.Query(`select
@@ -47,7 +48,9 @@ func TablePgColumns(tx *pgx.Tx, tblName config.PgTableName) ([]string, map[strin
   not a.attnotnull,
   a.atttypid::regtype::text,
   string_to_array(substring(format_type(a.atttypid, a.atttypmod) from '\((.*)\)'), ',') as ext,
-  coalesce(ai.attnum, 0) as pk_attnum
+  coalesce(ai.attnum, 0) as pk_attnum,
+  a.atttypmod,
+  a.atttypid
 from pg_class c
   inner join pg_namespace n on n.oid = c.relnamespace
   inner join pg_attribute a on a.attrelid = c.oid
@@ -70,9 +73,11 @@ order by
 			colName, baseType string
 			pgColumn          config.PgColumn
 			extStr            []string
+			attTypMod         int32
+			attOID            OID
 		)
 
-		if err := rows.Scan(&colName, &pgColumn.IsNullable, &baseType, &extStr, &pgColumn.PkCol); err != nil {
+		if err := rows.Scan(&colName, &pgColumn.IsNullable, &baseType, &extStr, &pgColumn.PkCol, &attTypMod, &attOID); err != nil {
 			return nil, nil, fmt.Errorf("could not scan: %v", err)
 		}
 
@@ -90,7 +95,12 @@ order by
 			}
 		}
 
-		columns = append(columns, colName)
+		columns = append(columns, message.Column{
+			IsKey:   pgColumn.PkCol > 0,
+			Name:    colName,
+			TypeOID: attOID,
+			Mode:    attTypMod,
+		})
 		pgColumns[colName] = pgColumn
 	}
 

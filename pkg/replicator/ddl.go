@@ -37,18 +37,18 @@ func (r *Replicator) GenerateChDDL() error {
 		if len(tblCfg.Columns) == 0 {
 			tblCfg.Columns = make(map[string]string)
 			for _, pgCol := range tblCfg.TupleColumns {
-				tblCfg.Columns[pgCol] = pgCol
+				tblCfg.Columns[pgCol.Name] = pgCol.Name
 			}
 		}
 
 		chColumnDDLs := make([]string, 0)
-		for _, pgColName := range tblCfg.TupleColumns {
-			chColName, ok := tblCfg.Columns[pgColName]
+		for _, pgCol := range tblCfg.TupleColumns {
+			chColName, ok := tblCfg.Columns[pgCol.Name]
 			if !ok {
 				continue
 			}
 
-			pgCol := tblCfg.PgColumns[pgColName]
+			pgCol := tblCfg.PgColumns[pgCol.Name]
 			chColDDL, err := utils.ToClickHouseType(pgCol)
 			if err != nil {
 				return fmt.Errorf("could not get clickhouse column definition: %v", err)

@@ -69,26 +69,27 @@ func newGenericTable(ctx context.Context, chConn *sql.DB, tblCfg config.Table) g
 		pgUsedColumns: make([]string, 0),
 		emptyValues:   make(map[int]interface{}),
 		flushMutex:    &sync.Mutex{},
+		tupleColumns:  tblCfg.TupleColumns,
 	}
 
 	t.buffer = make([]bufCommand, t.cfg.MaxBufferLength)
 
-	for pgColId, pgColName := range tblCfg.TupleColumns {
-		chCol, ok := tblCfg.ColumnMapping[pgColName]
+	for pgColId, pgCol := range t.tupleColumns {
+		chCol, ok := tblCfg.ColumnMapping[pgCol.Name]
 		if !ok {
 			continue
 		}
 
 		if emptyVal, ok := tblCfg.EmptyValues[chCol.Name]; ok {
-			if val, err := convert(emptyVal, chCol, t.cfg.PgColumns[pgColName]); err == nil {
+			if val, err := convert(emptyVal, chCol, t.cfg.PgColumns[pgCol.Name]); err == nil {
 				t.emptyValues[pgColId] = val
 			} else {
 				log.Fatalf("wrong value for %q empty value: %v", chCol.Name, err)
 			}
 		}
-		t.columnMapping[pgColName] = chCol
+		t.columnMapping[pgCol.Name] = chCol
 		t.chUsedColumns = append(t.chUsedColumns, chCol.Name)
-		t.pgUsedColumns = append(t.pgUsedColumns, pgColName)
+		t.pgUsedColumns = append(t.pgUsedColumns, pgCol.Name)
 	}
 
 	return t
@@ -230,6 +231,9 @@ func (t *genericTable) bufferAppend(cmdSet commandSet) {
 		bufItem[i] = bufRow{rowID: t.bufferRowId, data: cmdSet[i]}
 		t.bufferRowId++
 	}
+
+	log.Printf("appending new item: %#v", bufItem)
+	log.Printf("new buffer length: %v", t.bufferRowId)
 
 	t.buffer[t.bufferCmdId] = bufItem
 	t.bufferCmdId++
@@ -511,8 +515,8 @@ func (t *genericTable) Init() error {
 	return t.truncateBufTable()
 }
 
-// Relation processes relation message
-func (t *genericTable) Relation(rel message.Relation) {
+// SetTupleColumns sets the tuple columns
+func (t *genericTable) SetTupleColumns(tupleColumns []message.Column) {
 	//TODO: suggest alter table message for adding/deleting new/old columns on clickhouse side
-	t.tupleColumns = rel.Columns
+	t.tupleColumns = tupleColumns
 }

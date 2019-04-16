@@ -27,7 +27,7 @@ type clickHouseTable interface {
 	Insert(lsn utils.LSN, new message.Row) (mergeIsNeeded bool, err error)
 	Update(lsn utils.LSN, old message.Row, new message.Row) (mergeIsNeeded bool, err error)
 	Delete(lsn utils.LSN, old message.Row) (mergeIsNeeded bool, err error)
-	Relation(relation message.Relation)
+	SetTupleColumns([]message.Column)
 	Truncate() error
 	Sync(*pgx.Tx) error
 	Init() error
@@ -608,7 +608,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 			break
 		}
 
-		tbl.Relation(v)
+		tbl.SetTupleColumns(v.Columns)
 	case message.Insert:
 		tblName, tbl := r.getTable(v.RelationOID)
 		if tbl == nil || r.skipTableMessage(tblName) {
@@ -695,10 +695,10 @@ func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (c
 		}
 	} else {
 		for _, pgCol := range cfg.TupleColumns {
-			if chColCfg, ok := chColumns[pgCol]; !ok {
+			if chColCfg, ok := chColumns[pgCol.Name]; !ok {
 				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", pgCol, cfg.ChMainTable)
 			} else {
-				cfg.ColumnMapping[pgCol] = chColCfg
+				cfg.ColumnMapping[pgCol.Name] = chColCfg
 			}
 		}
 	}

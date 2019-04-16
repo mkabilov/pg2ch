@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx"
 	"gopkg.in/yaml.v2"
+
+	"github.com/mkabilov/pg2ch/pkg/message"
 )
 
 const (
@@ -77,7 +79,7 @@ type Table struct {
 	Columns                 map[string]string `yaml:"columns"`
 
 	PgTableName   PgTableName         `yaml:"-"`
-	TupleColumns  []string            `yaml:"-"` // columns in the order they are in the table
+	TupleColumns  []message.Column    `yaml:"-"` // columns in the order they are in the table
 	PgColumns     map[string]PgColumn `yaml:"-"`
 	ColumnMapping map[string]ChColumn `yaml:"-"`
 }
