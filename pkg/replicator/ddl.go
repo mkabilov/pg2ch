@@ -5,7 +5,8 @@ import (
 	"strings"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
-	"github.com/mkabilov/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
+	"github.com/mkabilov/pg2ch/pkg/utils/tableinfo"
 )
 
 //GenerateChDDL generates clickhouse table DDLs
@@ -29,7 +30,7 @@ func (r *Replicator) GenerateChDDL() error {
 
 		tblCfg := r.cfg.Tables[tblName]
 
-		tblCfg.TupleColumns, tblCfg.PgColumns, err = utils.TablePgColumns(tx, tblName)
+		tblCfg.TupleColumns, tblCfg.PgColumns, err = tableinfo.TablePgColumns(tx, tblName)
 		if err != nil {
 			return fmt.Errorf("could not get columns for %s postgres table: %v", tblName.String(), err)
 		}
@@ -49,7 +50,7 @@ func (r *Replicator) GenerateChDDL() error {
 			}
 
 			pgCol := tblCfg.PgColumns[pgCol.Name]
-			chColDDL, err := utils.ToClickHouseType(pgCol)
+			chColDDL, err := chutils.ToClickHouseType(pgCol)
 			if err != nil {
 				return fmt.Errorf("could not get clickhouse column definition: %v", err)
 			}

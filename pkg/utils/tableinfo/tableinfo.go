@@ -1,4 +1,4 @@
-package utils
+package tableinfo
 
 import (
 	"database/sql"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
+	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
 func TableChColumns(chConn *sql.DB, databaseName, chTableName string) (map[string]config.ChColumn, error) {
@@ -74,7 +75,7 @@ order by
 			pgColumn          config.PgColumn
 			extStr            []string
 			attTypMod         int32
-			attOID            OID
+			attOID            utils.OID
 		)
 
 		if err := rows.Scan(&colName, &pgColumn.IsNullable, &baseType, &extStr, &pgColumn.PkCol, &attTypMod, &attOID); err != nil {

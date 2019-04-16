@@ -21,6 +21,7 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/message"
 	"github.com/mkabilov/pg2ch/pkg/tableengines"
 	"github.com/mkabilov/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/utils/tableinfo"
 )
 
 type clickHouseTable interface {
@@ -674,12 +675,12 @@ func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (c
 	var err error
 	cfg := r.cfg.Tables[tblName]
 
-	cfg.TupleColumns, cfg.PgColumns, err = utils.TablePgColumns(tx, tblName)
+	cfg.TupleColumns, cfg.PgColumns, err = tableinfo.TablePgColumns(tx, tblName)
 	if err != nil {
 		return cfg, fmt.Errorf("could not get columns for %s postgres table: %v", tblName.String(), err)
 	}
 
-	chColumns, err := utils.TableChColumns(r.chConn, r.cfg.ClickHouse.Database, cfg.ChMainTable)
+	chColumns, err := tableinfo.TableChColumns(r.chConn, r.cfg.ClickHouse.Database, cfg.ChMainTable)
 	if err != nil {
 		return cfg, fmt.Errorf("could not get columns for %q clickhouse table: %v", cfg.ChMainTable, err)
 	}
