@@ -432,7 +432,7 @@ func convert(val string, chType config.ChColumn, pgType config.PgColumn) (interf
 	case utils.ChFloat32:
 		return strconv.ParseFloat(val, 32)
 	case utils.ChDecimal:
-		//TODO
+		return strconv.ParseFloat(val, 64)
 	case utils.ChFloat64:
 		return strconv.ParseFloat(val, 64)
 	case utils.ChFixedString:
