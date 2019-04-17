@@ -316,6 +316,7 @@ func (t *genericTable) flushBuffer() error {
 	return err
 }
 
+// flush from memory to the buffer/main table
 func (t *genericTable) attemptFlushBuffer() error {
 	if t.bufferCmdId == 0 {
 		return nil

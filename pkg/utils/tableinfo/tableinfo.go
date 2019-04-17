@@ -142,5 +142,9 @@ func parseChType(chType string) (col config.Column) {
 		col.BaseType = "FixedString"
 	}
 
+	if strings.HasPrefix(col.BaseType, "Decimal(") {
+		col.BaseType = "Decimal"
+	}
+
 	return
 }
