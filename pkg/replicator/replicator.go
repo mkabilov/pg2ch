@@ -668,7 +668,7 @@ func (r *Replicator) advanceLSN() {
 		return
 	}
 
-	r.consumer.AdvanceLSN(r.minLSN())
+	r.consumer.AdvanceLSN(r.finalLSN)
 }
 
 func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (config.Table, error) {
