@@ -352,9 +352,9 @@ func (r *Replicator) Run() error {
 	r.cancel()
 	r.consumer.Wait()
 
-	for tblName, tbl := range r.tables {
+	for _, tbl := range r.tables {
 		if err := tbl.FlushToMainTable(); err != nil {
-			log.Printf("could not flush %s to main table: %v", tblName.String(), err)
+			log.Println(err)
 		}
 	}
 

@@ -154,6 +154,18 @@ func (t *genericTable) begin() (err error) {
 	return
 }
 
+func (t *genericTable) pgStatLiveTuples(pgTx *pgx.Tx) (int64, error) {
+	var rows sql.NullInt64
+	err := pgTx.QueryRow("select n_live_tup from pg_stat_all_tables where schemaname = $1 and relname = $2",
+		t.cfg.PgTableName.SchemaName,
+		t.cfg.PgTableName.TableName).Scan(&rows)
+	if err != nil || !rows.Valid {
+		return 0, err
+	}
+
+	return rows.Int64, nil
+}
+
 func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	if t.cfg.InitSyncSkip {
 		return nil
@@ -163,15 +175,20 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		return fmt.Errorf("could not begin: %v", err)
 	}
 
+	tblLiveTuples, err := t.pgStatLiveTuples(pgTx)
+	if err != nil {
+		log.Printf("Could not get approx number of rows in the source table: %v", err)
+	}
+
 	if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
-		log.Printf("Copy from %s postgres table to %q clickhouse table via %q buffer table started",
-			t.cfg.PgTableName.String(), t.cfg.ChMainTable, t.cfg.ChBufferTable)
+		log.Printf("Copy from %s postgres table to %q clickhouse table via %q buffer table started. ~%v rows to copy",
+			t.cfg.PgTableName.String(), t.cfg.ChMainTable, t.cfg.ChBufferTable, tblLiveTuples)
 		if err := t.truncateBufTable(); err != nil {
 			return fmt.Errorf("could not truncate buffer table: %v", err)
 		}
 	} else {
-		log.Printf("Copy from %s postgres table to %q clickhouse table started",
-			t.cfg.PgTableName.String(), t.cfg.ChMainTable)
+		log.Printf("Copy from %s postgres table to %q clickhouse table started. ~%v rows to copy",
+			t.cfg.PgTableName.String(), t.cfg.ChMainTable, tblLiveTuples)
 		if !t.cfg.InitSyncSkipTruncate {
 			if err := t.truncateMainTable(); err != nil {
 				return fmt.Errorf("could not truncate main table: %v", err)
