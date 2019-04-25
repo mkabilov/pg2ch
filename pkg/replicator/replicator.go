@@ -649,8 +649,8 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 		}
 		r.inTxTables = make(map[config.PgTableName]struct{})
 	case message.Relation:
-		tblName, tbl := r.getTable(v.OID)
-		if tbl == nil || r.skipTableMessage(tblName) {
+		_, tbl := r.getTable(v.OID)
+		if tbl == nil {
 			break
 		}
 
@@ -742,7 +742,7 @@ func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (c
 	} else {
 		for _, pgCol := range cfg.TupleColumns {
 			if chColCfg, ok := chColumns[pgCol.Name]; !ok {
-				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", pgCol, cfg.ChMainTable)
+				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", pgCol.Name, cfg.ChMainTable)
 			} else {
 				cfg.ColumnMapping[pgCol.Name] = chColCfg
 			}
