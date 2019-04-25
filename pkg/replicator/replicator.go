@@ -635,6 +635,8 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 	r.tablesToMergeMutex.Lock()
 	defer r.tablesToMergeMutex.Unlock()
 
+	log.Printf("%v: %s", lsn, msg.String())
+
 	switch v := msg.(type) {
 	case message.Begin:
 		r.finalLSN = v.FinalLSN
@@ -649,6 +651,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 	case message.Relation:
 		tblName, tbl := r.getTable(v.OID)
 		if tbl == nil || r.skipTableMessage(tblName) {
+			log.Printf("skipped")
 			break
 		}
 
@@ -656,6 +659,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 	case message.Insert:
 		tblName, tbl := r.getTable(v.RelationOID)
 		if tbl == nil || r.skipTableMessage(tblName) {
+			log.Printf("skipped")
 			break
 		}
 
@@ -667,6 +671,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 	case message.Update:
 		tblName, tbl := r.getTable(v.RelationOID)
 		if tbl == nil || r.skipTableMessage(tblName) {
+			log.Printf("skipped")
 			break
 		}
 
@@ -678,6 +683,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 	case message.Delete:
 		tblName, tbl := r.getTable(v.RelationOID)
 		if tbl == nil || r.skipTableMessage(tblName) {
+			log.Printf("skipped")
 			break
 		}
 
@@ -689,6 +695,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 	case message.Truncate:
 		for _, oid := range v.RelationOIDs {
 			if tblName, tbl := r.getTable(oid); tbl == nil || r.skipTableMessage(tblName) {
+				log.Printf("%s skipped", tblName)
 				continue
 			} else {
 				if err := tbl.Truncate(); err != nil {
@@ -740,7 +747,7 @@ func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (c
 	} else {
 		for _, pgCol := range cfg.TupleColumns {
 			if chColCfg, ok := chColumns[pgCol.Name]; !ok {
-				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", pgCol, cfg.ChMainTable)
+				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", pgCol.Name, cfg.ChMainTable)
 			} else {
 				cfg.ColumnMapping[pgCol.Name] = chColCfg
 			}
