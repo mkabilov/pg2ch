@@ -644,6 +644,8 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 			if err := r.mergeTables(); err != nil {
 				return fmt.Errorf("could not merge tables: %v", err)
 			}
+		} else {
+			r.advanceLSN()
 		}
 		r.inTxTables = make(map[config.PgTableName]struct{})
 	case message.Relation:
