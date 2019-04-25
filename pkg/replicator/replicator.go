@@ -635,7 +635,7 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 	r.tablesToMergeMutex.Lock()
 	defer r.tablesToMergeMutex.Unlock()
 
-	log.Printf("%v: %s", lsn, msg.String())
+	log.Printf("%v - %T: %s", lsn, msg, msg.String())
 
 	switch v := msg.(type) {
 	case message.Begin:
