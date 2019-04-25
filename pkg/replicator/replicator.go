@@ -651,8 +651,8 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 		}
 		r.inTxTables = make(map[config.PgTableName]struct{})
 	case message.Relation:
-		tblName, tbl := r.getTable(v.OID)
-		if tbl == nil || r.skipTableMessage(tblName) {
+		_, tbl := r.getTable(v.OID)
+		if tbl == nil {
 			log.Printf("skipped")
 			break
 		}
