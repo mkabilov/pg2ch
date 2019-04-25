@@ -179,7 +179,7 @@ func (c *consumer) processReplicationMessage(handler Handler) {
 
 // SendStatus sends the status
 func (c *consumer) SendStatus() error {
-	// log.Printf("sending status: %v", c.currentLSN) //TODO: move to debug log level
+	log.Printf("sending status: %v", c.currentLSN) //TODO: move to debug log level
 	status, err := pgx.NewStandbyStatus(uint64(c.currentLSN))
 
 	if err != nil {
