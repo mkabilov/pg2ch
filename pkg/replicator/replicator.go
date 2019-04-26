@@ -181,6 +181,7 @@ func (r *Replicator) initAndSyncTables() error {
 			return fmt.Errorf("could not sync %s: %v", tblName.String(), err)
 		}
 		r.tableLSN[tblName] = lsn
+		log.Printf("set lsn for %s table: %v", tblName.String(), lsn)
 
 		r.saveStateNeeded = true
 		if err := r.saveCurrentState(); err != nil {
@@ -629,6 +630,7 @@ func (r *Replicator) mergeTables() error {
 
 		delete(r.tablesToMerge, tblName)
 		r.tableLSN[tblName] = r.finalLSN
+		log.Printf("set lsn for %s table: %v", tblName.String(), r.finalLSN)
 	}
 	r.advanceLSN()
 
