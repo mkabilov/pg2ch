@@ -214,7 +214,7 @@ func (r *Replicator) pgCommit(tx *pgx.Tx) error {
 	return tx.Commit()
 }
 
-func (r *Replicator) getCurrentState() error {
+func (r *Replicator) fetchCurrentState() error {
 	var (
 		s   state
 		err error
@@ -331,7 +331,7 @@ func (r *Replicator) Run() error {
 		return fmt.Errorf("could not connect to postgresql: %v", err)
 	}
 
-	if err := r.getCurrentState(); err != nil {
+	if err := r.fetchCurrentState(); err != nil {
 		return fmt.Errorf("could not get start lsn positions: %v", err)
 	}
 
@@ -536,18 +536,19 @@ func (r *Replicator) pgDropRepSlot(tx *pgx.Tx) error {
 
 func (r *Replicator) pgCreateTempRepSlot(tx *pgx.Tx, tblName config.PgTableName) (utils.LSN, error) {
 	var (
-		basebackupLSN, snapshotName, plugin sql.NullString
-		lsn                                 utils.LSN
+		snapshotLSN, snapshotName, plugin sql.NullString
+		lsn                               utils.LSN
 	)
 
 	row := tx.QueryRow(fmt.Sprintf("CREATE_REPLICATION_SLOT %s TEMPORARY LOGICAL %s USE_SNAPSHOT",
-		fmt.Sprintf("clickhouse_tempslot_%s_%s", tblName.SchemaName, tblName.TableName), utils.OutputPlugin))
+		fmt.Sprintf("ch_tmp_%s_%s", tblName.SchemaName, tblName.TableName), utils.OutputPlugin))
 
-	if err := row.Scan(&r.tempSlotName, &basebackupLSN, &snapshotName, &plugin); err != nil {
+	if err := row.Scan(&r.tempSlotName, &snapshotLSN, &snapshotName, &plugin); err != nil {
 		return utils.InvalidLSN, fmt.Errorf("could not scan: %v", err)
 	}
+	log.Printf("temp replication slot %s snapshot lsn: %v", fmt.Sprintf("ch_tmp_%s_%s", tblName.SchemaName, tblName.TableName), snapshotLSN)
 
-	if err := lsn.Parse(basebackupLSN.String); err != nil {
+	if err := lsn.Parse(snapshotLSN.String); err != nil {
 		return utils.InvalidLSN, fmt.Errorf("could not parse LSN: %v", err)
 	}
 
@@ -583,6 +584,10 @@ func (r *Replicator) skipTableMessage(tblName config.PgTableName) bool {
 	lsn, ok := r.tableLSN[tblName]
 	if !ok {
 		return false
+	}
+
+	if r.finalLSN <= lsn {
+		log.Printf("skipping table message. finalLSN: %v table lsn: %v", r.finalLSN, lsn)
 	}
 
 	return r.finalLSN <= lsn
