@@ -547,7 +547,7 @@ func (r *Replicator) pgCreateTempRepSlot(tx *pgx.Tx, tblName config.PgTableName)
 	if err := row.Scan(&r.tempSlotName, &snapshotLSN, &snapshotName, &plugin); err != nil {
 		return utils.InvalidLSN, fmt.Errorf("could not scan: %v", err)
 	}
-	log.Printf("temp replication slot %s snapshot lsn: %v", fmt.Sprintf("ch_tmp_%s_%s", tblName.SchemaName, tblName.TableName), snapshotLSN)
+	log.Printf("temp replication slot %s snapshot lsn: %v", fmt.Sprintf("ch_tmp_%s_%s", tblName.SchemaName, tblName.TableName), snapshotLSN.String)
 
 	if err := lsn.Parse(snapshotLSN.String); err != nil {
 		return utils.InvalidLSN, fmt.Errorf("could not parse LSN: %v", err)
