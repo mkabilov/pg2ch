@@ -21,5 +21,5 @@ postgres:
     replication_slot_name: my_slot
     publication_name: my_pub
 
-lsnStateFilepath: state.yaml
+lsn_state_filepath: state.yaml
 inactivity_flush_timeout: '30s'

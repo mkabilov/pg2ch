@@ -1,7 +1,8 @@
 # PostgreSQL to ClickHouse
-[WIP]
 
-Continuous data transfer from PostgreSQL to ClickHouse using logical replication mechanism
+Continuous data transfer from PostgreSQL to ClickHouse using logical replication mechanism.
+
+**[WIP] NOT FOR PRODUCTION USE YET**
 
 ### Getting and running
 
