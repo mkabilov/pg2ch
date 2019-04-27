@@ -2,7 +2,7 @@
 
 Continuous data transfer from PostgreSQL to ClickHouse using logical replication mechanism.
 
-**[WIP] NOT FOR PRODUCTION USE YET**
+**[WIP]**
 
 ### Getting and running
 
@@ -66,13 +66,13 @@ lsn_state_filepath: {state file to store applied LSN in}
 
 - make sure you have PostgreSQL server running on `localhost:5432`
     - set `wal_level` in the postgresql config file to `logical`
-    - set `max_replication_slots` to at least `1`
+    - set `max_replication_slots` to at least `2`
 - make sure you have ClickHouse server running on `localhost:9000` e.g. in the [docker](https://hub.docker.com/r/yandex/clickhouse-server/)
 - create database `pg2ch_test` in PostgreSQL: `CREATE DATABASE pg2ch_test;`
 - create a set of tables using pgbench command: `pgbench -U postgres -d pg2ch_test -i`
 - change [replica identity](https://www.postgresql.org/docs/current/sql-altertable.html#SQL-CREATETABLE-REPLICA-IDENTITY)
 for the `pgbench_accounts` table to FULL, so that we'll receive old values of the updated rows: `ALTER TABLE pgbench_accounts REPLICA IDENTITY FULL;`
-- create PostgreSQL publication for the desired table(s): `CREATE PUBLICATION pg2ch_pub FOR TABLE pgbench_accounts;`
+- create PostgreSQL publication for the `pgbench_accounts` table: `CREATE PUBLICATION pg2ch_pub FOR TABLE pgbench_accounts;`
 - create PostgreSQL logical replication slot: `SELECT * FROM pg_create_logical_replication_slot('pg2ch_slot', 'pgoutput');`
 - create tables on the ClickHouse side:
 ```sql
