@@ -99,7 +99,7 @@ type Config struct {
 	Postgres               pgConnConfig          `yaml:"postgres"`
 	Tables                 map[PgTableName]Table `yaml:"tables"`
 	InactivityFlushTimeout time.Duration         `yaml:"inactivity_flush_timeout"`
-	LsnStateFilepath       string                `yaml:"lsnStateFilepath"`
+	LsnStateFilepath       string                `yaml:"lsn_state_filepath"`
 }
 
 type Column struct {
