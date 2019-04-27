@@ -126,6 +126,6 @@ lsn_state_filepath: 'state.yaml'
 ```
 - wait for `inactivity_merge_timeout` period (in our case 10 seconds) so that data in the memory gets flushed to the table in ClickHouse
 - check the sums of the `abalance` column both on ClickHouse and PostgreSQL:
-    - ClickHouse: `SELECT SUM(abalance * sign) FROM pgbench_accounts` ([why multiply by `sign` column?](https://clickhouse.yandex/docs/en/operations/table_engines/collapsingmergetree/#example-of-use)) 
-    - PostgreSQL: `SELECT SUM(abalance) FROM pgbench_accounts`
-- the sums must match; if not, please open an issue.
+    - ClickHouse: `SELECT SUM(abalance * sign), SUM(sign) FROM pgbench_accounts` ([why multiply by `sign` column?](https://clickhouse.yandex/docs/en/operations/table_engines/collapsingmergetree/#example-of-use)) 
+    - PostgreSQL: `SELECT SUM(abalance), COUNT(*) FROM pgbench_accounts`
+- numbers must match; if not, please open an issue.
