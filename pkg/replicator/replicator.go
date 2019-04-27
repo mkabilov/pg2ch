@@ -45,7 +45,7 @@ type Replicator struct {
 	pgConn *pgx.Conn
 	chConn *sql.DB
 
-	tables       map[config.PgTableName]clickHouseTable
+	chTables     map[config.PgTableName]clickHouseTable
 	oidName      map[utils.OID]config.PgTableName
 	tempSlotName string
 
@@ -53,6 +53,7 @@ type Replicator struct {
 	tableLSN        map[config.PgTableName]utils.LSN
 	saveStateNeeded bool
 
+	inTx               bool // indicates if we're inside tx
 	tablesToMergeMutex *sync.Mutex
 	tablesToMerge      map[config.PgTableName]struct{} // tables to be merged
 	inTxTables         map[config.PgTableName]struct{} // tables inside running tx
@@ -66,10 +67,10 @@ type state struct {
 
 func New(cfg config.Config) *Replicator {
 	r := Replicator{
-		cfg:     cfg,
-		tables:  make(map[config.PgTableName]clickHouseTable),
-		oidName: make(map[utils.OID]config.PgTableName),
-		errCh:   make(chan error),
+		cfg:      cfg,
+		chTables: make(map[config.PgTableName]clickHouseTable),
+		oidName:  make(map[utils.OID]config.PgTableName),
+		errCh:    make(chan error),
 
 		tablesToMergeMutex: &sync.Mutex{},
 		tablesToMerge:      make(map[config.PgTableName]struct{}),
@@ -167,7 +168,7 @@ func (r *Replicator) initAndSyncTables() error {
 			fmt.Printf("could not init %s: %v", tblName.String(), err)
 		}
 
-		r.tables[tblName] = tbl
+		r.chTables[tblName] = tbl
 
 		if _, ok := r.tableLSN[tblName]; ok {
 			if err := tx.Commit(); err != nil {
@@ -245,6 +246,9 @@ func (r *Replicator) fetchCurrentState() error {
 	if len(s.Tables) != 0 {
 		r.tableLSN = s.Tables
 	}
+	for tblName, tblLSN := range r.tableLSN {
+		log.Printf("lsn for table %s -> %v", tblName.String(), tblLSN)
+	}
 
 	return nil
 }
@@ -297,7 +301,7 @@ func (r *Replicator) initTables(tx *pgx.Tx) error {
 			fmt.Printf("could not init %s: %v", tblName.String(), err)
 		}
 
-		r.tables[tblName] = tbl
+		r.chTables[tblName] = tbl
 	}
 
 	return nil
@@ -345,6 +349,7 @@ func (r *Replicator) Run() error {
 	}
 
 	if syncNeeded {
+		// in case of init sync, the replication slot must be created, which must be called before any query
 		if err := r.initAndSyncTables(); err != nil {
 			return fmt.Errorf("could not sync tables: %v", err)
 		}
@@ -364,7 +369,6 @@ func (r *Replicator) Run() error {
 		}
 	}
 
-	// in case of init sync, the replication slot must be created, which must be called before any query
 	if err := r.checkPgSlotAndPub(tx); err != nil {
 		return err
 	}
@@ -381,9 +385,9 @@ func (r *Replicator) Run() error {
 		return fmt.Errorf("could not close pg connection: %v", err)
 	}
 
-	startLSN := r.minLSN()
-
-	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Postgres.ConnConfig, r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, startLSN)
+	r.finalLSN = r.minLSN()
+	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Postgres.ConnConfig,
+		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.finalLSN)
 
 	if err := r.consumer.Run(r); err != nil {
 		return err
@@ -396,7 +400,7 @@ func (r *Replicator) Run() error {
 	r.cancel()
 	r.consumer.Wait()
 
-	for _, tbl := range r.tables {
+	for _, tbl := range r.chTables {
 		if err := tbl.FlushToMainTable(); err != nil {
 			log.Println(err)
 		}
@@ -406,7 +410,7 @@ func (r *Replicator) Run() error {
 		log.Printf("could not save current state: %v", err)
 	}
 
-	r.consumer.AdvanceLSN(startLSN)
+	r.consumer.AdvanceLSN(r.finalLSN)
 
 	if err := r.stateFp.Close(); err != nil {
 		log.Printf("could not close state file: %v", err)
@@ -424,7 +428,7 @@ func (r *Replicator) inactivityMerge() {
 			return
 		case <-ticker.C:
 			r.tablesToMergeMutex.Lock()
-			if err := r.mergeTables(); err != nil {
+			if err := r.mergeTables(true); err != nil {
 				select {
 				case r.errCh <- fmt.Errorf("could not backgound merge tables: %v", err):
 				default:
@@ -584,11 +588,13 @@ loop:
 func (r *Replicator) skipTableMessage(tblName config.PgTableName) bool {
 	lsn, ok := r.tableLSN[tblName]
 	if !ok {
+		log.Printf("table %s not found", tblName)
 		return false
 	}
 
 	if r.finalLSN <= lsn {
 		log.Printf("skipping table message. finalLSN: %v table lsn: %v", r.finalLSN, lsn)
+		os.Exit(0)
 	}
 
 	return r.finalLSN <= lsn
@@ -600,7 +606,7 @@ func (r *Replicator) getTable(oid utils.OID) (config.PgTableName, clickHouseTabl
 		return config.PgTableName{}, nil
 	}
 
-	tbl, ok := r.tables[tblName]
+	chTbl, ok := r.chTables[tblName]
 	if !ok {
 		return config.PgTableName{}, nil
 	}
@@ -614,17 +620,25 @@ func (r *Replicator) getTable(oid utils.OID) (config.PgTableName, clickHouseTabl
 		r.tablesToMerge[tblName] = struct{}{}
 	}
 
-	return tblName, tbl
+	return tblName, chTbl
 }
 
-func (r *Replicator) mergeTables() error {
+func (r *Replicator) mergeTables(inactivity bool) error {
+	if inactivity {
+		log.Printf("inactivity merge")
+	} else {
+		log.Printf("normal merge")
+	}
+	if r.inTx {
+		log.Printf("we're inside tx, skipping")
+	}
 	r.saveStateNeeded = r.saveStateNeeded || len(r.tablesToMerge) > 0
 	for tblName := range r.tablesToMerge {
 		if _, ok := r.inTxTables[tblName]; ok {
 			continue
 		}
 
-		if err := r.tables[tblName].FlushToMainTable(); err != nil {
+		if err := r.chTables[tblName].FlushToMainTable(); err != nil {
 			return fmt.Errorf("could not commit %s table: %v", tblName.String(), err)
 		}
 
@@ -638,19 +652,21 @@ func (r *Replicator) mergeTables() error {
 }
 
 // HandleMessage processes the incoming wal message
-func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
+func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 	r.tablesToMergeMutex.Lock()
 	defer r.tablesToMergeMutex.Unlock()
 
-	log.Printf("%v - %T: %s", lsn, msg, msg.String())
+	log.Printf("%v - %v - %T: %s", lsn, r.finalLSN, msg, msg.String())
 
 	switch v := msg.(type) {
 	case message.Begin:
+		r.inTx = true
 		r.finalLSN = v.FinalLSN
 		r.curTxMergeIsNeeded = false
 	case message.Commit:
+		r.inTx = false
 		if r.curTxMergeIsNeeded {
-			if err := r.mergeTables(); err != nil {
+			if err := r.mergeTables(false); err != nil {
 				return fmt.Errorf("could not merge tables: %v", err)
 			}
 		} else {
@@ -658,56 +674,67 @@ func (r *Replicator) HandleMessage(msg message.Message, lsn utils.LSN) error {
 		}
 		r.inTxTables = make(map[config.PgTableName]struct{})
 	case message.Relation:
-		_, tbl := r.getTable(v.OID)
-		if tbl == nil {
-			log.Printf("skipped")
+		_, chTbl := r.getTable(v.OID)
+		if chTbl == nil {
 			break
 		}
 
-		tbl.SetTupleColumns(v.Columns)
+		chTbl.SetTupleColumns(v.Columns)
 	case message.Insert:
-		tblName, tbl := r.getTable(v.RelationOID)
-		if tbl == nil || r.skipTableMessage(tblName) {
+		tblName, chTbl := r.getTable(v.RelationOID)
+		if chTbl == nil {
+			break
+		}
+		if r.skipTableMessage(tblName) {
 			log.Printf("skipped")
 			break
 		}
 
-		if mergeIsNeeded, err := tbl.Insert(r.finalLSN, v.NewRow); err != nil {
+		if mergeIsNeeded, err := chTbl.Insert(r.finalLSN, v.NewRow); err != nil {
 			return fmt.Errorf("could not insert: %v", err)
 		} else {
 			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
 		}
 	case message.Update:
-		tblName, tbl := r.getTable(v.RelationOID)
-		if tbl == nil || r.skipTableMessage(tblName) {
+		tblName, chTbl := r.getTable(v.RelationOID)
+		if chTbl == nil {
+			break
+		}
+		if r.skipTableMessage(tblName) {
 			log.Printf("skipped")
 			break
 		}
 
-		if mergeIsNeeded, err := tbl.Update(r.finalLSN, v.OldRow, v.NewRow); err != nil {
+		if mergeIsNeeded, err := chTbl.Update(r.finalLSN, v.OldRow, v.NewRow); err != nil {
 			return fmt.Errorf("could not update: %v", err)
 		} else {
 			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
 		}
 	case message.Delete:
-		tblName, tbl := r.getTable(v.RelationOID)
-		if tbl == nil || r.skipTableMessage(tblName) {
+		tblName, chTbl := r.getTable(v.RelationOID)
+		if chTbl == nil {
+			log.Printf("delete break here")
+			break
+		}
+		if r.skipTableMessage(tblName) {
 			log.Printf("skipped")
 			break
 		}
 
-		if mergeIsNeeded, err := tbl.Delete(r.finalLSN, v.OldRow); err != nil {
+		if mergeIsNeeded, err := chTbl.Delete(r.finalLSN, v.OldRow); err != nil {
 			return fmt.Errorf("could not delete: %v", err)
 		} else {
 			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
 		}
 	case message.Truncate:
 		for _, oid := range v.RelationOIDs {
-			if tblName, tbl := r.getTable(oid); tbl == nil || r.skipTableMessage(tblName) {
-				log.Printf("%s skipped", tblName)
+			if tblName, chTbl := r.getTable(oid); chTbl == nil {
+				continue
+			} else if r.skipTableMessage(tblName) {
+				log.Printf("table %s truncate skipped", tblName.String())
 				continue
 			} else {
-				if err := tbl.Truncate(); err != nil {
+				if err := chTbl.Truncate(); err != nil {
 					return err
 				}
 			}
