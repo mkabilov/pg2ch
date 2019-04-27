@@ -21,7 +21,7 @@ const (
 
 // Handler represents interface for processing logical replication messages
 type Handler interface {
-	HandleMessage(message.Message, utils.LSN) error
+	HandleMessage(utils.LSN, message.Message) error
 }
 
 // Interface represents interface for the consumer
@@ -160,7 +160,7 @@ func (c *consumer) processReplicationMessage(handler Handler) {
 					return
 				}
 
-				if err := handler.HandleMessage(msg, utils.LSN(repMsg.WalMessage.WalStart)); err != nil {
+				if err := handler.HandleMessage(utils.LSN(repMsg.WalMessage.WalStart), msg); err != nil {
 					c.close(fmt.Errorf("error handling waldata: %s", err))
 					return
 				}
