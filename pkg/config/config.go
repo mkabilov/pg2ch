@@ -233,6 +233,10 @@ func New(filepath string) (*Config, error) {
 		cfg.ClickHouse.Host = defaultClickHouseHost
 	}
 
+	if cfg.LsnStateFilepath == "" {
+		return nil, fmt.Errorf("lsn state filepath is not specified")
+	}
+
 	return &cfg, nil
 }
 
