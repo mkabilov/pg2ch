@@ -396,6 +396,11 @@ func (t *genericTable) FlushToMainTable() error {
 		return nil
 	}
 
+	defer func(startTime time.Time) {
+		log.Printf("FlushToMainTable for %s pg table processed in %v",
+			t.cfg.PgTableName.String(), time.Since(startTime))
+	}(time.Now())
+
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		err := t.tryFlushToMainTable()
 		if err == nil {
