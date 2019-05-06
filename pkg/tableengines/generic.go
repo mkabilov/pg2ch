@@ -448,6 +448,15 @@ func convert(val string, chType config.ChColumn, pgType config.PgColumn) (interf
 	case utils.ChUInt16:
 		return strconv.ParseUint(val, 10, 16)
 	case utils.ChUint32:
+		if pgType.BaseType == utils.PgTimeWithoutTimeZone {
+			t, err := time.Parse("15:04:05", val)
+			if err != nil {
+				return nil, err
+			}
+
+			return t.Hour()*3600 + t.Minute()*60 + t.Second(), nil
+		}
+
 		return strconv.ParseUint(val, 10, 32)
 	case utils.ChUint64:
 		return strconv.ParseUint(val, 10, 64)
