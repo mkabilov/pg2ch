@@ -69,6 +69,7 @@ type Table struct {
 	ChMainTable             string            `yaml:"main_table"`
 	MaxBufferLength         int               `yaml:"max_buffer_length"`
 	VerColumn               string            `yaml:"ver_column"`
+	IsDeletedColumn         string            `yaml:"is_deleted_column"`
 	SignColumn              string            `yaml:"sign_column"`
 	Engine                  tableEngine       `yaml:"engine"`
 	FlushThreshold          int               `yaml:"flush_threshold"`
@@ -259,6 +260,10 @@ func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 	if val.VerColumn == "" && (val.Engine == ReplacingMergeTree || val.Engine == VersionedCollapsingMergeTree) {
 		val.VerColumn = defaultVerColumn
+	}
+
+	if val.IsDeletedColumn == "" && (val.Engine == ReplacingMergeTree || val.Engine == VersionedCollapsingMergeTree) {
+		val.IsDeletedColumn = "is_deleted"
 	}
 
 	if val.MaxBufferLength == 0 {

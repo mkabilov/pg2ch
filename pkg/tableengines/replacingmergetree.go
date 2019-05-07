@@ -25,7 +25,7 @@ func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Tabl
 		genericTable: newGenericTable(ctx, conn, tblCfg),
 		verColumn:    tblCfg.VerColumn,
 	}
-	t.chUsedColumns = append(t.chUsedColumns, tblCfg.VerColumn)
+	t.chUsedColumns = append(t.chUsedColumns, tblCfg.VerColumn, tblCfg.IsDeletedColumn)
 
 	t.flushQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
 		t.cfg.ChMainTable, strings.Join(t.chUsedColumns, ", "), t.cfg.ChBufferTable, t.cfg.BufferTableRowIdColumn)}
@@ -54,24 +54,20 @@ func (t *replacingMergeTree) Write(p []byte) (int, error) {
 // Insert handles incoming insert DML operation
 func (t *replacingMergeTree) Insert(lsn utils.LSN, new message.Row) (bool, error) {
 	return t.processCommandSet(commandSet{
-		append(t.convertTuples(new), uint64(lsn)),
+		append(t.convertTuples(new), uint64(lsn), 0),
 	})
 }
 
 // Update handles incoming update DML operation
 func (t *replacingMergeTree) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
 	return t.processCommandSet(commandSet{
-		append(t.convertTuples(new), uint64(lsn)),
+		append(t.convertTuples(new), uint64(lsn), 0),
 	})
 }
 
 // Delete handles incoming delete DML operation
 func (t *replacingMergeTree) Delete(lsn utils.LSN, old message.Row) (bool, error) {
-	oldRow := append(t.convertTuples(old), uint64(lsn))
-
-	for id, val := range t.emptyValues {
-		oldRow[id] = val
-	}
-
-	return t.processCommandSet(commandSet{oldRow})
+	return t.processCommandSet(commandSet{
+		append(t.convertTuples(old), uint64(lsn), 1),
+	})
 }
