@@ -24,6 +24,7 @@ const (
 	defaultMaxBufferLength        = 1000
 	defaultSignColumn             = "sign"
 	defaultVerColumn              = "ver"
+	defaultIsDeletedColumn        = "is_deleted"
 )
 
 type tableEngine int
@@ -263,7 +264,7 @@ func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	}
 
 	if val.IsDeletedColumn == "" && (val.Engine == ReplacingMergeTree || val.Engine == VersionedCollapsingMergeTree) {
-		val.IsDeletedColumn = "is_deleted"
+		val.IsDeletedColumn = defaultIsDeletedColumn
 	}
 
 	if val.MaxBufferLength == 0 {
