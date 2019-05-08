@@ -50,7 +50,6 @@ type genericTable struct {
 	chUsedColumns  []string
 	pgUsedColumns  []string
 	columnMapping  map[string]config.ChColumn // [pg column name]ch column description
-	emptyValues    map[int]interface{}
 	flushMutex     *sync.Mutex
 	buffer         []bufCommand
 	bufferCmdId    int // number of commands in the current buffer
@@ -68,26 +67,18 @@ func newGenericTable(ctx context.Context, chConn *sql.DB, tblCfg config.Table) g
 		columnMapping: make(map[string]config.ChColumn),
 		chUsedColumns: make([]string, 0),
 		pgUsedColumns: make([]string, 0),
-		emptyValues:   make(map[int]interface{}),
 		flushMutex:    &sync.Mutex{},
 		tupleColumns:  tblCfg.TupleColumns,
 	}
 
 	t.buffer = make([]bufCommand, t.cfg.MaxBufferLength)
 
-	for pgColId, pgCol := range t.tupleColumns {
+	for _, pgCol := range t.tupleColumns {
 		chCol, ok := tblCfg.ColumnMapping[pgCol.Name]
 		if !ok {
 			continue
 		}
 
-		if emptyVal, ok := tblCfg.EmptyValues[chCol.Name]; ok {
-			if val, err := convert(emptyVal, chCol, t.cfg.PgColumns[pgCol.Name]); err == nil {
-				t.emptyValues[pgColId] = val
-			} else {
-				log.Fatalf("wrong value for %q empty value: %v", chCol.Name, err)
-			}
-		}
 		t.columnMapping[pgCol.Name] = chCol
 		t.chUsedColumns = append(t.chUsedColumns, chCol.Name)
 		t.pgUsedColumns = append(t.pgUsedColumns, pgCol.Name)

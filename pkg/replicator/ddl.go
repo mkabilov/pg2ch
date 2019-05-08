@@ -75,6 +75,7 @@ func (r *Replicator) GenerateChDDL() error {
 		case config.ReplacingMergeTree:
 			engineParams = tblCfg.VerColumn
 			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s UInt64", engineParams))
+			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s UInt8", tblCfg.IsDeletedColumn))
 		case config.CollapsingMergeTree:
 			engineParams = tblCfg.SignColumn
 			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s Int8", engineParams))
