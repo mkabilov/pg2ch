@@ -60,8 +60,16 @@ func (t *replacingMergeTree) Insert(lsn utils.LSN, new message.Row) (bool, error
 
 // Update handles incoming update DML operation
 func (t *replacingMergeTree) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
-	if t.equalRows(old, new) {
+	equal, keyChanged := t.compareRows(old, new)
+	if equal {
 		return t.processCommandSet(nil)
+	}
+
+	if keyChanged {
+		return t.processCommandSet(commandSet{
+			append(t.convertTuples(old), uint64(lsn), 1),
+			append(t.convertTuples(new), uint64(lsn), 0),
+		})
 	}
 
 	return t.processCommandSet(commandSet{

@@ -60,7 +60,7 @@ func (t *collapsingMergeTreeTable) Insert(lsn utils.LSN, new message.Row) (bool,
 
 // Update handles incoming update DML operation
 func (t *collapsingMergeTreeTable) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
-	if t.equalRows(old, new) {
+	if equal, _ := t.compareRows(old, new); equal {
 		return t.processCommandSet(nil)
 	}
 

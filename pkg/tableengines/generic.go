@@ -537,7 +537,9 @@ func (t *genericTable) SetTupleColumns(tupleColumns []message.Column) {
 	t.tupleColumns = tupleColumns
 }
 
-func (t *genericTable) equalRows(a, b message.Row) bool {
+func (t *genericTable) compareRows(a, b message.Row) (bool, bool) {
+	equal := true
+	keyColumnChanged := false
 	for colId, col := range t.tupleColumns {
 		if _, ok := t.columnMapping[col.Name]; !ok {
 			continue
@@ -545,12 +547,18 @@ func (t *genericTable) equalRows(a, b message.Row) bool {
 
 		if a[colId].Kind != message.TupleNull {
 			if !bytes.Equal(a[colId].Value, b[colId].Value) {
-				return false
+				equal = false
+				if col.IsKey {
+					keyColumnChanged = true
+				}
 			}
 		} else if b[colId].Kind == message.TupleNull {
-			return false
+			equal = false
+			if col.IsKey { // should never happen
+				keyColumnChanged = true
+			}
 		}
 	}
 
-	return true
+	return equal, keyColumnChanged
 }
