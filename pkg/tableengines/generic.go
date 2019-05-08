@@ -1,6 +1,7 @@
 package tableengines
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -543,4 +544,22 @@ func (t *genericTable) Init() error {
 func (t *genericTable) SetTupleColumns(tupleColumns []message.Column) {
 	//TODO: suggest alter table message for adding/deleting new/old columns on clickhouse side
 	t.tupleColumns = tupleColumns
+}
+
+func (t *genericTable) equalRows(a, b message.Row) bool {
+	for colId, col := range t.tupleColumns {
+		if _, ok := t.columnMapping[col.Name]; !ok {
+			continue
+		}
+
+		if a[colId].Kind != message.TupleNull {
+			if !bytes.Equal(a[colId].Value, b[colId].Value) {
+				return false
+			}
+		} else if b[colId].Kind == message.TupleNull {
+			return false
+		}
+	}
+
+	return true
 }
