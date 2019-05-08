@@ -46,7 +46,7 @@ func (t *replacingMergeTree) Write(p []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	row = append(row, 0) // append version column value
+	row = append(row, 0, 0) // append "version" and "is_deleted" columns
 
 	return n, t.insertRow(row)
 }
