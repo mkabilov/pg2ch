@@ -25,6 +25,7 @@ const (
 	defaultSignColumn             = "sign"
 	defaultVerColumn              = "ver"
 	defaultIsDeletedColumn        = "is_deleted"
+	defaultRedisBind              = ":6379"
 )
 
 type tableEngine int
@@ -101,7 +102,8 @@ type Config struct {
 	Postgres               pgConnConfig          `yaml:"postgres"`
 	Tables                 map[PgTableName]Table `yaml:"tables"`
 	InactivityFlushTimeout time.Duration         `yaml:"inactivity_flush_timeout"`
-	LsnStateFilepath       string                `yaml:"lsn_state_filepath"`
+	CaskDbPath             string                `yaml:"db_filepath"`
+	RedisBind              string                `yaml:"redis_bind"`
 }
 
 type Column struct {
@@ -148,14 +150,7 @@ func (t *tableEngine) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return fmt.Errorf("unknown table engine: %q", val)
 }
 
-func (tn *PgTableName) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	//TODO: improve parser, use regexp
-	var val string
-
-	if err := unmarshal(&val); err != nil {
-		return err
-	}
-
+func (tn *PgTableName) Parse(val string) error {
 	parts := strings.Split(val, ".")
 	if ln := len(parts); ln == 2 {
 		*tn = PgTableName{
@@ -172,6 +167,17 @@ func (tn *PgTableName) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	}
 
 	return nil
+}
+
+func (tn *PgTableName) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	//TODO: improve parser, use regexp
+	var val string
+
+	if err := unmarshal(&val); err != nil {
+		return err
+	}
+
+	return tn.Parse(val)
 }
 
 func (tn PgTableName) MarshalYAML() (interface{}, error) {
@@ -235,8 +241,12 @@ func New(filepath string) (*Config, error) {
 		cfg.ClickHouse.Host = defaultClickHouseHost
 	}
 
-	if cfg.LsnStateFilepath == "" {
-		return nil, fmt.Errorf("lsn state filepath is not specified")
+	if cfg.CaskDbPath == "" {
+		return nil, fmt.Errorf("db_filepath is not set")
+	}
+
+	if cfg.RedisBind == "" {
+		cfg.RedisBind = defaultRedisBind
 	}
 
 	return &cfg, nil

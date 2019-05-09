@@ -1,20 +1,20 @@
 package replicator
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx"
 	"github.com/kshvakov/clickhouse"
-	"gopkg.in/yaml.v2"
+	"github.com/prologic/bitcask"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/consumer"
@@ -23,6 +23,8 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils"
 	"github.com/mkabilov/pg2ch/pkg/utils/tableinfo"
 )
+
+const tableKeyPrefix = "table_"
 
 type clickHouseTable interface {
 	Insert(lsn utils.LSN, new message.Row) (mergeIsNeeded bool, err error)
@@ -45,24 +47,20 @@ type Replicator struct {
 	pgConn *pgx.Conn
 	chConn *sql.DB
 
+	caskDB *bitcask.Bitcask
+
 	chTables     map[config.PgTableName]clickHouseTable
 	oidName      map[utils.OID]config.PgTableName
 	tempSlotName string
 
-	finalLSN        utils.LSN
-	tableLSN        map[config.PgTableName]utils.LSN
-	saveStateNeeded bool
+	finalLSN utils.LSN
+	tableLSN map[config.PgTableName]utils.LSN
 
 	inTx               bool // indicates if we're inside tx
 	tablesToMergeMutex *sync.Mutex
 	tablesToMerge      map[config.PgTableName]struct{} // tables to be merged
 	inTxTables         map[config.PgTableName]struct{} // tables inside running tx
 	curTxMergeIsNeeded bool                            // if tables in the current transaction are needed to be merged
-	stateFp            *os.File
-}
-
-type state struct {
-	Tables map[config.PgTableName]utils.LSN `yaml:"tables"`
 }
 
 func New(cfg config.Config) *Replicator {
@@ -181,11 +179,10 @@ func (r *Replicator) initAndSyncTables() error {
 		if err := tbl.Sync(tx); err != nil {
 			return fmt.Errorf("could not sync %s: %v", tblName.String(), err)
 		}
-		r.tableLSN[tblName] = lsn
 
-		r.saveStateNeeded = true
-		if err := r.saveCurrentState(); err != nil {
-			log.Printf("could not save current state: %v", err)
+		r.tableLSN[tblName] = lsn
+		if err := r.caskDB.Put(tableKeyPrefix+tblName.String(), lsn.Bytes()); err != nil {
+			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 
 		if err := r.pgDropRepSlot(tx); err != nil {
@@ -215,70 +212,29 @@ func (r *Replicator) pgCommit(tx *pgx.Tx) error {
 	return tx.Commit()
 }
 
-func (r *Replicator) fetchCurrentState() error {
-	var (
-		s   state
-		err error
-	)
-
-	r.stateFp, err = os.OpenFile(r.cfg.LsnStateFilepath, os.O_RDWR, os.FileMode(0666))
-	if os.IsNotExist(err) {
-		r.stateFp, err = os.OpenFile(r.cfg.LsnStateFilepath, os.O_WRONLY|os.O_CREATE, os.FileMode(0666))
-		if err != nil {
-			return fmt.Errorf("could not create file: %v", err)
+func (r *Replicator) readCaskDB() error {
+	for key := range r.caskDB.Keys() {
+		if !strings.HasPrefix(key, tableKeyPrefix) {
+			continue
+		}
+		val, err := r.caskDB.Get(key)
+		if err == bitcask.ErrKeyNotFound {
+			continue
 		}
 
-		return nil
-	}
-
-	if stat, err := r.stateFp.Stat(); err != nil {
-		return fmt.Errorf("could not get file stats: %v", err)
-	} else if stat.Size() == 0 {
-		return nil
-	}
-
-	if err := yaml.NewDecoder(r.stateFp).Decode(&s); err != nil {
-		log.Printf("could not decode state yaml: %v", err)
-		return nil
-	}
-
-	if len(s.Tables) != 0 {
-		r.tableLSN = s.Tables
-		for tblName, tblLSN := range r.tableLSN {
-			log.Printf("consuming changes for table %s starting from %v lsn position", tblName.String(), tblLSN)
+		tblName := &config.PgTableName{}
+		if err := tblName.Parse(key[len(tableKeyPrefix):]); err != nil {
+			return err
 		}
-	}
 
-	return nil
-}
+		lsn := utils.InvalidLSN
+		if err := lsn.Parse(string(val)); err != nil {
+			return fmt.Errorf("could not parse lsn %q: %v", string(val), err)
+		}
 
-func (r *Replicator) saveCurrentState() error {
-	if !r.saveStateNeeded {
-		return nil
+		r.tableLSN[*tblName] = lsn
+		log.Printf("consuming changes for table %s starting from %v lsn position", tblName.String(), lsn)
 	}
-
-	buf := bytes.NewBuffer(nil)
-
-	if err := yaml.NewEncoder(buf).Encode(state{Tables: r.tableLSN}); err != nil {
-		return fmt.Errorf("could not encode: %v", err)
-	}
-	if _, err := r.stateFp.Seek(0, 0); err != nil {
-		return fmt.Errorf("could not seek: %v", err)
-	}
-
-	n, err := buf.WriteTo(r.stateFp)
-	if err != nil {
-		return fmt.Errorf("could not write to file: %v", err)
-	}
-
-	if err := r.stateFp.Truncate(n); err != nil {
-		return fmt.Errorf("could not truncate: %v", err)
-	}
-
-	if err := utils.SyncFileAndDirectory(r.stateFp); err != nil {
-		return fmt.Errorf("could not sync state file %q: %v", r.cfg.LsnStateFilepath, err)
-	}
-	r.saveStateNeeded = false
 
 	return nil
 }
@@ -326,6 +282,12 @@ func (r *Replicator) Run() error {
 		tx  *pgx.Tx
 		err error
 	)
+	r.caskDB, err = bitcask.Open(r.cfg.CaskDbPath)
+	if err != nil {
+		return fmt.Errorf("could not open cask db: %v", err)
+	}
+	defer r.caskDB.Close()
+
 	if err := r.chConnect(); err != nil {
 		return fmt.Errorf("could not connect to clickhouse: %v", err)
 	}
@@ -335,7 +297,7 @@ func (r *Replicator) Run() error {
 		return fmt.Errorf("could not connect to postgresql: %v", err)
 	}
 
-	if err := r.fetchCurrentState(); err != nil {
+	if err := r.readCaskDB(); err != nil {
 		return fmt.Errorf("could not get start lsn positions: %v", err)
 	}
 
@@ -394,6 +356,7 @@ func (r *Replicator) Run() error {
 
 	go r.logErrCh()
 	go r.inactivityMerge()
+	go r.caskRedis()
 
 	r.waitForShutdown()
 	r.cancel()
@@ -405,15 +368,7 @@ func (r *Replicator) Run() error {
 		}
 	}
 
-	if err := r.saveCurrentState(); err != nil {
-		log.Printf("could not save current state: %v", err)
-	}
-
 	r.consumer.AdvanceLSN(r.finalLSN)
-
-	if err := r.stateFp.Close(); err != nil {
-		log.Printf("could not close state file: %v", err)
-	}
 
 	return nil
 }
@@ -619,7 +574,6 @@ func (r *Replicator) getTable(oid utils.OID) (config.PgTableName, clickHouseTabl
 }
 
 func (r *Replicator) mergeTables() error {
-	r.saveStateNeeded = r.saveStateNeeded || len(r.tablesToMerge) > 0
 	for tblName := range r.tablesToMerge {
 		if _, ok := r.inTxTables[tblName]; ok {
 			continue
@@ -631,7 +585,11 @@ func (r *Replicator) mergeTables() error {
 
 		delete(r.tablesToMerge, tblName)
 		r.tableLSN[tblName] = r.finalLSN
+		if err := r.caskDB.Put(tableKeyPrefix+tblName.String(), r.finalLSN.Bytes()); err != nil {
+			return fmt.Errorf("could not store lsn for table %s", tblName.String())
+		}
 	}
+
 	r.advanceLSN()
 
 	return nil
@@ -713,7 +671,7 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 }
 
 func (r *Replicator) advanceLSN() {
-	if err := r.saveCurrentState(); err != nil {
+	if err := r.caskDB.Sync(); err != nil {
 		select {
 		case r.errCh <- err:
 		default:
