@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -26,6 +27,7 @@ import (
 
 const (
 	tableLSNKeyPrefix = "table_lsn_"
+	generationIDKey   = "generation_id"
 )
 
 type clickHouseTable interface {
@@ -239,6 +241,16 @@ func (r *Replicator) readCaskDB() error {
 
 		r.tableLSN[*tblName] = lsn
 		log.Printf("consuming changes for table %s starting from %v lsn position", tblName.String(), lsn)
+	}
+
+	if val, err := r.caskDB.Get(generationIDKey); err != bitcask.ErrKeyNotFound {
+		genID, err := strconv.ParseUint(string(val), 10, 32)
+		if err != nil {
+			log.Printf("incorrect value for generation_id in the cask db: %v", err)
+		}
+
+		r.generationID = uint32(genID)
+		log.Printf("generation_id: %v", r.generationID)
 	}
 
 	return nil
