@@ -34,8 +34,7 @@ tables:
         columns: # postgres - clickhouse column name mapping, 
                  # if not present, all the columns are expected to be on the clickhouse side with the exact same names 
             {postgresql column name}: {clickhouse column name}
-        empty_values: # in case of ReplacingMergeTree those values will be used to discard deleted rows
-            {clickhouse column name}: {value to be used}
+        is_deleted_column: # in case of ReplacingMergeTree 1 will be stored in the {is_deleted_column} in order to mark deleted rows
         sign_column: {clickhouse sign column name for CollapsingMergeTree engines only, default "sign"}
         ver_column: {clickhouse version column name for the ReplacingMergeTree engine, default "ver"}
 
@@ -59,7 +58,7 @@ pg: # postgresql connection params
     replication_slot_name: {logical replication slot name}
     publication_name: {postgresql publication name}
     
-lsn_state_filepath: {state file to store applied LSN in}
+db_path: {path to the cask db dir where table lsn positions will be stored}
 ```
 
 ### Sample setup:
@@ -112,7 +111,7 @@ pg:
     replication_slot_name: pg2ch_slot
     publication_name: pg2ch_pub
     
-lsn_state_filepath: 'state.yaml'
+db_path: cask
 ```
 
 - run pg2ch to start replication:
