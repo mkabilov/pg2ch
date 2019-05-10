@@ -47,7 +47,9 @@ func (t *mergeTreeTable) Write(p []byte) (int, error) {
 		return 0, err
 	}
 
-	row = append(row, 0) // append generationID
+	if t.cfg.GenerationColumn != "" {
+		row = append(row, 0)
+	}
 
 	return n, t.insertRow(row)
 }
