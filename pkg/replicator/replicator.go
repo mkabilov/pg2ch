@@ -24,7 +24,9 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils/tableinfo"
 )
 
-const tableKeyPrefix = "table_"
+const (
+	tableLSNKeyPrefix = "table_lsn_"
+)
 
 type clickHouseTable interface {
 	Insert(lsn utils.LSN, new message.Row) (mergeIsNeeded bool, err error)
@@ -181,7 +183,7 @@ func (r *Replicator) initAndSyncTables() error {
 		}
 
 		r.tableLSN[tblName] = lsn
-		if err := r.caskDB.Put(tableKeyPrefix+tblName.String(), lsn.Bytes()); err != nil {
+		if err := r.caskDB.Put(tableLSNKeyPrefix+tblName.String(), lsn.Bytes()); err != nil {
 			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 
@@ -214,7 +216,7 @@ func (r *Replicator) pgCommit(tx *pgx.Tx) error {
 
 func (r *Replicator) readCaskDB() error {
 	for key := range r.caskDB.Keys() {
-		if !strings.HasPrefix(key, tableKeyPrefix) {
+		if !strings.HasPrefix(key, tableLSNKeyPrefix) {
 			continue
 		}
 		val, err := r.caskDB.Get(key)
@@ -223,7 +225,7 @@ func (r *Replicator) readCaskDB() error {
 		}
 
 		tblName := &config.PgTableName{}
-		if err := tblName.Parse(key[len(tableKeyPrefix):]); err != nil {
+		if err := tblName.Parse(key[len(tableLSNKeyPrefix):]); err != nil {
 			return err
 		}
 
@@ -362,9 +364,9 @@ func (r *Replicator) Run() error {
 	r.cancel()
 	r.consumer.Wait()
 
-	for _, tbl := range r.chTables {
+	for tblName, tbl := range r.chTables {
 		if err := tbl.FlushToMainTable(); err != nil {
-			log.Println(err)
+			log.Printf("could not flush %s table: %v", tblName.String(), err)
 		}
 	}
 
@@ -585,7 +587,7 @@ func (r *Replicator) mergeTables() error {
 
 		delete(r.tablesToMerge, tblName)
 		r.tableLSN[tblName] = r.finalLSN
-		if err := r.caskDB.Put(tableKeyPrefix+tblName.String(), r.finalLSN.Bytes()); err != nil {
+		if err := r.caskDB.Put(tableLSNKeyPrefix+tblName.String(), r.finalLSN.Bytes()); err != nil {
 			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 	}

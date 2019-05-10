@@ -388,10 +388,10 @@ func (t *genericTable) FlushToMainTable() error {
 		return nil
 	}
 
-	defer func(startTime time.Time) {
-		log.Printf("FlushToMainTable for %s pg table processed in %v",
-			t.cfg.PgTableName.String(), time.Since(startTime).Truncate(time.Second))
-	}(time.Now())
+	defer func(startTime time.Time, rows int) {
+		log.Printf("FlushToMainTable for %s pg table processed in %v (rows: %d)",
+			t.cfg.PgTableName.String(), time.Since(startTime).Truncate(time.Second), rows)
+	}(time.Now(), t.bufferRowId)
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		err := t.tryFlushToMainTable()

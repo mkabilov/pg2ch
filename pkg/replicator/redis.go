@@ -7,7 +7,7 @@ import (
 	"github.com/tidwall/redcon"
 )
 
-const forbiddenError = "cannot modify '" + tableKeyPrefix + "*' keys"
+const forbiddenError = "cannot modify '" + tableLSNKeyPrefix + "*' keys"
 
 func (r *Replicator) caskRedis() {
 	err := redcon.ListenAndServe(r.cfg.RedisBind,
@@ -26,7 +26,7 @@ func (r *Replicator) caskRedis() {
 				key := string(cmd.Args[1])
 				value := cmd.Args[2]
 
-				if strings.HasPrefix(key, tableKeyPrefix) {
+				if strings.HasPrefix(key, tableLSNKeyPrefix) {
 					conn.WriteString(fmt.Sprintf("ERR: %s", forbiddenError))
 					return
 				}
@@ -70,7 +70,7 @@ func (r *Replicator) caskRedis() {
 					return
 				}
 				key := string(cmd.Args[1])
-				if strings.HasPrefix(key, tableKeyPrefix) {
+				if strings.HasPrefix(key, tableLSNKeyPrefix) {
 					conn.WriteString(fmt.Sprintf("ERR: %s", forbiddenError))
 					return
 				}
