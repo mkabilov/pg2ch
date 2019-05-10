@@ -102,7 +102,7 @@ type Config struct {
 	Postgres               pgConnConfig          `yaml:"postgres"`
 	Tables                 map[PgTableName]Table `yaml:"tables"`
 	InactivityFlushTimeout time.Duration         `yaml:"inactivity_flush_timeout"`
-	CaskDbPath             string                `yaml:"db_filepath"`
+	CaskDbPath             string                `yaml:"db_path"`
 	RedisBind              string                `yaml:"redis_bind"`
 }
 

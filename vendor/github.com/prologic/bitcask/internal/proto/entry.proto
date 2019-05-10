@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package proto;
+
+message Entry {
+	uint32 Checksum = 1;
+	string Key = 2;
+	int64 Offset = 3;
+	bytes Value = 4;
+}

@@ -3,12 +3,39 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:05756b73bf7eae03d6f6c5f0ae83de42ce296e7d83336563dd9ce2072106d5e6"
   name = "github.com/cloudflare/golz4"
   packages = ["."]
+  pruneopts = "UT"
   revision = "ef862a3cdc58a6f1fee4e3af3d44fbe279194cde"
 
 [[projects]]
+  digest = "1:d7b2d6ad2a9768bb5c9e3bfa4d9ceaa635ca2737cca288507986f116fa4b8da2"
+  name = "github.com/gofrs/flock"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "392e7fae8f1b0bdbd67dad7237d23f618feb6dbb"
+  version = "v0.7.1"
+
+[[projects]]
+  digest = "1:48092bf6632f55839850666c33469f546f6d45fdbd59a66759ec12e84d853dc2"
+  name = "github.com/gogo/protobuf"
+  packages = ["proto"]
+  pruneopts = "UT"
+  revision = "ba06b47c162d49f2af050fb4c75bcbc86a159d5c"
+  version = "v1.2.1"
+
+[[projects]]
+  digest = "1:318f1c959a8a740366fce4b1e1eb2fd914036b4af58fbd0a003349b305f118ad"
+  name = "github.com/golang/protobuf"
+  packages = ["proto"]
+  pruneopts = "UT"
+  revision = "b5d812f8a3706043e23a9cd5babf2e5423744d30"
+  version = "v1.3.1"
+
+[[projects]]
   branch = "master"
+  digest = "1:5b44dd580eb13905a19fc6a289136c389fb5a14f03d6754a67c325553d08f2a6"
   name = "github.com/jackc/pgx"
   packages = [
     ".",
@@ -16,11 +43,13 @@
     "internal/sanitize",
     "pgio",
     "pgproto3",
-    "pgtype"
+    "pgtype",
   ]
-  revision = "31500c15b3a8a98bc6c1b8606e655b0498f30671"
+  pruneopts = "UT"
+  revision = "8faa4453fc7051d1076053f8854077753ab912f2"
 
 [[projects]]
+  digest = "1:18110843f1b123fd4368a5e441354a1a8f66f8823516e799c2610eead34f322d"
   name = "github.com/kshvakov/clickhouse"
   packages = [
     ".",
@@ -32,26 +61,113 @@
     "lib/lz4",
     "lib/protocol",
     "lib/types",
-    "lib/writebuffer"
+    "lib/writebuffer",
   ]
+  pruneopts = "UT"
   revision = "1d87030de2a38bbe8c05e1b13f5b2f27466fd5a8"
   version = "v1.3.6"
 
 [[projects]]
+  digest = "1:cf31692c14422fa27c83a05292eb5cbe0fb2775972e8f1f8446a71549bd8980b"
   name = "github.com/pkg/errors"
   packages = ["."]
+  pruneopts = "UT"
   revision = "ba968bfe8b2f7e042a574c888954fccecfa385b4"
   version = "v0.8.1"
 
 [[projects]]
+  digest = "1:07769ae7e77865f3dcf40f6fd61f79770471d204623548a256818cd562ce47fa"
+  name = "github.com/prologic/bitcask"
+  packages = [
+    ".",
+    "internal",
+    "internal/proto",
+    "internal/streampb",
+  ]
+  pruneopts = "UT"
+  revision = "b6c9867e7b8d7b7cd4f865a51a5084e62774f49e"
+  version = "v0.1.6"
+
+[[projects]]
+  branch = "master"
+  digest = "1:4333849538d7dd266a44ae024a4533b6f24014451f7b308cd4c99106b0742aac"
+  name = "github.com/prologic/trie"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "3972df81f9b588faa8d3c84f835ec95f13a50836"
+
+[[projects]]
+  digest = "1:0b8d86f074869a0e1c6293773bfafea7515752d28b49921f8e3f889158c921de"
+  name = "github.com/tidwall/redcon"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "c964c660adb68a16a0f890ceb01d25e05d0ab49e"
+  version = "v1.0.0"
+
+[[projects]]
+  branch = "master"
+  digest = "1:f92f6956e4059f6a3efc14924d2dd58ba90da25cc57fe07ae3779ef2f5e0c5f2"
+  name = "golang.org/x/crypto"
+  packages = ["pbkdf2"]
+  pruneopts = "UT"
+  revision = "cbcb750295291b33242907a04be40e80801d0cfc"
+
+[[projects]]
+  branch = "master"
+  digest = "1:feece64517a25b2ffe2a82f2df04255b9914ce3fbfd5263fce681479510990c1"
+  name = "golang.org/x/exp"
+  packages = ["mmap"]
+  pruneopts = "UT"
+  revision = "0e2d8f6bf8daea8f45b95c9fc7dd64f957b1541e"
+
+[[projects]]
+  digest = "1:5f1559c4cee44069f81517430ebba19589869f3d4d4648213a4d5ddd199b11d8"
+  name = "golang.org/x/text"
+  packages = [
+    "cases",
+    "collate",
+    "collate/build",
+    "internal",
+    "internal/colltab",
+    "internal/gen",
+    "internal/language",
+    "internal/language/compact",
+    "internal/tag",
+    "internal/triegen",
+    "internal/ucd",
+    "language",
+    "runes",
+    "secure/bidirule",
+    "secure/precis",
+    "transform",
+    "unicode/bidi",
+    "unicode/cldr",
+    "unicode/norm",
+    "unicode/rangetable",
+    "width",
+  ]
+  pruneopts = "UT"
+  revision = "342b2e1fbaa52c93f31447ad2c6abc048c63e475"
+  version = "v0.3.2"
+
+[[projects]]
+  digest = "1:4d2e5a73dc1500038e504a8d78b986630e3626dc027bc030ba5c75da257cdb96"
   name = "gopkg.in/yaml.v2"
   packages = ["."]
+  pruneopts = "UT"
   revision = "51d6538a90f86fe93ac480b35f37b2be17fef232"
   version = "v2.2.2"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "6752079078989b97b379e41434fe20cd7c51b440393dde8bd5d09488b099896e"
+  input-imports = [
+    "github.com/jackc/pgx",
+    "github.com/jackc/pgx/pgtype",
+    "github.com/kshvakov/clickhouse",
+    "github.com/prologic/bitcask",
+    "github.com/tidwall/redcon",
+    "gopkg.in/yaml.v2",
+  ]
   solver-name = "gps-cdcl"
   solver-version = 1
