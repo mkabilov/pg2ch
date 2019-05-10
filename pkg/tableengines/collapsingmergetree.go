@@ -20,9 +20,9 @@ type collapsingMergeTreeTable struct {
 }
 
 // NewCollapsingMergeTree instantiates collapsingMergeTreeTable
-func NewCollapsingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table) *collapsingMergeTreeTable {
+func NewCollapsingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID *uint32) *collapsingMergeTreeTable {
 	t := collapsingMergeTreeTable{
-		genericTable: newGenericTable(ctx, conn, tblCfg),
+		genericTable: newGenericTable(ctx, conn, tblCfg, genID),
 		signColumn:   tblCfg.SignColumn,
 	}
 	t.chUsedColumns = append(t.chUsedColumns, tblCfg.SignColumn)
@@ -46,7 +46,7 @@ func (t *collapsingMergeTreeTable) Write(p []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	row = append(row, 1) // append sign column value
+	row = append(row, 0, 1) // append generationID and sign column value
 
 	return n, t.insertRow(row)
 }

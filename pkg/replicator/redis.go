@@ -70,10 +70,6 @@ func (r *Replicator) caskRedis() {
 					return
 				}
 				key := string(cmd.Args[1])
-				if strings.HasPrefix(key, tableLSNKeyPrefix) {
-					conn.WriteString(fmt.Sprintf("ERR: %s", forbiddenError))
-					return
-				}
 
 				err := r.caskDB.Delete(key)
 				if err != nil {

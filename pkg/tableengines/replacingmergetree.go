@@ -20,9 +20,9 @@ type replacingMergeTree struct {
 }
 
 // NewReplacingMergeTree instantiates replacingMergeTree
-func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table) *replacingMergeTree {
+func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID *uint32) *replacingMergeTree {
 	t := replacingMergeTree{
-		genericTable: newGenericTable(ctx, conn, tblCfg),
+		genericTable: newGenericTable(ctx, conn, tblCfg, genID),
 		verColumn:    tblCfg.VerColumn,
 	}
 	t.chUsedColumns = append(t.chUsedColumns, tblCfg.VerColumn, tblCfg.IsDeletedColumn)
@@ -46,7 +46,7 @@ func (t *replacingMergeTree) Write(p []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	row = append(row, 0, 0) // append "version" and "is_deleted" columns
+	row = append(row, 0, 0, 0) // append "generationID", "version" and "is_deleted" columns
 
 	return n, t.insertRow(row)
 }

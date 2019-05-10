@@ -71,6 +71,10 @@ func (r *Replicator) GenerateChDDL() error {
 			pkColumns[pgCol.PkCol-1] = pgColName
 		}
 
+		if tblCfg.GenerationColumn != "" {
+			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s UInt32", tblCfg.GenerationColumn))
+		}
+
 		switch tblCfg.Engine {
 		case config.ReplacingMergeTree:
 			engineParams = tblCfg.VerColumn

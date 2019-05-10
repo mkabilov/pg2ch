@@ -63,6 +63,8 @@ type Replicator struct {
 	tablesToMerge      map[config.PgTableName]struct{} // tables to be merged
 	inTxTables         map[config.PgTableName]struct{} // tables inside running tx
 	curTxMergeIsNeeded bool                            // if tables in the current transaction are needed to be merged
+	generationID       uint32
+	isEmptyTx          bool
 }
 
 func New(cfg config.Config) *Replicator {
@@ -89,15 +91,15 @@ func (r *Replicator) newTable(tblName config.PgTableName, tblConfig config.Table
 			return nil, fmt.Errorf("ReplacingMergeTree requires version column to be set")
 		}
 
-		return tableengines.NewReplacingMergeTree(r.ctx, r.chConn, tblConfig), nil
+		return tableengines.NewReplacingMergeTree(r.ctx, r.chConn, tblConfig, &r.generationID), nil
 	case config.MergeTree:
-		return tableengines.NewMergeTree(r.ctx, r.chConn, tblConfig), nil
+		return tableengines.NewMergeTree(r.ctx, r.chConn, tblConfig, &r.generationID), nil
 	case config.CollapsingMergeTree:
 		if tblConfig.SignColumn == "" {
 			return nil, fmt.Errorf("CollapsingMergeTree requires sign column to be set")
 		}
 
-		return tableengines.NewCollapsingMergeTree(r.ctx, r.chConn, tblConfig), nil
+		return tableengines.NewCollapsingMergeTree(r.ctx, r.chConn, tblConfig, &r.generationID), nil
 	}
 
 	return nil, fmt.Errorf("%s table engine is not implemented", tblConfig.Engine)
@@ -165,7 +167,7 @@ func (r *Replicator) initAndSyncTables() error {
 		}
 
 		if err := tbl.Init(); err != nil {
-			fmt.Printf("could not init %s: %v", tblName.String(), err)
+			return fmt.Errorf("could not init %s: %v", tblName.String(), err)
 		}
 
 		r.chTables[tblName] = tbl
@@ -195,6 +197,7 @@ func (r *Replicator) initAndSyncTables() error {
 			return err
 		}
 	}
+	r.incrementGeneration()
 
 	return nil
 }
@@ -255,7 +258,7 @@ func (r *Replicator) initTables(tx *pgx.Tx) error {
 		}
 
 		if err := tbl.Init(); err != nil {
-			fmt.Printf("could not init %s: %v", tblName.String(), err)
+			return fmt.Errorf("could not init %s: %v", tblName.String(), err)
 		}
 
 		r.chTables[tblName] = tbl
@@ -597,6 +600,13 @@ func (r *Replicator) mergeTables() error {
 	return nil
 }
 
+func (r *Replicator) incrementGeneration() {
+	r.generationID++
+	if err := r.caskDB.Put("generation_id", []byte(fmt.Sprintf("%v", r.generationID))); err != nil {
+		log.Printf("could not save generation id to cask: %v", err)
+	}
+}
+
 // HandleMessage processes the incoming wal message
 func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 	r.tablesToMergeMutex.Lock()
@@ -607,6 +617,7 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 		r.inTx = true
 		r.finalLSN = v.FinalLSN
 		r.curTxMergeIsNeeded = false
+		r.isEmptyTx = true
 	case message.Commit:
 		if r.curTxMergeIsNeeded {
 			if err := r.mergeTables(); err != nil {
@@ -614,6 +625,9 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 			}
 		} else {
 			r.advanceLSN()
+		}
+		if !r.isEmptyTx {
+			r.incrementGeneration()
 		}
 		r.inTxTables = make(map[config.PgTableName]struct{})
 		r.inTx = false
@@ -635,6 +649,7 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 		} else {
 			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
 		}
+		r.isEmptyTx = false
 	case message.Update:
 		tblName, chTbl := r.getTable(v.RelationOID)
 		if chTbl == nil || r.skipTableMessage(tblName) {
@@ -646,6 +661,7 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 		} else {
 			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
 		}
+		r.isEmptyTx = false
 	case message.Delete:
 		tblName, chTbl := r.getTable(v.RelationOID)
 		if chTbl == nil || r.skipTableMessage(tblName) {
@@ -657,6 +673,7 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 		} else {
 			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
 		}
+		r.isEmptyTx = false
 	case message.Truncate:
 		for _, oid := range v.RelationOIDs {
 			if tblName, chTbl := r.getTable(oid); chTbl == nil || r.skipTableMessage(tblName) {
@@ -667,6 +684,7 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 				}
 			}
 		}
+		r.isEmptyTx = false
 	}
 
 	return nil

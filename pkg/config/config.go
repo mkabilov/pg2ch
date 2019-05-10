@@ -73,12 +73,12 @@ type Table struct {
 	VerColumn               string            `yaml:"ver_column"`
 	IsDeletedColumn         string            `yaml:"is_deleted_column"`
 	SignColumn              string            `yaml:"sign_column"`
+	GenerationColumn        string            `yaml:"generation_column"`
 	Engine                  tableEngine       `yaml:"engine"`
 	FlushThreshold          int               `yaml:"flush_threshold"`
 	InitSyncSkip            bool              `yaml:"init_sync_skip"`
 	InitSyncSkipBufferTable bool              `yaml:"init_sync_skip_buffer_table"`
 	InitSyncSkipTruncate    bool              `yaml:"init_sync_skip_truncate"`
-	EmptyValues             map[string]string `yaml:"empty_values"`
 	Columns                 map[string]string `yaml:"columns"`
 
 	PgTableName   PgTableName         `yaml:"-"`
