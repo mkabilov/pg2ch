@@ -94,14 +94,14 @@ func (r *Replicator) newTable(tblName config.PgTableName, tblConfig config.Table
 		}
 
 		return tableengines.NewReplacingMergeTree(r.ctx, r.chConn, tblConfig, &r.generationID), nil
-	case config.MergeTree:
-		return tableengines.NewMergeTree(r.ctx, r.chConn, tblConfig, &r.generationID), nil
 	case config.CollapsingMergeTree:
 		if tblConfig.SignColumn == "" {
 			return nil, fmt.Errorf("CollapsingMergeTree requires sign column to be set")
 		}
 
 		return tableengines.NewCollapsingMergeTree(r.ctx, r.chConn, tblConfig, &r.generationID), nil
+	case config.MergeTree:
+		return tableengines.NewMergeTree(r.ctx, r.chConn, tblConfig, &r.generationID), nil
 	}
 
 	return nil, fmt.Errorf("%s table engine is not implemented", tblConfig.Engine)
@@ -303,7 +303,11 @@ func (r *Replicator) Run() error {
 	if err != nil {
 		return fmt.Errorf("could not open cask db: %v", err)
 	}
-	defer r.caskDB.Close()
+	defer func() {
+		if err := r.caskDB.Close(); err != nil {
+			log.Printf("could not close cask db: %v", err)
+		}
+	}()
 
 	if err := r.chConnect(); err != nil {
 		return fmt.Errorf("could not connect to clickhouse: %v", err)

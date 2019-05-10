@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"strings"
@@ -200,7 +201,11 @@ func New(filepath string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not open file: %v", err)
 	}
-	defer fp.Close() //TODO: handle err message
+	defer func() {
+		if err := fp.Close(); err != nil {
+			log.Printf("could not close config file: %v", err)
+		}
+	}()
 
 	if err := yaml.NewDecoder(fp).Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("could not decode yaml: %v", err)

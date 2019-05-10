@@ -57,7 +57,7 @@ func (d *decoder) rowInfo(char byte) bool {
 		return true
 	}
 
-	d.buf.UnreadByte()
+	_ = d.buf.UnreadByte()
 	return false
 }
 

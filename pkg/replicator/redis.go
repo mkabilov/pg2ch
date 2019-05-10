@@ -2,6 +2,7 @@ package replicator
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/tidwall/redcon"
@@ -17,7 +18,9 @@ func (r *Replicator) caskRedis() {
 				conn.WriteString("PONG")
 			case "quit":
 				conn.WriteString("OK")
-				conn.Close()
+				if err := conn.Close(); err != nil {
+					log.Printf("could not close redis connection: %v", err)
+				}
 			case "set":
 				if len(cmd.Args) != 3 {
 					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
