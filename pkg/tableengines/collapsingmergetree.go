@@ -20,7 +20,7 @@ type collapsingMergeTreeTable struct {
 }
 
 // NewCollapsingMergeTree instantiates collapsingMergeTreeTable
-func NewCollapsingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID *uint32) *collapsingMergeTreeTable {
+func NewCollapsingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID *uint64) *collapsingMergeTreeTable {
 	t := collapsingMergeTreeTable{
 		genericTable: newGenericTable(ctx, conn, tblCfg, genID),
 		signColumn:   tblCfg.SignColumn,

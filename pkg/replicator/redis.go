@@ -80,6 +80,12 @@ func (r *Replicator) caskRedis() {
 				} else {
 					conn.WriteInt(1)
 				}
+			case "pause":
+				//TODO
+				conn.WriteString("OK")
+			case "resume":
+				//TODO
+				conn.WriteString("OK")
 			default:
 				conn.WriteError("ERR unknown command '" + string(cmd.Args[0]) + "'")
 			}

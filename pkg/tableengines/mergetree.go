@@ -18,7 +18,7 @@ type mergeTreeTable struct {
 }
 
 // NewMergeTree instantiates mergeTreeTable
-func NewMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID *uint32) *mergeTreeTable {
+func NewMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID *uint64) *mergeTreeTable {
 	t := mergeTreeTable{
 		genericTable: newGenericTable(ctx, conn, tblCfg, genID),
 	}

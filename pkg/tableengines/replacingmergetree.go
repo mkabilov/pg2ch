@@ -20,7 +20,7 @@ type replacingMergeTree struct {
 }
 
 // NewReplacingMergeTree instantiates replacingMergeTree
-func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID *uint32) *replacingMergeTree {
+func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID *uint64) *replacingMergeTree {
 	t := replacingMergeTree{
 		genericTable: newGenericTable(ctx, conn, tblCfg, genID),
 		verColumn:    tblCfg.VerColumn,

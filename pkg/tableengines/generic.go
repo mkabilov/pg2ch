@@ -57,10 +57,10 @@ type genericTable struct {
 	bufferFlushCnt int // number of flushed buffers
 	flushQueries   []string
 	tupleColumns   []message.Column // Columns description taken from RELATION rep message
-	generationID   *uint32
+	generationID   *uint64
 }
 
-func newGenericTable(ctx context.Context, chConn *sql.DB, tblCfg config.Table, genID *uint32) genericTable {
+func newGenericTable(ctx context.Context, chConn *sql.DB, tblCfg config.Table, genID *uint64) genericTable {
 	t := genericTable{
 		ctx:           ctx,
 		chConn:        chConn,

@@ -65,7 +65,7 @@ type Replicator struct {
 	tablesToMerge      map[config.PgTableName]struct{} // tables to be merged
 	inTxTables         map[config.PgTableName]struct{} // tables inside running tx
 	curTxMergeIsNeeded bool                            // if tables in the current transaction are needed to be merged
-	generationID       uint32
+	generationID       uint64
 	isEmptyTx          bool
 }
 
@@ -249,7 +249,7 @@ func (r *Replicator) readCaskDB() error {
 			log.Printf("incorrect value for generation_id in the cask db: %v", err)
 		}
 
-		r.generationID = uint32(genID)
+		r.generationID = uint64(genID)
 		log.Printf("generation_id: %v", r.generationID)
 	}
 
