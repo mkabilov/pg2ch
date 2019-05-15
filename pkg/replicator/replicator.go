@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx"
 	"github.com/kshvakov/clickhouse"
+	"github.com/peterbourgon/diskv/v3"
 	"github.com/prologic/bitcask"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
@@ -51,7 +52,7 @@ type Replicator struct {
 	pgConn *pgx.Conn
 	chConn *sql.DB
 
-	caskDB *bitcask.Bitcask
+	persStorage *diskv.Diskv
 
 	chTables     map[config.PgTableName]clickHouseTable
 	oidName      map[utils.OID]config.PgTableName
@@ -187,7 +188,7 @@ func (r *Replicator) initAndSyncTables() error {
 		}
 
 		r.tableLSN[tblName] = lsn
-		if err := r.caskDB.Put(tableLSNKeyPrefix+tblName.String(), lsn.Bytes()); err != nil {
+		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), lsn.Bytes()); err != nil {
 			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 
@@ -219,12 +220,12 @@ func (r *Replicator) pgCommit(tx *pgx.Tx) error {
 	return tx.Commit()
 }
 
-func (r *Replicator) readCaskDB() error {
-	for key := range r.caskDB.Keys() {
+func (r *Replicator) readPersStorage() error {
+	for key := range r.persStorage.Keys(nil) {
 		if !strings.HasPrefix(key, tableLSNKeyPrefix) {
 			continue
 		}
-		val, err := r.caskDB.Get(key)
+		val, err := r.persStorage.Read(key)
 		if err == bitcask.ErrKeyNotFound {
 			continue
 		}
@@ -243,7 +244,7 @@ func (r *Replicator) readCaskDB() error {
 		log.Printf("consuming changes for table %s starting from %v lsn position", tblName.String(), lsn)
 	}
 
-	if val, err := r.caskDB.Get(generationIDKey); err != bitcask.ErrKeyNotFound {
+	if val, err := r.persStorage.Read(generationIDKey); err != bitcask.ErrKeyNotFound {
 		genID, err := strconv.ParseUint(string(val), 10, 32)
 		if err != nil {
 			log.Printf("incorrect value for generation_id in the cask db: %v", err)
@@ -299,15 +300,11 @@ func (r *Replicator) Run() error {
 		tx  *pgx.Tx
 		err error
 	)
-	r.caskDB, err = bitcask.Open(r.cfg.CaskDbPath)
-	if err != nil {
-		return fmt.Errorf("could not open cask db: %v", err)
-	}
-	defer func() {
-		if err := r.caskDB.Close(); err != nil {
-			log.Printf("could not close cask db: %v", err)
-		}
-	}()
+
+	r.persStorage = diskv.New(diskv.Options{
+		BasePath:     r.cfg.PersStoragePath,
+		CacheSizeMax: 1024 * 1024, // 1MB
+	})
 
 	if err := r.chConnect(); err != nil {
 		return fmt.Errorf("could not connect to clickhouse: %v", err)
@@ -318,7 +315,7 @@ func (r *Replicator) Run() error {
 		return fmt.Errorf("could not connect to postgresql: %v", err)
 	}
 
-	if err := r.readCaskDB(); err != nil {
+	if err := r.readPersStorage(); err != nil {
 		return fmt.Errorf("could not get start lsn positions: %v", err)
 	}
 
@@ -606,7 +603,7 @@ func (r *Replicator) mergeTables() error {
 
 		delete(r.tablesToMerge, tblName)
 		r.tableLSN[tblName] = r.finalLSN
-		if err := r.caskDB.Put(tableLSNKeyPrefix+tblName.String(), r.finalLSN.Bytes()); err != nil {
+		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), r.finalLSN.Bytes()); err != nil {
 			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 	}
@@ -618,7 +615,7 @@ func (r *Replicator) mergeTables() error {
 
 func (r *Replicator) incrementGeneration() {
 	r.generationID++
-	if err := r.caskDB.Put("generation_id", []byte(fmt.Sprintf("%v", r.generationID))); err != nil {
+	if err := r.persStorage.Write("generation_id", []byte(fmt.Sprintf("%v", r.generationID))); err != nil {
 		log.Printf("could not save generation id to cask: %v", err)
 	}
 }
@@ -707,15 +704,6 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 }
 
 func (r *Replicator) advanceLSN() {
-	if err := r.caskDB.Sync(); err != nil {
-		select {
-		case r.errCh <- err:
-		default:
-		}
-
-		return
-	}
-
 	r.consumer.AdvanceLSN(r.finalLSN)
 }
 

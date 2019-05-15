@@ -98,7 +98,7 @@ type Config struct {
 	Postgres               pgConnConfig          `yaml:"postgres"`
 	Tables                 map[PgTableName]Table `yaml:"tables"`
 	InactivityFlushTimeout time.Duration         `yaml:"inactivity_flush_timeout"`
-	CaskDbPath             string                `yaml:"db_path"`
+	PersStoragePath        string                `yaml:"db_path"`
 	RedisBind              string                `yaml:"redis_bind"`
 }
 
@@ -241,7 +241,7 @@ func New(filepath string) (*Config, error) {
 		cfg.ClickHouse.Host = defaultClickHouseHost
 	}
 
-	if cfg.CaskDbPath == "" {
+	if cfg.PersStoragePath == "" {
 		return nil, fmt.Errorf("db_filepath is not set")
 	}
 

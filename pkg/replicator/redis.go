@@ -34,7 +34,7 @@ func (r *Replicator) caskRedis() {
 					return
 				}
 
-				if err := r.caskDB.Put(key, value); err != nil {
+				if err := r.persStorage.Write(key, value); err != nil {
 					conn.WriteString(fmt.Sprintf("ERR: %s", err))
 				} else {
 					conn.WriteString("OK")
@@ -45,24 +45,22 @@ func (r *Replicator) caskRedis() {
 					return
 				}
 				key := string(cmd.Args[1])
-				value, err := r.caskDB.Get(key)
+				value, err := r.persStorage.Read(key)
 				if err != nil {
 					conn.WriteNull()
 				} else {
 					conn.WriteBulk(value)
 				}
 			case "keys":
-				conn.WriteArray(r.caskDB.Len())
-				for key := range r.caskDB.Keys() {
-					conn.WriteBulk([]byte(key))
-				}
+				conn.WriteString("OK")
+				//TODO
 			case "exists":
 				if len(cmd.Args) != 2 {
 					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 					return
 				}
 				key := string(cmd.Args[1])
-				if r.caskDB.Has(key) {
+				if r.persStorage.Has(key) {
 					conn.WriteInt(1)
 				} else {
 					conn.WriteInt(0)
@@ -74,7 +72,7 @@ func (r *Replicator) caskRedis() {
 				}
 				key := string(cmd.Args[1])
 
-				err := r.caskDB.Delete(key)
+				err := r.persStorage.Erase(key)
 				if err != nil {
 					conn.WriteInt(0)
 				} else {
