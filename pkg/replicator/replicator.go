@@ -393,6 +393,10 @@ func (r *Replicator) Run() error {
 		if err := tbl.FlushToMainTable(); err != nil {
 			log.Printf("could not flush %s table: %v", tblName.String(), err)
 		}
+
+		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), r.finalLSN.Bytes()); err != nil {
+			return fmt.Errorf("could not store lsn for table %s", tblName.String())
+		}
 	}
 
 	r.consumer.AdvanceLSN(r.finalLSN)
