@@ -25,7 +25,10 @@ func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Tabl
 		genericTable: newGenericTable(ctx, conn, tblCfg, genID),
 		verColumn:    tblCfg.VerColumn,
 	}
-	t.chUsedColumns = append(t.chUsedColumns, tblCfg.VerColumn, tblCfg.IsDeletedColumn)
+	if tblCfg.VerColumn != "" {
+		t.chUsedColumns = append(t.chUsedColumns, tblCfg.VerColumn)
+	}
+	t.chUsedColumns = append(t.chUsedColumns, tblCfg.IsDeletedColumn)
 
 	t.flushQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
 		t.cfg.ChMainTable, strings.Join(t.chUsedColumns, ", "), t.cfg.ChBufferTable, t.cfg.BufferTableRowIdColumn)}
@@ -49,40 +52,57 @@ func (t *replacingMergeTree) Write(p []byte) (int, error) {
 	if t.cfg.GenerationColumn != "" {
 		row = append(row, 0) // "generationID"
 	}
-	row = append(row, 0, 0) // append "version" and "is_deleted" columns
+	if t.cfg.VerColumn != "" {
+		row = append(row, 0) // "version"
+	}
+	row = append(row, 0) // append "is_deleted" column
 
 	return n, t.insertRow(row)
 }
 
 // Insert handles incoming insert DML operation
 func (t *replacingMergeTree) Insert(lsn utils.LSN, new message.Row) (bool, error) {
-	return t.processCommandSet(commandSet{
-		append(t.convertTuples(new), uint64(lsn), 0),
-	})
+	if t.cfg.VerColumn != "" {
+		return t.processCommandSet(commandSet{append(t.convertTuples(new), uint64(lsn), 0)})
+	} else {
+		return t.processCommandSet(commandSet{append(t.convertTuples(new), 0)})
+	}
 }
 
 // Update handles incoming update DML operation
 func (t *replacingMergeTree) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
+	var cmdSet commandSet
 	equal, keyChanged := t.compareRows(old, new)
 	if equal {
 		return t.processCommandSet(nil)
 	}
 
 	if keyChanged {
-		return t.processCommandSet(commandSet{
-			append(t.convertTuples(old), uint64(lsn), 1),
-			append(t.convertTuples(new), uint64(lsn), 0),
-		})
+		if t.cfg.VerColumn != "" {
+			cmdSet = commandSet{
+				append(t.convertTuples(old), uint64(lsn), 1),
+				append(t.convertTuples(new), uint64(lsn), 0),
+			}
+		} else {
+			cmdSet = commandSet{
+				append(t.convertTuples(old), 1),
+				append(t.convertTuples(new), 0),
+			}
+		}
+	} else if t.cfg.VerColumn != "" {
+		cmdSet = commandSet{append(t.convertTuples(new), uint64(lsn), 0)}
+	} else {
+		cmdSet = commandSet{append(t.convertTuples(new), 0)}
 	}
 
-	return t.processCommandSet(commandSet{
-		append(t.convertTuples(new), uint64(lsn), 0),
-	})
+	return t.processCommandSet(cmdSet)
 }
 
 // Delete handles incoming delete DML operation
 func (t *replacingMergeTree) Delete(lsn utils.LSN, old message.Row) (bool, error) {
-	return t.processCommandSet(commandSet{
-		append(t.convertTuples(old), uint64(lsn), 1),
-	})
+	if t.cfg.VerColumn != "" {
+		return t.processCommandSet(commandSet{append(t.convertTuples(old), uint64(lsn), 0)})
+	} else {
+		return t.processCommandSet(commandSet{append(t.convertTuples(old), 0)})
+	}
 }

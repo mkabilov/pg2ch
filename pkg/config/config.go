@@ -24,7 +24,6 @@ const (
 	defaultRowIdColumn            = "row_id"
 	defaultMaxBufferLength        = 1000
 	defaultSignColumn             = "sign"
-	defaultVerColumn              = "ver"
 	defaultIsDeletedColumn        = "is_deleted"
 	defaultRedisBind              = ":6379"
 )
@@ -38,18 +37,14 @@ const (
 	//ReplacingMergeTree represents ReplacingMergeTree table engine
 	ReplacingMergeTree
 
-	//VersionedCollapsingMergeTree represents VersionedCollapsingMergeTree table engine
-	VersionedCollapsingMergeTree
-
 	//MergeTree represents MergeTree table engine
 	MergeTree
 )
 
 var tableEngines = map[tableEngine]string{
-	CollapsingMergeTree:          "CollapsingMergeTree",
-	ReplacingMergeTree:           "ReplacingMergeTree",
-	VersionedCollapsingMergeTree: "VersionedCollapsingMergeTree",
-	MergeTree:                    "MergeTree",
+	CollapsingMergeTree: "CollapsingMergeTree",
+	ReplacingMergeTree:  "ReplacingMergeTree",
+	MergeTree:           "MergeTree",
 }
 
 type pgConnConfig struct {
@@ -270,15 +265,11 @@ func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		val.BufferTableRowIdColumn = defaultRowIdColumn
 	}
 
-	if val.SignColumn == "" && (val.Engine == CollapsingMergeTree || val.Engine == VersionedCollapsingMergeTree) {
+	if val.SignColumn == "" && val.Engine == CollapsingMergeTree {
 		val.SignColumn = defaultSignColumn
 	}
 
-	if val.VerColumn == "" && (val.Engine == ReplacingMergeTree || val.Engine == VersionedCollapsingMergeTree) {
-		val.VerColumn = defaultVerColumn
-	}
-
-	if val.IsDeletedColumn == "" && (val.Engine == ReplacingMergeTree || val.Engine == VersionedCollapsingMergeTree) {
+	if val.IsDeletedColumn == "" && val.Engine == ReplacingMergeTree {
 		val.IsDeletedColumn = defaultIsDeletedColumn
 	}
 

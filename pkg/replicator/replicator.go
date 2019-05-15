@@ -89,8 +89,8 @@ func New(cfg config.Config) *Replicator {
 func (r *Replicator) newTable(tblName config.PgTableName, tblConfig config.Table) (clickHouseTable, error) {
 	switch tblConfig.Engine {
 	case config.ReplacingMergeTree:
-		if tblConfig.VerColumn == "" {
-			return nil, fmt.Errorf("ReplacingMergeTree requires version column to be set")
+		if tblConfig.VerColumn == "" && tblConfig.GenerationColumn == "" {
+			return nil, fmt.Errorf("ReplacingMergeTree requires either version or generation column to be set")
 		}
 
 		return tableengines.NewReplacingMergeTree(r.ctx, r.chConn, tblConfig, &r.generationID), nil
