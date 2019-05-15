@@ -78,12 +78,12 @@ func (r *Replicator) GenerateChDDL() error {
 		switch tblCfg.Engine {
 		case config.ReplacingMergeTree:
 			if tblCfg.VerColumn != "" {
-				engineParams = tblCfg.GenerationColumn
-			} else if tblCfg.VerColumn == "" && tblCfg.GenerationColumn != "" {
+				chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s UInt64", tblCfg.VerColumn))
+				engineParams = tblCfg.VerColumn
+			} else {
 				engineParams = tblCfg.GenerationColumn
 			}
 
-			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s UInt64", engineParams))
 			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s UInt8", tblCfg.IsDeletedColumn))
 		case config.CollapsingMergeTree:
 			engineParams = tblCfg.SignColumn
