@@ -1,8 +1,0 @@
-*~*
-*.bak
-
-/coverage.txt
-/bitcask
-/bitcaskd
-/tmp
-/dist

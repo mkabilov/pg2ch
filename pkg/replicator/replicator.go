@@ -15,8 +15,7 @@ import (
 
 	"github.com/jackc/pgx"
 	"github.com/kshvakov/clickhouse"
-	"github.com/peterbourgon/diskv/v3"
-	"github.com/prologic/bitcask"
+	"github.com/peterbourgon/diskv"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/consumer"
@@ -225,9 +224,12 @@ func (r *Replicator) readPersStorage() error {
 		if !strings.HasPrefix(key, tableLSNKeyPrefix) {
 			continue
 		}
-		val, err := r.persStorage.Read(key)
-		if err == bitcask.ErrKeyNotFound {
+		if !r.persStorage.Has(key) {
 			continue
+		}
+		val, err := r.persStorage.Read(key)
+		if err != nil {
+			return fmt.Errorf("could not read %v key: %v", err)
 		}
 
 		tblName := &config.PgTableName{}
@@ -244,10 +246,10 @@ func (r *Replicator) readPersStorage() error {
 		log.Printf("consuming changes for table %s starting from %v lsn position", tblName.String(), lsn)
 	}
 
-	if val, err := r.persStorage.Read(generationIDKey); err != bitcask.ErrKeyNotFound {
+	if val, err := r.persStorage.Read(generationIDKey); err != nil {
 		genID, err := strconv.ParseUint(string(val), 10, 32)
 		if err != nil {
-			log.Printf("incorrect value for generation_id in the cask db: %v", err)
+			log.Printf("incorrect value for generation_id in the pers storage: %v", err)
 		}
 
 		r.generationID = uint64(genID)

@@ -10,28 +10,12 @@
   revision = "ef862a3cdc58a6f1fee4e3af3d44fbe279194cde"
 
 [[projects]]
-  digest = "1:d7b2d6ad2a9768bb5c9e3bfa4d9ceaa635ca2737cca288507986f116fa4b8da2"
-  name = "github.com/gofrs/flock"
+  digest = "1:0bfbe13936953a98ae3cfe8ed6670d396ad81edf069a806d2f6515d7bb6950df"
+  name = "github.com/google/btree"
   packages = ["."]
   pruneopts = "UT"
-  revision = "392e7fae8f1b0bdbd67dad7237d23f618feb6dbb"
-  version = "v0.7.1"
-
-[[projects]]
-  digest = "1:48092bf6632f55839850666c33469f546f6d45fdbd59a66759ec12e84d853dc2"
-  name = "github.com/gogo/protobuf"
-  packages = ["proto"]
-  pruneopts = "UT"
-  revision = "ba06b47c162d49f2af050fb4c75bcbc86a159d5c"
-  version = "v1.2.1"
-
-[[projects]]
-  digest = "1:318f1c959a8a740366fce4b1e1eb2fd914036b4af58fbd0a003349b305f118ad"
-  name = "github.com/golang/protobuf"
-  packages = ["proto"]
-  pruneopts = "UT"
-  revision = "b5d812f8a3706043e23a9cd5babf2e5423744d30"
-  version = "v1.3.1"
+  revision = "4030bb1f1f0c35b30ca7009e9ebd06849dd45306"
+  version = "v1.0.0"
 
 [[projects]]
   branch = "master"
@@ -68,33 +52,28 @@
   version = "v1.3.6"
 
 [[projects]]
+  branch = "master"
+  digest = "1:89da0f0574bc94cfd0ac8b59af67bf76cdd110d503df2721006b9f0492394333"
+  name = "github.com/petar/GoLLRB"
+  packages = ["llrb"]
+  pruneopts = "UT"
+  revision = "33fb24c13b99c46c93183c291836c573ac382536"
+
+[[projects]]
+  digest = "1:a8c2725121694dfbf6d552fb86fe6b46e3e7135ea05db580c28695b916162aad"
+  name = "github.com/peterbourgon/diskv"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "0be1b92a6df0e4f5cb0a5d15fb7f643d0ad93ce6"
+  version = "v3.0.0"
+
+[[projects]]
   digest = "1:cf31692c14422fa27c83a05292eb5cbe0fb2775972e8f1f8446a71549bd8980b"
   name = "github.com/pkg/errors"
   packages = ["."]
   pruneopts = "UT"
   revision = "ba968bfe8b2f7e042a574c888954fccecfa385b4"
   version = "v0.8.1"
-
-[[projects]]
-  digest = "1:07769ae7e77865f3dcf40f6fd61f79770471d204623548a256818cd562ce47fa"
-  name = "github.com/prologic/bitcask"
-  packages = [
-    ".",
-    "internal",
-    "internal/proto",
-    "internal/streampb",
-  ]
-  pruneopts = "UT"
-  revision = "b6c9867e7b8d7b7cd4f865a51a5084e62774f49e"
-  version = "v0.1.6"
-
-[[projects]]
-  branch = "master"
-  digest = "1:4333849538d7dd266a44ae024a4533b6f24014451f7b308cd4c99106b0742aac"
-  name = "github.com/prologic/trie"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "3972df81f9b588faa8d3c84f835ec95f13a50836"
 
 [[projects]]
   digest = "1:0b8d86f074869a0e1c6293773bfafea7515752d28b49921f8e3f889158c921de"
@@ -110,15 +89,7 @@
   name = "golang.org/x/crypto"
   packages = ["pbkdf2"]
   pruneopts = "UT"
-  revision = "cbcb750295291b33242907a04be40e80801d0cfc"
-
-[[projects]]
-  branch = "master"
-  digest = "1:feece64517a25b2ffe2a82f2df04255b9914ce3fbfd5263fce681479510990c1"
-  name = "golang.org/x/exp"
-  packages = ["mmap"]
-  pruneopts = "UT"
-  revision = "0e2d8f6bf8daea8f45b95c9fc7dd64f957b1541e"
+  revision = "22d7a77e9e5f409e934ed268692e56707cd169e5"
 
 [[projects]]
   digest = "1:5f1559c4cee44069f81517430ebba19589869f3d4d4648213a4d5ddd199b11d8"
@@ -165,7 +136,7 @@
     "github.com/jackc/pgx",
     "github.com/jackc/pgx/pgtype",
     "github.com/kshvakov/clickhouse",
-    "github.com/prologic/bitcask",
+    "github.com/peterbourgon/diskv",
     "github.com/tidwall/redcon",
     "gopkg.in/yaml.v2",
   ]

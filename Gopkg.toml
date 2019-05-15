@@ -34,8 +34,8 @@
   version = "1.3.6"
 
 [[constraint]]
-  name = "github.com/prologic/bitcask"
-  version = "0.1.6"
+  name = "github.com/peterbourgon/diskv"
+  version = "3.0.0"
 
 [[constraint]]
   name = "github.com/tidwall/redcon"
