@@ -10,7 +10,7 @@ import (
 
 const forbiddenError = "cannot modify '" + tableLSNKeyPrefix + "*' keys"
 
-func (r *Replicator) caskRedis() {
+func (r *Replicator) redisServer() {
 	err := redcon.ListenAndServe(r.cfg.RedisBind,
 		func(conn redcon.Conn, cmd redcon.Command) {
 			switch strings.ToLower(string(cmd.Args[0])) {

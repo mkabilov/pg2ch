@@ -246,15 +246,22 @@ func (r *Replicator) readPersStorage() error {
 		log.Printf("consuming changes for table %s starting from %v lsn position", tblName.String(), lsn)
 	}
 
-	if val, err := r.persStorage.Read(generationIDKey); err != nil {
-		genID, err := strconv.ParseUint(string(val), 10, 32)
-		if err != nil {
-			log.Printf("incorrect value for generation_id in the pers storage: %v", err)
-		}
-
-		r.generationID = uint64(genID)
-		log.Printf("generation_id: %v", r.generationID)
+	if !r.persStorage.Has(generationIDKey) {
+		return nil
 	}
+
+	val, err := r.persStorage.Read(generationIDKey)
+	if err != nil {
+		return fmt.Errorf("could not read generation id: %v", err)
+	}
+
+	genID, err := strconv.ParseUint(string(val), 10, 32)
+	if err != nil {
+		log.Printf("incorrect value for generation_id in the pers storage: %v", err)
+	}
+
+	r.generationID = uint64(genID)
+	log.Printf("generation_id: %v", r.generationID)
 
 	return nil
 }
@@ -376,7 +383,7 @@ func (r *Replicator) Run() error {
 
 	go r.logErrCh()
 	go r.inactivityMerge()
-	go r.caskRedis()
+	go r.redisServer()
 
 	r.waitForShutdown()
 	r.cancel()
@@ -618,7 +625,7 @@ func (r *Replicator) mergeTables() error {
 func (r *Replicator) incrementGeneration() {
 	r.generationID++
 	if err := r.persStorage.Write("generation_id", []byte(fmt.Sprintf("%v", r.generationID))); err != nil {
-		log.Printf("could not save generation id to cask: %v", err)
+		log.Printf("could not save generation id: %v", err)
 	}
 }
 

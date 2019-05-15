@@ -58,7 +58,7 @@ pg: # postgresql connection params
     replication_slot_name: {logical replication slot name}
     publication_name: {postgresql publication name}
     
-db_path: {path to the cask db dir where table lsn positions will be stored}
+db_path: {path to the persistent storage dir where table lsn positions will be stored}
 ```
 
 ### Sample setup:
@@ -111,7 +111,7 @@ pg:
     replication_slot_name: pg2ch_slot
     publication_name: pg2ch_pub
     
-db_path: cask
+db_path: db
 ```
 
 - run pg2ch to start replication:
