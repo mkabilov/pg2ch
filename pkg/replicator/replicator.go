@@ -304,6 +304,23 @@ func (r *Replicator) minLSN() utils.LSN {
 	return result
 }
 
+func (r *Replicator) pgCheck() error {
+	tx, err := r.pgBegin()
+	if err != nil {
+		return fmt.Errorf("could not begin: %v", err)
+	}
+
+	if err := r.checkPgSlotAndPub(tx); err != nil {
+		return err
+	}
+
+	if err := r.pgCommit(tx); err != nil {
+		return fmt.Errorf("could not commit: %v", err)
+	}
+
+	return nil
+}
+
 func (r *Replicator) Run() error {
 	var (
 		tx  *pgx.Tx
@@ -315,14 +332,18 @@ func (r *Replicator) Run() error {
 		CacheSizeMax: 1024 * 1024, // 1MB
 	})
 
+	if err := r.pgConnect(); err != nil {
+		return fmt.Errorf("could not connect to postgresql: %v", err)
+	}
+	defer r.pgDisconnect()
+	if err := r.pgCheck(); err != nil {
+		return err
+	}
+
 	if err := r.chConnect(); err != nil {
 		return fmt.Errorf("could not connect to clickhouse: %v", err)
 	}
 	defer r.chDisconnect()
-
-	if err := r.pgConnect(); err != nil {
-		return fmt.Errorf("could not connect to postgresql: %v", err)
-	}
 
 	if err := r.readPersStorage(); err != nil {
 		return fmt.Errorf("could not get start lsn positions: %v", err)
@@ -357,20 +378,12 @@ func (r *Replicator) Run() error {
 		}
 	}
 
-	if err := r.checkPgSlotAndPub(tx); err != nil {
-		return err
-	}
-
 	if err := r.fetchPgTablesInfo(tx); err != nil {
 		return fmt.Errorf("table check failed: %v", err)
 	}
 
 	if err := r.pgCommit(tx); err != nil {
 		return err
-	}
-
-	if err := r.pgConn.Close(); err != nil { // logical replication consumer uses it's own connection
-		return fmt.Errorf("could not close pg connection: %v", err)
 	}
 
 	r.finalLSN = r.minLSN()
@@ -407,22 +420,27 @@ func (r *Replicator) Run() error {
 func (r *Replicator) inactivityMerge() {
 	ticker := time.NewTicker(r.cfg.InactivityFlushTimeout)
 
+	mergeFn := func() {
+		if r.inTx {
+			return
+		}
+
+		r.tablesToMergeMutex.Lock()
+		if err := r.mergeTables(); err != nil {
+			select {
+			case r.errCh <- fmt.Errorf("could not backgound merge tables: %v", err):
+			default:
+			}
+		}
+		r.tablesToMergeMutex.Unlock()
+	}
+
 	for {
 		select {
 		case <-r.ctx.Done():
 			return
 		case <-ticker.C:
-			if r.inTx {
-				break
-			}
-			r.tablesToMergeMutex.Lock()
-			if err := r.mergeTables(); err != nil {
-				select {
-				case r.errCh <- fmt.Errorf("could not backgound merge tables: %v", err):
-				default:
-				}
-			}
-			r.tablesToMergeMutex.Unlock()
+			mergeFn()
 		}
 	}
 }
@@ -519,6 +537,12 @@ func (r *Replicator) pgConnect() error {
 	r.pgConn.ConnInfo = connInfo
 
 	return nil
+}
+
+func (r *Replicator) pgDisconnect() {
+	if err := r.pgConn.Close(); err != nil {
+		log.Printf("could not close connection to postgresql: %v", err)
+	}
 }
 
 func (r *Replicator) pgDropRepSlot(tx *pgx.Tx) error {

@@ -2,8 +2,6 @@ package chutils
 
 import (
 	"fmt"
-	"log"
-
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/utils"
 )
@@ -41,7 +39,6 @@ var pgToChMap = map[string]string{
 func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
 	chType, ok := pgToChMap[pgColumn.BaseType]
 	if !ok {
-		log.Printf("pg type %q will be treated as String", pgColumn.BaseType)
 		chType = utils.ChString
 	}
 
