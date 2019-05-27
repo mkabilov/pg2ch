@@ -50,7 +50,7 @@ clickhouse: # clickhouse tcp protocol connection params
         {extra param name}:{extra param value}
         ...
 
-pg: # postgresql connection params
+postgres: # postgresql connection params
     host: {host name, default 127.0.0.1}
     port: {port, default 5432}
     database: {database name}
@@ -103,7 +103,7 @@ clickhouse:
     port: 9000
     database: default
     username: default
-pg:
+postgres:
     host: localhost
     port: 5432
     database: pg2ch_test
