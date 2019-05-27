@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"strings"
@@ -36,18 +37,14 @@ const (
 	//ReplacingMergeTree represents ReplacingMergeTree table engine
 	ReplacingMergeTree
 
-	//VersionedCollapsingMergeTree represents VersionedCollapsingMergeTree table engine
-	VersionedCollapsingMergeTree
-
 	//MergeTree represents MergeTree table engine
 	MergeTree
 )
 
 var tableEngines = map[tableEngine]string{
-	CollapsingMergeTree:          "CollapsingMergeTree",
-	ReplacingMergeTree:           "ReplacingMergeTree",
-	VersionedCollapsingMergeTree: "VersionedCollapsingMergeTree",
-	MergeTree:                    "MergeTree",
+	CollapsingMergeTree: "CollapsingMergeTree",
+	ReplacingMergeTree:  "ReplacingMergeTree",
+	MergeTree:           "MergeTree",
 }
 
 type pgConnConfig struct {
@@ -72,12 +69,12 @@ type Table struct {
 	VerColumn               string            `yaml:"ver_column"`
 	IsDeletedColumn         string            `yaml:"is_deleted_column"`
 	SignColumn              string            `yaml:"sign_column"`
+	GenerationColumn        string            `yaml:"generation_column"`
 	Engine                  tableEngine       `yaml:"engine"`
 	FlushThreshold          int               `yaml:"flush_threshold"`
 	InitSyncSkip            bool              `yaml:"init_sync_skip"`
 	InitSyncSkipBufferTable bool              `yaml:"init_sync_skip_buffer_table"`
 	InitSyncSkipTruncate    bool              `yaml:"init_sync_skip_truncate"`
-	EmptyValues             map[string]string `yaml:"empty_values"`
 	Columns                 map[string]string `yaml:"columns"`
 
 	PgTableName   PgTableName         `yaml:"-"`
@@ -101,7 +98,8 @@ type Config struct {
 	Postgres               pgConnConfig          `yaml:"postgres"`
 	Tables                 map[PgTableName]Table `yaml:"tables"`
 	InactivityFlushTimeout time.Duration         `yaml:"inactivity_flush_timeout"`
-	LsnStateFilepath       string                `yaml:"lsn_state_filepath"`
+	PersStoragePath        string                `yaml:"db_path"`
+	RedisBind              string                `yaml:"redis_bind"`
 }
 
 type Column struct {
@@ -148,14 +146,7 @@ func (t *tableEngine) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return fmt.Errorf("unknown table engine: %q", val)
 }
 
-func (tn *PgTableName) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	//TODO: improve parser, use regexp
-	var val string
-
-	if err := unmarshal(&val); err != nil {
-		return err
-	}
-
+func (tn *PgTableName) Parse(val string) error {
 	parts := strings.Split(val, ".")
 	if ln := len(parts); ln == 2 {
 		*tn = PgTableName{
@@ -172,6 +163,17 @@ func (tn *PgTableName) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	}
 
 	return nil
+}
+
+func (tn *PgTableName) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	//TODO: improve parser, use regexp
+	var val string
+
+	if err := unmarshal(&val); err != nil {
+		return err
+	}
+
+	return tn.Parse(val)
 }
 
 func (tn PgTableName) MarshalYAML() (interface{}, error) {
@@ -194,7 +196,11 @@ func New(filepath string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not open file: %v", err)
 	}
-	defer fp.Close() //TODO: handle err message
+	defer func() {
+		if err := fp.Close(); err != nil {
+			log.Printf("could not close config file: %v", err)
+		}
+	}()
 
 	if err := yaml.NewDecoder(fp).Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("could not decode yaml: %v", err)
@@ -235,8 +241,8 @@ func New(filepath string) (*Config, error) {
 		cfg.ClickHouse.Host = defaultClickHouseHost
 	}
 
-	if cfg.LsnStateFilepath == "" {
-		return nil, fmt.Errorf("lsn state filepath is not specified")
+	if cfg.PersStoragePath == "" {
+		return nil, fmt.Errorf("db_filepath is not set")
 	}
 
 	return &cfg, nil
@@ -255,16 +261,16 @@ func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		val.BufferTableRowIdColumn = defaultRowIdColumn
 	}
 
-	if val.SignColumn == "" && (val.Engine == CollapsingMergeTree || val.Engine == VersionedCollapsingMergeTree) {
+	if val.SignColumn == "" && val.Engine == CollapsingMergeTree {
 		val.SignColumn = defaultSignColumn
 	}
 
-	if val.VerColumn == "" && (val.Engine == ReplacingMergeTree || val.Engine == VersionedCollapsingMergeTree) {
-		val.VerColumn = defaultVerColumn
+	if val.IsDeletedColumn == "" && val.Engine == ReplacingMergeTree {
+		val.IsDeletedColumn = defaultIsDeletedColumn
 	}
 
-	if val.IsDeletedColumn == "" && (val.Engine == ReplacingMergeTree || val.Engine == VersionedCollapsingMergeTree) {
-		val.IsDeletedColumn = defaultIsDeletedColumn
+	if val.VerColumn == "" && val.Engine == ReplacingMergeTree {
+		val.VerColumn = defaultVerColumn
 	}
 
 	if val.MaxBufferLength == 0 {

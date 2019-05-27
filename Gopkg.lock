@@ -8,6 +8,12 @@
   revision = "ef862a3cdc58a6f1fee4e3af3d44fbe279194cde"
 
 [[projects]]
+  name = "github.com/google/btree"
+  packages = ["."]
+  revision = "4030bb1f1f0c35b30ca7009e9ebd06849dd45306"
+  version = "v1.0.0"
+
+[[projects]]
   branch = "master"
   name = "github.com/jackc/pgx"
   packages = [
@@ -18,7 +24,7 @@
     "pgproto3",
     "pgtype"
   ]
-  revision = "31500c15b3a8a98bc6c1b8606e655b0498f30671"
+  revision = "8faa4453fc7051d1076053f8854077753ab912f2"
 
 [[projects]]
   name = "github.com/kshvakov/clickhouse"
@@ -38,10 +44,62 @@
   version = "v1.3.6"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/petar/GoLLRB"
+  packages = ["llrb"]
+  revision = "33fb24c13b99c46c93183c291836c573ac382536"
+
+[[projects]]
+  name = "github.com/peterbourgon/diskv"
+  packages = ["."]
+  revision = "0be1b92a6df0e4f5cb0a5d15fb7f643d0ad93ce6"
+  version = "v3.0.0"
+
+[[projects]]
   name = "github.com/pkg/errors"
   packages = ["."]
   revision = "ba968bfe8b2f7e042a574c888954fccecfa385b4"
   version = "v0.8.1"
+
+[[projects]]
+  name = "github.com/tidwall/redcon"
+  packages = ["."]
+  revision = "c964c660adb68a16a0f890ceb01d25e05d0ab49e"
+  version = "v1.0.0"
+
+[[projects]]
+  branch = "master"
+  name = "golang.org/x/crypto"
+  packages = ["pbkdf2"]
+  revision = "22d7a77e9e5f409e934ed268692e56707cd169e5"
+
+[[projects]]
+  name = "golang.org/x/text"
+  packages = [
+    "cases",
+    "collate",
+    "collate/build",
+    "internal",
+    "internal/colltab",
+    "internal/gen",
+    "internal/language",
+    "internal/language/compact",
+    "internal/tag",
+    "internal/triegen",
+    "internal/ucd",
+    "language",
+    "runes",
+    "secure/bidirule",
+    "secure/precis",
+    "transform",
+    "unicode/bidi",
+    "unicode/cldr",
+    "unicode/norm",
+    "unicode/rangetable",
+    "width"
+  ]
+  revision = "342b2e1fbaa52c93f31447ad2c6abc048c63e475"
+  version = "v0.3.2"
 
 [[projects]]
   name = "gopkg.in/yaml.v2"
@@ -52,6 +110,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "6752079078989b97b379e41434fe20cd7c51b440393dde8bd5d09488b099896e"
+  inputs-digest = "ec33d2502f97a14e88af7d340eb114425f966a47b7816819b329a453f6605a7e"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -57,9 +57,10 @@ type genericTable struct {
 	bufferFlushCnt int // number of flushed buffers
 	flushQueries   []string
 	tupleColumns   []message.Column // Columns description taken from RELATION rep message
+	generationID   *uint64
 }
 
-func newGenericTable(ctx context.Context, chConn *sql.DB, tblCfg config.Table) genericTable {
+func newGenericTable(ctx context.Context, chConn *sql.DB, tblCfg config.Table, genID *uint64) genericTable {
 	t := genericTable{
 		ctx:           ctx,
 		chConn:        chConn,
@@ -69,6 +70,7 @@ func newGenericTable(ctx context.Context, chConn *sql.DB, tblCfg config.Table) g
 		pgUsedColumns: make([]string, 0),
 		flushMutex:    &sync.Mutex{},
 		tupleColumns:  tblCfg.TupleColumns,
+		generationID:  genID,
 	}
 
 	t.buffer = make([]bufCommand, t.cfg.MaxBufferLength)
@@ -82,6 +84,10 @@ func newGenericTable(ctx context.Context, chConn *sql.DB, tblCfg config.Table) g
 		t.columnMapping[pgCol.Name] = chCol
 		t.chUsedColumns = append(t.chUsedColumns, chCol.Name)
 		t.pgUsedColumns = append(t.pgUsedColumns, pgCol.Name)
+	}
+
+	if tblCfg.GenerationColumn != "" {
+		t.chUsedColumns = append(t.chUsedColumns, tblCfg.GenerationColumn)
 	}
 
 	return t
@@ -202,8 +208,6 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	}
 	rows := t.bufferRowId
 	t.bufferCmdId = 0
-	t.bufferRowId = 0
-
 	if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
 		if !t.cfg.InitSyncSkipTruncate {
 			if err := t.truncateMainTable(); err != nil {
@@ -216,7 +220,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 			return fmt.Errorf("could not move from buffer to the main table: %v", err)
 		}
 	}
-
+	t.bufferRowId = 0
 	log.Printf("Pg table %s: %d rows copied to ClickHouse %q table", t.cfg.PgTableName.String(), rows, t.cfg.ChMainTable)
 
 	return nil
@@ -388,6 +392,11 @@ func (t *genericTable) FlushToMainTable() error {
 		return nil
 	}
 
+	defer func(startTime time.Time, rows int) {
+		log.Printf("FlushToMainTable for %s pg table processed in %v (rows: %d)",
+			t.cfg.PgTableName.String(), time.Since(startTime).Truncate(time.Second), rows)
+	}(time.Now(), t.bufferRowId)
+
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		err := t.tryFlushToMainTable()
 		if err == nil {
@@ -484,6 +493,9 @@ func (t *genericTable) convertTuples(row message.Row) []interface{} {
 		}
 
 		res = append(res, val)
+	}
+	if t.cfg.GenerationColumn != "" {
+		res = append(res, uint32(*t.generationID))
 	}
 
 	return res

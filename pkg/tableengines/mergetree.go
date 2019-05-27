@@ -18,9 +18,9 @@ type mergeTreeTable struct {
 }
 
 // NewMergeTree instantiates mergeTreeTable
-func NewMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table) *mergeTreeTable {
+func NewMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID *uint64) *mergeTreeTable {
 	t := mergeTreeTable{
-		genericTable: newGenericTable(ctx, conn, tblCfg),
+		genericTable: newGenericTable(ctx, conn, tblCfg, genID),
 	}
 
 	if t.cfg.ChBufferTable == "" {
@@ -45,6 +45,10 @@ func (t *mergeTreeTable) Write(p []byte) (int, error) {
 	row, n, err := t.syncConvertIntoRow(p)
 	if err != nil {
 		return 0, err
+	}
+
+	if t.cfg.GenerationColumn != "" {
+		row = append(row, 0)
 	}
 
 	return n, t.insertRow(row)
