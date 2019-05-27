@@ -353,12 +353,12 @@ func (r *ReplicaIdentity) UnmarshalYAML(unmarshal func(interface{}) error) error
 	return fmt.Errorf("unknown replica identity: %q", val)
 }
 
-func (dst *ReplicaIdentity) DecodeText(ci *pgtype.ConnInfo, src []byte) error {
+func (r *ReplicaIdentity) DecodeText(ci *pgtype.ConnInfo, src []byte) error {
 	if src == nil {
 		return nil
 	}
 
-	*dst = ReplicaIdentity(uint8(src[0]))
+	*r = ReplicaIdentity(uint8(src[0]))
 
 	return nil
 }

@@ -71,3 +71,7 @@ func (l *LSN) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 	return nil
 }
+
+func (l *LSN) Bytes() []byte {
+	return []byte(l.String())
+}
