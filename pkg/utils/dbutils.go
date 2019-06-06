@@ -157,3 +157,20 @@ func DecodeCopy(in []byte) ([]sql.NullString, error) {
 
 	return result, nil
 }
+
+func ParseIstore(str string) (keys, values []int, err error) {
+	keys = make([]int, 0)
+	values = make([]int, 0)
+	for _, pair := range strings.Split(str, ",") {
+		var key, value int
+		n, err := fmt.Sscanf(strings.TrimLeft(pair, " "), `"%d"=>"%d"`, &key, &value)
+		if err != nil || n != 2 {
+			return nil, nil, fmt.Errorf("could not parse istore: %v(%d)", err, n)
+		}
+
+		keys = append(keys, key)
+		values = append(values, value)
+	}
+
+	return
+}

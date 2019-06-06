@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
+	"github.com/mkabilov/pg2ch/pkg/utils"
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 	"github.com/mkabilov/pg2ch/pkg/utils/tableinfo"
 )
@@ -56,6 +57,13 @@ func (r *Replicator) GenerateChDDL() error {
 			}
 			if pgCol.PkCol > 0 && pgCol.PkCol > pkColumnNumb {
 				pkColumnNumb = pgCol.PkCol
+			}
+
+			if pgCol.BaseType == utils.PgIstore {
+				chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_keys Array(Int32)", chColName))
+				chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_values Array(Int32)", chColName))
+
+				continue
 			}
 
 			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s %s", chColName, chColDDL))
