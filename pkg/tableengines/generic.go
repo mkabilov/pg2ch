@@ -82,9 +82,11 @@ func newGenericTable(ctx context.Context, chConn *sql.DB, tblCfg config.Table, g
 		}
 
 		t.columnMapping[pgCol.Name] = chCol
-		if pgCol.TypeOID == utils.OID(17059) || pgCol.TypeOID == utils.OID(17065) {
-			t.chUsedColumns = append(t.chUsedColumns, chCol.Name+"_keys")
-			t.chUsedColumns = append(t.chUsedColumns, chCol.Name+"_values")
+		if pgCol.TypeOID == utils.BigIstoreOID || pgCol.TypeOID == utils.IstoreOID {
+			t.chUsedColumns = append(t.chUsedColumns, pgCol.Name+"_keys")
+			t.chUsedColumns = append(t.chUsedColumns, pgCol.Name+"_values")
+		} else {
+			t.chUsedColumns = append(t.chUsedColumns, chCol.Name)
 		}
 
 		t.pgUsedColumns = append(t.pgUsedColumns, pgCol.Name)
@@ -500,6 +502,7 @@ func (t *genericTable) convertTuples(row message.Row) []interface{} {
 
 				res = append(res, valKeys)
 				res = append(res, valValues)
+				continue
 			}
 
 			val, err = convert(string(row[colId].Value), t.columnMapping[col.Name], t.cfg.PgColumns[col.Name])

@@ -11,6 +11,9 @@ const (
 	OutputPlugin = "pgoutput"
 
 	copyNull = 'N'
+
+	IstoreOID    = OID(34111)
+	BigIstoreOID = OID(34117)
 )
 
 var decodeMap = map[byte]byte{

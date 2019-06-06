@@ -152,7 +152,7 @@ func (r *Replicator) initAndSyncTables() error {
 			return err
 		}
 
-		if _, ok := r.tableLSN[tblName]; !ok {
+		if _, ok := r.tableLSN[tblName]; !r.cfg.Tables[tblName].InitSyncSkip && !ok {
 			lsn, err = r.pgCreateTempRepSlot(tx, tblName) // create temp repl slot must the first command in the tx
 			if err != nil {
 				return fmt.Errorf("could not create temporary replication slot: %v", err)
@@ -193,8 +193,10 @@ func (r *Replicator) initAndSyncTables() error {
 			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 
-		if err := r.pgDropRepSlot(tx); err != nil {
-			return fmt.Errorf("could not drop replication slot: %v", err)
+		if !r.cfg.Tables[tblName].InitSyncSkip {
+			if err := r.pgDropRepSlot(tx); err != nil {
+				return fmt.Errorf("could not drop replication slot: %v", err)
+			}
 		}
 
 		if err := tx.Commit(); err != nil {
@@ -774,6 +776,11 @@ func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (c
 		}
 	} else {
 		for _, pgCol := range cfg.TupleColumns {
+			if pgCol.TypeOID == utils.IstoreOID || pgCol.TypeOID == utils.BigIstoreOID {
+				cfg.ColumnMapping[pgCol.Name] = config.ChColumn{}
+				continue
+			}
+
 			if chColCfg, ok := chColumns[pgCol.Name]; !ok {
 				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", pgCol.Name, cfg.ChMainTable)
 			} else {
