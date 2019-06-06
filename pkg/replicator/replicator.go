@@ -152,7 +152,7 @@ func (r *Replicator) initAndSyncTables() error {
 			return err
 		}
 
-		if _, ok := r.tableLSN[tblName]; !r.cfg.Tables[tblName].InitSyncSkip && !ok {
+		if _, ok := r.tableLSN[tblName]; !ok {
 			lsn, err = r.pgCreateTempRepSlot(tx, tblName) // create temp repl slot must the first command in the tx
 			if err != nil {
 				return fmt.Errorf("could not create temporary replication slot: %v", err)
