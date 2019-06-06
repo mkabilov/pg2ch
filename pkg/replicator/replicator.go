@@ -26,6 +26,7 @@ import (
 )
 
 const (
+	applicationName   = "pg2ch"
 	tableLSNKeyPrefix = "table_lsn_"
 	generationIDKey   = "generation_id"
 )
@@ -145,6 +146,10 @@ func (r *Replicator) initAndSyncTables() error {
 			lsn utils.LSN
 			err error
 		)
+		if r.cfg.Tables[tblName].InitSyncSkip {
+			continue
+		}
+
 		tx, err := r.pgBegin()
 		if err != nil {
 			return err
@@ -527,7 +532,7 @@ func (r *Replicator) pgConnect() error {
 	var err error
 
 	r.pgConn, err = pgx.Connect(r.cfg.Postgres.Merge(pgx.ConnConfig{
-		RuntimeParams:        map[string]string{"replication": "database"},
+		RuntimeParams:        map[string]string{"replication": "database", "application_name": applicationName},
 		PreferSimpleProtocol: true}))
 	if err != nil {
 		return fmt.Errorf("could not rep connect to pg: %v", err)
