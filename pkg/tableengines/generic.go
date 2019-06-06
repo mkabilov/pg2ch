@@ -495,6 +495,11 @@ func (t *genericTable) convertTuples(row message.Row) []interface{} {
 			if t.cfg.PgColumns[col.Name].BaseType == utils.PgIstore ||
 				t.cfg.PgColumns[col.Name].BaseType == utils.PgBigIstore {
 
+				if len(row[colId].Value) == 0 {
+					res = append(res, []int{})
+					res = append(res, []int{})
+					continue
+				}
 				valKeys, valValues, err := utils.ParseIstore(string(row[colId].Value))
 				if err != nil {
 					panic(err)
