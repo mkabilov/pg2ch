@@ -511,7 +511,9 @@ func (t *genericTable) convertTuples(row message.Row) []interface{} {
 			}
 		} else if t.cfg.PgColumns[col.Name].BaseType == utils.PgIstore ||
 			t.cfg.PgColumns[col.Name].BaseType == utils.PgBigIstore {
-			res = append(res, val)
+			res = append(res, []int{})
+			res = append(res, []int{})
+			continue
 		}
 
 		res = append(res, val)
