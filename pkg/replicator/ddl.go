@@ -44,36 +44,44 @@ func (r *Replicator) GenerateChDDL() error {
 		}
 
 		chColumnDDLs := make([]string, 0)
-		for _, pgCol := range tblCfg.TupleColumns {
-			chColName, ok := tblCfg.Columns[pgCol.Name]
+		for _, tupleColumn := range tblCfg.TupleColumns {
+			chColName, ok := tblCfg.Columns[tupleColumn.Name]
 			if !ok {
 				continue
 			}
 
-			pgCol := tblCfg.PgColumns[pgCol.Name]
-			chColDDL, err := chutils.ToClickHouseType(pgCol)
+			pgCol := tblCfg.PgColumns[tupleColumn.Name]
+			chColType, err := chutils.ToClickHouseType(pgCol)
 			if err != nil {
 				return fmt.Errorf("could not get clickhouse column definition: %v", err)
 			}
+
 			if pgCol.PkCol > 0 && pgCol.PkCol > pkColumnNumb {
 				pkColumnNumb = pgCol.PkCol
 			}
+			columnCfg, hasColumnCfg := tblCfg.ColumnProperties[tupleColumn.Name]
+			if !hasColumnCfg && (pgCol.BaseType == utils.PgIstore || pgCol.BaseType == utils.PgBigIstore) {
+				hasColumnCfg = true
+				columnCfg = config.ColumnProperty{
+					IstoreKeysSuffix:   "keys",
+					IstoreValuesSuffix: "values",
+				}
+			}
 
-			if pgCol.BaseType == utils.PgIstore {
-				chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_keys Array(Int32)", chColName))
-				chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_values Array(Int32)", chColName))
-
+			if hasColumnCfg {
+				switch {
+				case columnCfg.FlattenIstore:
+					for i := columnCfg.FlattenIstoreMin; i <= columnCfg.FlattenIstoreMax; i++ {
+						chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%d %s", chColName, i, chColType))
+					}
+				case columnCfg.IstoreKeysSuffix != "":
+					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%s Array(Int32)", chColName, columnCfg.IstoreKeysSuffix))
+					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%s Array(%s)", chColName, columnCfg.IstoreValuesSuffix, chColType))
+				}
 				continue
 			}
 
-			if pgCol.BaseType == utils.PgBigIstore {
-				chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_keys Array(Int32)", chColName))
-				chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_values Array(Int64)", chColName))
-
-				continue
-			}
-
-			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s %s", chColName, chColDDL))
+			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s %s", chColName, chColType))
 		}
 		pkColumns := make([]string, pkColumnNumb)
 
