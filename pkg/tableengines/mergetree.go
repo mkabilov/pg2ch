@@ -2,7 +2,6 @@ package tableengines
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -18,9 +17,9 @@ type mergeTreeTable struct {
 }
 
 // NewMergeTree instantiates mergeTreeTable
-func NewMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID *uint64) *mergeTreeTable {
+func NewMergeTree(ctx context.Context, connUrl, dbName string, tblCfg config.Table, genID *uint64) *mergeTreeTable {
 	t := mergeTreeTable{
-		genericTable: newGenericTable(ctx, conn, tblCfg, genID),
+		genericTable: newGenericTable(ctx, connUrl, dbName, tblCfg, genID),
 	}
 
 	if t.cfg.ChBufferTable == "" {
@@ -40,18 +39,22 @@ func (t *mergeTreeTable) Sync(pgTx *pgx.Tx) error {
 
 // Write implements io.Writer which is used during the Sync process, see genSync method
 func (t *mergeTreeTable) Write(p []byte) (int, error) {
-	var row []interface{}
-
-	row, n, err := t.syncConvertIntoRow(p)
-	if err != nil {
+	if err := t.genWrite(p); err != nil {
 		return 0, err
 	}
 
 	if t.cfg.GenerationColumn != "" {
-		row = append(row, 0)
+		if err := t.chLoader.BulkAdd([]byte("\t0")); err != nil {
+			return 0, err
+		}
+	}
+	if err := t.chLoader.BulkAdd([]byte("\n")); err != nil {
+		return 0, err
 	}
 
-	return n, t.insertRow(row)
+	t.bufferRowId++
+
+	return len(p), nil
 }
 
 // Insert handles incoming insert DML operation

@@ -1,32 +1,27 @@
 package tableinfo
 
 import (
-	"database/sql"
 	"fmt"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
+	"github.com/mkabilov/pg2ch/pkg/utils/chloader"
 )
 
-func TableChColumns(chConn *sql.DB, databaseName, chTableName string) (map[string]config.ChColumn, error) {
+func TableChColumns(chConnectionString, databaseName string, chTableName string) (map[string]config.ChColumn, error) {
 	result := make(map[string]config.ChColumn)
 
-	rows, err := chConn.Query("select name, type from system.columns where database = ? and table = ?",
-		databaseName, chTableName)
+	chLoader := chloader.New(chConnectionString, databaseName)
 
+	rows, err := chLoader.Query(fmt.Sprintf("select name, type from system.columns where database = '%s' and table = '%s'",
+		databaseName, chTableName)) //TODO: fix SQL injections
 	if err != nil {
 		return nil, fmt.Errorf("could not query: %v", err)
 	}
 
-	for rows.Next() {
-		var colName, colType string
-
-		if err := rows.Scan(&colName, &colType); err != nil {
-			return nil, fmt.Errorf("could not scan: %v", err)
-		}
-
-		result[colName] = config.ChColumn{
-			Name:   colName,
-			Column: parseChType(colType),
+	for _, line := range rows {
+		result[line[0]] = config.ChColumn{
+			Name:   line[0],
+			Column: parseChType(line[1]),
 		}
 	}
 

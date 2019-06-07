@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx"
@@ -20,9 +21,9 @@ type replacingMergeTree struct {
 }
 
 // NewReplacingMergeTree instantiates replacingMergeTree
-func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID *uint64) *replacingMergeTree {
+func NewReplacingMergeTree(ctx context.Context, connUrl, dbName string, tblCfg config.Table, genID *uint64) *replacingMergeTree {
 	t := replacingMergeTree{
-		genericTable: newGenericTable(ctx, conn, tblCfg, genID),
+		genericTable: newGenericTable(ctx, connUrl, dbName, tblCfg, genID),
 		verColumn:    tblCfg.VerColumn,
 	}
 	if tblCfg.VerColumn != "" {
@@ -43,29 +44,42 @@ func (t *replacingMergeTree) Sync(pgTx *pgx.Tx) error {
 
 // Write implements io.Writer which is used during the Sync process, see genSync method
 func (t *replacingMergeTree) Write(p []byte) (int, error) {
-	var row []interface{}
-
-	row, n, err := t.syncConvertIntoRow(p)
-	if err != nil {
+	if err := t.genWrite(p); err != nil {
 		return 0, err
 	}
+
+	suffixes := make([]string, 0)
+
 	if t.cfg.GenerationColumn != "" {
-		row = append(row, 0) // "generationID"
+		suffixes = append(suffixes, "0") // generation id
 	}
 	if t.cfg.VerColumn != "" {
-		row = append(row, 0) // "version"
+		suffixes = append(suffixes, "0") // version
 	}
-	row = append(row, 0) // append "is_deleted" column
+	suffixes = append(suffixes, "0") // is_deleted
 
-	return n, t.insertRow(row)
+	if len(suffixes) > 0 {
+		if err := t.chLoader.BulkAdd([]byte(strings.Join(suffixes, "\t"))); err != nil {
+			return 0, err
+		}
+	}
+
+	if err := t.chLoader.BulkAdd([]byte("\n")); err != nil {
+		return 0, err
+	}
+
+	return len(p), nil
 }
 
 // Insert handles incoming insert DML operation
 func (t *replacingMergeTree) Insert(lsn utils.LSN, new message.Row) (bool, error) {
 	if t.cfg.VerColumn != "" {
-		return t.processCommandSet(commandSet{append(t.convertTuples(new), uint64(lsn), 0)})
+		return t.processCommandSet(commandSet{append(
+			t.convertTuples(new),
+			sql.NullString{String: strconv.FormatUint(uint64(lsn), 10), Valid: true},
+			sql.NullString{String: "0", Valid: true})})
 	} else {
-		return t.processCommandSet(commandSet{append(t.convertTuples(new), 0)})
+		return t.processCommandSet(commandSet{append(t.convertTuples(new), sql.NullString{String: "0", Valid: true})})
 	}
 }
 
@@ -76,23 +90,24 @@ func (t *replacingMergeTree) Update(lsn utils.LSN, old, new message.Row) (bool, 
 	if equal {
 		return t.processCommandSet(nil)
 	}
+	lsnStr := sql.NullString{String: strconv.FormatUint(uint64(lsn), 10), Valid: true}
 
 	if keyChanged {
 		if t.cfg.VerColumn != "" {
 			cmdSet = commandSet{
-				append(t.convertTuples(old), uint64(lsn), 1),
-				append(t.convertTuples(new), uint64(lsn), 0),
+				append(t.convertTuples(old), lsnStr, oneStr),
+				append(t.convertTuples(new), lsnStr, zeroStr),
 			}
 		} else {
 			cmdSet = commandSet{
-				append(t.convertTuples(old), 1),
-				append(t.convertTuples(new), 0),
+				append(t.convertTuples(old), oneStr),
+				append(t.convertTuples(new), zeroStr),
 			}
 		}
 	} else if t.cfg.VerColumn != "" {
-		cmdSet = commandSet{append(t.convertTuples(new), uint64(lsn), 0)}
+		cmdSet = commandSet{append(t.convertTuples(new), lsnStr, zeroStr)}
 	} else {
-		cmdSet = commandSet{append(t.convertTuples(new), 0)}
+		cmdSet = commandSet{append(t.convertTuples(new), zeroStr)}
 	}
 
 	return t.processCommandSet(cmdSet)
@@ -101,8 +116,8 @@ func (t *replacingMergeTree) Update(lsn utils.LSN, old, new message.Row) (bool, 
 // Delete handles incoming delete DML operation
 func (t *replacingMergeTree) Delete(lsn utils.LSN, old message.Row) (bool, error) {
 	if t.cfg.VerColumn != "" {
-		return t.processCommandSet(commandSet{append(t.convertTuples(old), uint64(lsn), 0)})
+		return t.processCommandSet(commandSet{append(t.convertTuples(old), sql.NullString{String: strconv.FormatUint(uint64(lsn), 10), Valid: true}, zeroStr)})
 	} else {
-		return t.processCommandSet(commandSet{append(t.convertTuples(old), 0)})
+		return t.processCommandSet(commandSet{append(t.convertTuples(old), zeroStr)})
 	}
 }

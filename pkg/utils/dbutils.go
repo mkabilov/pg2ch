@@ -11,6 +11,9 @@ const (
 	OutputPlugin = "pgoutput"
 
 	copyNull = 'N'
+
+	IstoreOID    = OID(34111)
+	BigIstoreOID = OID(34117)
 )
 
 var decodeMap = map[byte]byte{
@@ -156,4 +159,56 @@ func DecodeCopy(in []byte) ([]sql.NullString, error) {
 	}
 
 	return result, nil
+}
+
+func ParseIstore(str string) (keys, values []int, err error) {
+	keys = make([]int, 0)
+	values = make([]int, 0)
+	for _, pair := range strings.Split(str, ",") {
+		var key, value int
+		n, err := fmt.Sscanf(strings.TrimLeft(pair, " "), `"%d"=>"%d"`, &key, &value)
+		if err != nil || n != 2 {
+			return nil, nil, fmt.Errorf("could not parse istore: %v(%d)", err, n)
+		}
+
+		keys = append(keys, key)
+		values = append(values, value)
+	}
+
+	return
+}
+
+func SplitIstore(str string) (keys, values []string, err error) {
+	keys = make([]string, 0)
+	values = make([]string, 0)
+
+	isKey := true
+	tmpStr := strings.Builder{}
+	isNum := false
+	for _, c := range str {
+		switch c {
+		case '"':
+			isNum = !isNum
+			if !isNum {
+				if isKey {
+					keys = append(keys, tmpStr.String())
+				} else {
+					values = append(values, tmpStr.String())
+					isKey = true
+				}
+			} else {
+				tmpStr.Reset()
+			}
+		case '=':
+			isKey = false
+		case '>':
+		default:
+			tmpStr.WriteRune(c)
+		}
+	}
+	if len(keys) != len(values) {
+		err = fmt.Errorf("wrong istore")
+	}
+
+	return
 }

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx"
-	"github.com/kshvakov/clickhouse"
 	"github.com/peterbourgon/diskv"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
@@ -49,8 +48,10 @@ type Replicator struct {
 	cfg      config.Config
 	errCh    chan error
 
+	chConnString string
+	chDbName     string
+
 	pgConn *pgx.Conn
-	chConn *sql.DB
 
 	persStorage *diskv.Diskv
 
@@ -83,6 +84,8 @@ func New(cfg config.Config) *Replicator {
 		tableLSN:           make(map[config.PgTableName]utils.LSN),
 	}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
+	r.chDbName = r.cfg.ClickHouse.Database
+	r.chConnString = fmt.Sprintf("http://%s:%d", r.cfg.ClickHouse.Host, r.cfg.ClickHouse.Port) //TODO use uri builder
 
 	return &r
 }
@@ -94,15 +97,15 @@ func (r *Replicator) newTable(tblName config.PgTableName, tblConfig config.Table
 			return nil, fmt.Errorf("ReplacingMergeTree requires either version or generation column to be set")
 		}
 
-		return tableengines.NewReplacingMergeTree(r.ctx, r.chConn, tblConfig, &r.generationID), nil
+		return tableengines.NewReplacingMergeTree(r.ctx, r.chConnString, r.chDbName, tblConfig, &r.generationID), nil
 	case config.CollapsingMergeTree:
 		if tblConfig.SignColumn == "" {
 			return nil, fmt.Errorf("CollapsingMergeTree requires sign column to be set")
 		}
 
-		return tableengines.NewCollapsingMergeTree(r.ctx, r.chConn, tblConfig, &r.generationID), nil
+		return tableengines.NewCollapsingMergeTree(r.ctx, r.chConnString, r.chDbName, tblConfig, &r.generationID), nil
 	case config.MergeTree:
-		return tableengines.NewMergeTree(r.ctx, r.chConn, tblConfig, &r.generationID), nil
+		return tableengines.NewMergeTree(r.ctx, r.chConnString, r.chDbName, tblConfig, &r.generationID), nil
 	}
 
 	return nil, fmt.Errorf("%s table engine is not implemented", tblConfig.Engine)
@@ -342,11 +345,6 @@ func (r *Replicator) Run() error {
 		return err
 	}
 
-	if err := r.chConnect(); err != nil {
-		return fmt.Errorf("could not connect to clickhouse: %v", err)
-	}
-	defer r.chDisconnect()
-
 	if err := r.readPersStorage(); err != nil {
 		return fmt.Errorf("could not get start lsn positions: %v", err)
 	}
@@ -499,30 +497,6 @@ func (r *Replicator) fetchPgTablesInfo(tx *pgx.Tx) error {
 	}
 
 	return nil
-}
-
-func (r *Replicator) chConnect() error {
-	var err error
-
-	r.chConn, err = sql.Open("clickhouse", r.cfg.ClickHouse.ConnectionString())
-	if err != nil {
-		log.Fatal(err)
-	}
-	if err := r.chConn.Ping(); err != nil {
-		if exception, ok := err.(*clickhouse.Exception); ok {
-			return fmt.Errorf("[%d] %s %s", exception.Code, exception.Message, exception.StackTrace)
-		}
-
-		return fmt.Errorf("could not ping: %v", err)
-	}
-
-	return nil
-}
-
-func (r *Replicator) chDisconnect() {
-	if err := r.chConn.Close(); err != nil {
-		log.Printf("could not close connection to clickhouse: %v", err)
-	}
 }
 
 func (r *Replicator) pgConnect() error {
@@ -758,7 +732,7 @@ func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (c
 		return cfg, fmt.Errorf("could not get columns for %s postgres table: %v", tblName.String(), err)
 	}
 
-	chColumns, err := tableinfo.TableChColumns(r.chConn, r.cfg.ClickHouse.Database, cfg.ChMainTable)
+	chColumns, err := tableinfo.TableChColumns(r.chConnString, r.chDbName, cfg.ChMainTable)
 	if err != nil {
 		return cfg, fmt.Errorf("could not get columns for %q clickhouse table: %v", cfg.ChMainTable, err)
 	}
@@ -774,6 +748,10 @@ func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (c
 		}
 	} else {
 		for _, pgCol := range cfg.TupleColumns {
+			if pgCol.TypeOID == utils.IstoreOID || pgCol.TypeOID == utils.BigIstoreOID {
+				cfg.ColumnMapping[pgCol.Name] = config.ChColumn{}
+				continue
+			}
 			if chColCfg, ok := chColumns[pgCol.Name]; !ok {
 				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", pgCol.Name, cfg.ChMainTable)
 			} else {

@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mkabilov/pg2ch/pkg/utils/chloader"
+
 	"github.com/jackc/pgx"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
@@ -23,27 +25,29 @@ import (
 const (
 	attemptInterval = time.Second
 	maxAttempts     = 100
-)
 
-const (
 	pgTrue  = "t"
 	pgFalse = "f"
 )
 
+var (
+	zeroStr     = sql.NullString{String: "0", Valid: true}
+	oneStr      = sql.NullString{String: "1", Valid: true}
+	minusOneStr = sql.NullString{String: "-1", Valid: true}
+)
+
 type bufRow struct {
 	rowID int
-	data  []interface{}
+	data  []sql.NullString
 }
 
-type commandSet [][]interface{}
+type commandSet [][]sql.NullString
 
 type bufCommand []bufRow
 
 type genericTable struct {
-	ctx     context.Context
-	chConn  *sql.DB
-	chTx    *sql.Tx
-	chStmnt *sql.Stmt
+	ctx      context.Context
+	chLoader *chloader.CHLoader
 
 	cfg config.Table
 
@@ -60,10 +64,10 @@ type genericTable struct {
 	generationID   *uint64
 }
 
-func newGenericTable(ctx context.Context, chConn *sql.DB, tblCfg config.Table, genID *uint64) genericTable {
+func newGenericTable(ctx context.Context, connUrl, dbName string, tblCfg config.Table, genID *uint64) genericTable {
 	t := genericTable{
 		ctx:           ctx,
-		chConn:        chConn,
+		chLoader:      chloader.New(connUrl, dbName),
 		cfg:           tblCfg,
 		columnMapping: make(map[string]config.ChColumn),
 		chUsedColumns: make([]string, 0),
@@ -94,7 +98,7 @@ func newGenericTable(ctx context.Context, chConn *sql.DB, tblCfg config.Table, g
 }
 
 func (t *genericTable) truncateMainTable() error {
-	if _, err := t.chConn.Exec(fmt.Sprintf("truncate table %s", t.cfg.ChMainTable)); err != nil {
+	if err := t.chLoader.Exec(fmt.Sprintf("truncate table %s", t.cfg.ChMainTable)); err != nil {
 		return err
 	}
 
@@ -106,50 +110,11 @@ func (t *genericTable) truncateBufTable() error {
 		return nil
 	}
 
-	if _, err := t.chConn.Exec(fmt.Sprintf("truncate table %s", t.cfg.ChBufferTable)); err != nil {
+	if err := t.chLoader.Exec(fmt.Sprintf("truncate table %s", t.cfg.ChBufferTable)); err != nil {
 		return err
 	}
 
 	return nil
-}
-
-func (t *genericTable) stmntPrepare(sync bool) error {
-	var (
-		tableName string
-		err       error
-	)
-
-	columns := t.chUsedColumns
-	if t.cfg.ChBufferTable != "" && ((sync && !t.cfg.InitSyncSkipBufferTable) || !sync) {
-		tableName = t.cfg.ChBufferTable
-		columns = append(columns, t.cfg.BufferTableRowIdColumn)
-	} else {
-		tableName = t.cfg.ChMainTable
-	}
-
-	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-		tableName,
-		strings.Join(columns, ", "),
-		strings.Join(strings.Split(strings.Repeat("?", len(columns)), ""), ", "))
-
-	t.chStmnt, err = t.chTx.Prepare(query)
-	if err != nil {
-		return fmt.Errorf("could not prepare statement: %v", err)
-	}
-
-	return nil
-}
-
-func (t *genericTable) stmntExec(params []interface{}) error {
-	_, err := t.chStmnt.Exec(params...)
-
-	return err
-}
-
-func (t *genericTable) begin() (err error) {
-	t.chTx, err = t.chConn.Begin()
-
-	return
 }
 
 func (t *genericTable) pgStatLiveTuples(pgTx *pgx.Tx) (int64, error) {
@@ -164,13 +129,52 @@ func (t *genericTable) pgStatLiveTuples(pgTx *pgx.Tx) (int64, error) {
 	return rows.Int64, nil
 }
 
+func (t *genericTable) genWrite(p []byte) error {
+	fields := strings.Split(string(p), "\t") //TODO: rewrite split function into single scan of a string
+
+	if len(fields) != len(t.tupleColumns) {
+		return fmt.Errorf("fields number mismatch")
+	}
+
+	for pgId, pgCol := range t.tupleColumns {
+		if pgId != 0 {
+			if err := t.chLoader.BulkAdd([]byte("\t")); err != nil {
+				return err
+			}
+		}
+
+		if fields[pgId] == `\N` {
+			if err := t.chLoader.BulkAdd([]byte(fields[pgId])); err != nil {
+				return err
+			}
+		}
+
+		if pgCol.TypeOID == utils.IstoreOID || pgCol.TypeOID == utils.BigIstoreOID {
+			keys, values, err := utils.SplitIstore(fields[pgId])
+			if err != nil {
+				return fmt.Errorf("could not parse istore: %v", err)
+			}
+
+			if err := t.chLoader.BulkAdd([]byte("[" + strings.Join(keys, ",") + "]\t")); err != nil {
+				return err
+			}
+
+			if err := t.chLoader.BulkAdd([]byte("[" + strings.Join(values, ",") + "]")); err != nil {
+				return err
+			}
+		} else {
+			if err := t.chLoader.BulkAdd([]byte(fields[pgId])); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	if t.cfg.InitSyncSkip {
 		return nil
-	}
-
-	if err := t.begin(); err != nil {
-		return fmt.Errorf("could not begin: %v", err)
 	}
 
 	tblLiveTuples, err := t.pgStatLiveTuples(pgTx)
@@ -194,18 +198,22 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		}
 	}
 
-	if err := t.stmntPrepare(true); err != nil {
-		return fmt.Errorf("could not prepare: %v", err)
-	}
+	loaderErrCh := make(chan error, 1)
+	go func(errCh chan error) {
+		errCh <- t.chLoader.BulkUpload(t.cfg.ChMainTable, nil)
+	}(loaderErrCh)
 
 	query := fmt.Sprintf("copy %s(%s) to stdout", t.cfg.PgTableName.String(), strings.Join(t.pgUsedColumns, ", "))
 	if _, err := pgTx.CopyToWriter(w, query); err != nil {
 		return fmt.Errorf("could not copy: %v", err)
 	}
 
-	if err := t.stmntCloseCommit(); err != nil {
-		return err
+	t.chLoader.BulkFinish()
+	if err := <-loaderErrCh; err != nil {
+		return fmt.Errorf("could not load to CH: %v", err)
 	}
+	close(loaderErrCh)
+
 	rows := t.bufferRowId
 	t.bufferCmdId = 0
 	if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
@@ -226,18 +234,6 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	return nil
 }
 
-func (t *genericTable) stmntCloseCommit() error {
-	if err := t.chStmnt.Close(); err != nil {
-		return fmt.Errorf("could not close statement: %v", err)
-	}
-
-	if err := t.chTx.Commit(); err != nil {
-		return fmt.Errorf("could not commit transaction: %v", err)
-	}
-
-	return nil
-}
-
 func (t *genericTable) bufferAppend(cmdSet commandSet) {
 	bufItem := make([]bufRow, len(cmdSet))
 	for i := range cmdSet {
@@ -251,7 +247,12 @@ func (t *genericTable) bufferAppend(cmdSet commandSet) {
 
 func (t *genericTable) processCommandSet(set commandSet) (bool, error) {
 	if set != nil {
-		t.bufferAppend(set)
+		//t.bufferAppend(set)
+		for _, row := range set {
+			t.chLoader.Add(row)
+			t.bufferRowId++
+		}
+		t.bufferCmdId++
 	}
 
 	if t.bufferCmdId == t.cfg.MaxBufferLength {
@@ -284,19 +285,20 @@ func (t *genericTable) syncConvertIntoRow(p []byte) ([]interface{}, int, error) 
 	return row, len(p), nil
 }
 
-func (t *genericTable) insertRow(row []interface{}) error {
+func (t *genericTable) insertRow(row []sql.NullString) error {
 	var chTableName string
 
 	if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
 		chTableName = t.cfg.ChBufferTable
-		row = append(row, t.bufferRowId)
+		row = append(row, sql.NullString{String: strconv.Itoa(t.bufferRowId), Valid: true})
 	} else {
 		chTableName = t.cfg.ChMainTable
 	}
-
-	if err := t.stmntExec(row); err != nil {
-		return fmt.Errorf("could not insert: %v", err)
+	t.chLoader.Add(row)
+	if err := t.chLoader.Upload(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
+		return err
 	}
+
 	t.bufferRowId++
 
 	if t.bufferRowId%1000000 == 0 {
@@ -335,30 +337,10 @@ func (t *genericTable) attemptFlushBuffer() error {
 		return nil
 	}
 
-	if err := t.begin(); err != nil {
+	if err := t.chLoader.Upload(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
 		return err
 	}
-
-	if err := t.stmntPrepare(false); err != nil {
-		return err
-	}
-
-	for i := 0; i < t.bufferCmdId; i++ {
-		for _, cmd := range t.buffer[i] {
-			row := cmd.data
-			if t.cfg.ChBufferTable != "" {
-				row = append(row, cmd.rowID)
-			}
-
-			if err := t.stmntExec(row); err != nil {
-				return fmt.Errorf("could not exec(%#v): %v", row, err)
-			}
-		}
-	}
-
-	if err := t.stmntCloseCommit(); err != nil {
-		return err
-	}
+	log.Printf("buffer flushed %d commands", t.bufferCmdId)
 
 	t.bufferCmdId = 0
 	t.bufferFlushCnt++
@@ -368,7 +350,7 @@ func (t *genericTable) attemptFlushBuffer() error {
 
 func (t *genericTable) tryFlushToMainTable() error { //TODO: consider better name
 	for _, query := range t.flushQueries {
-		if _, err := t.chConn.Exec(query); err != nil {
+		if err := t.chLoader.Exec(query); err != nil {
 			return err
 		}
 	}
@@ -475,27 +457,24 @@ func convert(val string, chType config.ChColumn, pgType config.PgColumn) (interf
 	return nil, fmt.Errorf("unknown type: %v", chType)
 }
 
-func (t *genericTable) convertTuples(row message.Row) []interface{} {
-	var err error
-	res := make([]interface{}, 0)
+func (t *genericTable) convertTuples(row message.Row) []sql.NullString {
+	res := make([]sql.NullString, len(t.tupleColumns))
 
 	for colId, col := range t.tupleColumns {
-		var val interface{}
+		val := sql.NullString{}
 		if _, ok := t.columnMapping[col.Name]; !ok {
 			continue
 		}
 
 		if row[colId].Kind != message.TupleNull {
-			val, err = convert(string(row[colId].Value), t.columnMapping[col.Name], t.cfg.PgColumns[col.Name])
-			if err != nil {
-				panic(err)
-			}
+			val.Valid = true
+			val.String = string(row[colId].Value)
 		}
 
-		res = append(res, val)
+		res[colId] = val
 	}
 	if t.cfg.GenerationColumn != "" {
-		res = append(res, uint32(*t.generationID))
+		res = append(res, sql.NullString{String: strconv.FormatUint(*t.generationID, 10), Valid: true})
 	}
 
 	return res

@@ -2,7 +2,6 @@ package tableengines
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -20,9 +19,9 @@ type collapsingMergeTreeTable struct {
 }
 
 // NewCollapsingMergeTree instantiates collapsingMergeTreeTable
-func NewCollapsingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID *uint64) *collapsingMergeTreeTable {
+func NewCollapsingMergeTree(ctx context.Context, connUrl, dbName string, tblCfg config.Table, genID *uint64) *collapsingMergeTreeTable {
 	t := collapsingMergeTreeTable{
-		genericTable: newGenericTable(ctx, conn, tblCfg, genID),
+		genericTable: newGenericTable(ctx, connUrl, dbName, tblCfg, genID),
 		signColumn:   tblCfg.SignColumn,
 	}
 	t.chUsedColumns = append(t.chUsedColumns, tblCfg.SignColumn)
@@ -40,25 +39,32 @@ func (t *collapsingMergeTreeTable) Sync(pgTx *pgx.Tx) error {
 
 // Write implements io.Writer which is used during the Sync process, see genSync method
 func (t *collapsingMergeTreeTable) Write(p []byte) (int, error) {
-	var row []interface{}
-
-	row, n, err := t.syncConvertIntoRow(p)
-	if err != nil {
+	if err := t.genWrite(p); err != nil {
 		return 0, err
 	}
 
 	if t.cfg.GenerationColumn != "" {
-		row = append(row, 0) // generationID
+		if err := t.chLoader.BulkAdd([]byte("\t0\t1")); err != nil {
+			return 0, err
+		}
+	} else {
+		if err := t.chLoader.BulkAdd([]byte("\t1")); err != nil {
+			return 0, err
+		}
 	}
-	row = append(row, 1) // append sign column value
+	if err := t.chLoader.BulkAdd([]byte("\n")); err != nil {
+		return 0, err
+	}
 
-	return n, t.insertRow(row)
+	t.bufferRowId++
+
+	return len(p), nil
 }
 
 // Insert handles incoming insert DML operation
 func (t *collapsingMergeTreeTable) Insert(lsn utils.LSN, new message.Row) (bool, error) {
 	return t.processCommandSet(commandSet{
-		append(t.convertTuples(new), 1),
+		append(t.convertTuples(new), oneStr),
 	})
 }
 
@@ -69,14 +75,14 @@ func (t *collapsingMergeTreeTable) Update(lsn utils.LSN, old, new message.Row) (
 	}
 
 	return t.processCommandSet(commandSet{
-		append(t.convertTuples(old), -1),
-		append(t.convertTuples(new), 1),
+		append(t.convertTuples(old), minusOneStr),
+		append(t.convertTuples(new), oneStr),
 	})
 }
 
 // Delete handles incoming delete DML operation
 func (t *collapsingMergeTreeTable) Delete(lsn utils.LSN, old message.Row) (bool, error) {
 	return t.processCommandSet(commandSet{
-		append(t.convertTuples(old), -1),
+		append(t.convertTuples(old), minusOneStr),
 	})
 }

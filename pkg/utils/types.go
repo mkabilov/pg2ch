@@ -45,4 +45,6 @@ const (
 	PgUuid                     = "uuid"
 	PgBytea                    = "bytea"
 	PgInet                     = "inet"
+	PgIstore                   = "istore"
+	PgBigIstore                = "bigistore"
 )
