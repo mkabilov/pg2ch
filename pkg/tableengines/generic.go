@@ -149,7 +149,10 @@ func (t *genericTable) genWrite(p []byte) error {
 			}
 		}
 
-		if pgCol.TypeOID == utils.IstoreOID || pgCol.TypeOID == utils.BigIstoreOID {
+		switch pgCol.TypeOID {
+		case utils.IstoreOID:
+			fallthrough
+		case utils.BigIstoreOID:
 			keys, values, err := utils.SplitIstore(fields[pgId])
 			if err != nil {
 				return fmt.Errorf("could not parse istore: %v", err)
@@ -162,7 +165,24 @@ func (t *genericTable) genWrite(p []byte) error {
 			if err := t.chLoader.BulkAdd([]byte("[" + strings.Join(values, ",") + "]")); err != nil {
 				return err
 			}
-		} else {
+		case utils.AjBoolOID:
+			fallthrough
+		case utils.BoolOID:
+			if fields[pgId] == "t" {
+				if err := t.chLoader.BulkAdd([]byte("1")); err != nil {
+					return err
+				}
+			} else if fields[pgId] == "f" {
+				if err := t.chLoader.BulkAdd([]byte("0")); err != nil {
+					return err
+				}
+
+			} else if fields[pgId] == "u" {
+				if err := t.chLoader.BulkAdd([]byte("2")); err != nil {
+					return err
+				}
+			}
+		default:
 			if err := t.chLoader.BulkAdd([]byte(fields[pgId])); err != nil {
 				return err
 			}
@@ -337,6 +357,7 @@ func (t *genericTable) attemptFlushBuffer() error {
 		return nil
 	}
 
+	log.Printf("table: %q columns: %v", t.cfg.ChMainTable, t.chUsedColumns)
 	if err := t.chLoader.Upload(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
 		return err
 	}

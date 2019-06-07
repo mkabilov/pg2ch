@@ -14,6 +14,8 @@ const (
 
 	IstoreOID    = OID(34111)
 	BigIstoreOID = OID(34117)
+	BoolOID      = OID(16)
+	AjBoolOID    = OID(16389)
 )
 
 var decodeMap = map[byte]byte{
