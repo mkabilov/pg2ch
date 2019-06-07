@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/mkabilov/pg2ch/pkg/message"
+	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
 const (
@@ -306,4 +307,8 @@ func (c *chConnConfig) ConnectionString() string {
 	}
 
 	return fmt.Sprintf("tcp://%s:%d?%s", c.Host, c.Port, connStr.Encode())
+}
+
+func (c PgColumn) IsIstore() bool {
+	return c.BaseType == utils.PgIstore || c.BaseType == utils.PgBigIstore
 }

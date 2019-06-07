@@ -31,9 +31,10 @@ const (
 )
 
 var (
-	zeroStr     = sql.NullString{String: "0", Valid: true}
-	oneStr      = sql.NullString{String: "1", Valid: true}
-	minusOneStr = sql.NullString{String: "-1", Valid: true}
+	zeroStr     = []byte("0")
+	oneStr      = []byte("1")
+	minusOneStr = []byte("-1")
+	nullStr     = []byte(`\N`)
 )
 
 type bufRow struct {
@@ -41,7 +42,8 @@ type bufRow struct {
 	data  []sql.NullString
 }
 
-type commandSet [][]sql.NullString
+type chTuple []byte
+type chTuples []chTuple
 
 type bufCommand []bufRow
 
@@ -88,9 +90,17 @@ func newGenericTable(ctx context.Context, connUrl, dbName string, tblCfg config.
 		t.columnMapping[pgCol.Name] = chCol
 		t.pgUsedColumns = append(t.pgUsedColumns, pgCol.Name)
 
-		if pgCol.TypeOID == utils.IstoreOID || pgCol.TypeOID == utils.BigIstoreOID {
-			t.chUsedColumns = append(t.chUsedColumns, pgCol.Name+"_keys")
-			t.chUsedColumns = append(t.chUsedColumns, pgCol.Name+"_values")
+		if tblCfg.PgColumns[pgCol.Name].IsIstore() {
+			if columnCfg, ok := tblCfg.ColumnProperties[pgCol.Name]; ok {
+				if columnCfg.FlattenIstore {
+					for i := columnCfg.FlattenIstoreMin; i <= columnCfg.FlattenIstoreMax; i++ {
+						t.chUsedColumns = append(t.chUsedColumns, fmt.Sprintf("%s_%d", chCol.Name, i))
+					}
+				} else {
+					t.chUsedColumns = append(t.chUsedColumns, fmt.Sprintf("%s_%s", chCol.Name, columnCfg.IstoreKeysSuffix))
+					t.chUsedColumns = append(t.chUsedColumns, fmt.Sprintf("%s_%s", chCol.Name, columnCfg.IstoreValuesSuffix))
+				}
+			}
 		} else {
 			t.chUsedColumns = append(t.chUsedColumns, chCol.Name)
 		}
@@ -135,111 +145,109 @@ func (t *genericTable) pgStatLiveTuples(pgTx *pgx.Tx) (int64, error) {
 	return rows.Int64, nil
 }
 
-func convertColumn(colOID utils.OID, value string, isNull bool) ([]string, error) {
-	switch colOID {
-	case utils.IstoreOID:
+func convertColumn(colType string, val message.Tuple) []byte {
+	switch colType {
+	case utils.PgIstore:
 		fallthrough
-	case utils.BigIstoreOID:
-		if isNull {
-			return []string{"[]", "[]"}, nil
+	case utils.PgBigIstore:
+		if val.Kind == message.TupleNull {
+			return []byte("[]\t[]")
 		}
-		keys, values, err := utils.SplitIstore(value)
-		if err != nil {
-			return nil, fmt.Errorf("could not parse istore: %v", err)
+		return utils.FlattenIstore(val.Value)
+	case utils.PgAjBool:
+		fallthrough
+	case utils.PgBoolean:
+		if val.Kind == message.TupleNull {
+			return nullStr
 		}
 
-		return []string{"[" + strings.Join(keys, ",") + "]", "[" + strings.Join(values, ",") + "]"}, nil
-	case utils.AjBoolOID:
-		fallthrough
-	case utils.BoolOID:
-		if isNull {
-			return []string{}, nil
-		}
-		if value == "t" {
-			return []string{"1"}, nil
-		} else if value == "f" {
-			return []string{"0"}, nil
-		} else if value == "u" {
-			return []string{"2"}, nil
+		switch val.Value[0] {
+		case 't':
+			return oneStr
+		case 'f':
+			return zeroStr
+		case 'u':
+			return []byte{'2'}
 		}
 	}
-	if isNull {
-		return []string{}, nil
+	if val.Kind == message.TupleNull {
+		return nullStr
 	}
 
-	return []string{value}, nil
+	return val.Value
 }
 
 func (t *genericTable) genWrite(p []byte) error {
-	fields := strings.Split(string(p), "\t") //TODO: rewrite split function into single scan of a string
-
-	if len(fields) != len(t.tupleColumns) {
-		return fmt.Errorf("fields number mismatch")
-	}
-
-	for pgId, pgCol := range t.tupleColumns {
-		if pgId != 0 {
-			if err := t.chLoader.BulkAdd([]byte("\t")); err != nil {
-				return err
-			}
-		}
-
-		if fields[pgId] == `\N` {
-			if err := t.chLoader.BulkAdd([]byte(fields[pgId])); err != nil {
-				return err
-			}
-		}
-
-		val, err := convertColumn(pgCol.TypeOID, fields[pgId], false)
-		if err != nil {
-			return err
-		}
-
-		if err := t.chLoader.BulkAdd([]byte(strings.Join(val, "\t"))); err != nil {
-			return err
-		}
-
-		switch pgCol.TypeOID {
-		case utils.IstoreOID:
-			fallthrough
-		case utils.BigIstoreOID:
-			keys, values, err := utils.SplitIstore(fields[pgId])
-			if err != nil {
-				return fmt.Errorf("could not parse istore: %v", err)
-			}
-
-			if err := t.chLoader.BulkAdd([]byte("[" + strings.Join(keys, ",") + "]\t")); err != nil {
-				return err
-			}
-
-			if err := t.chLoader.BulkAdd([]byte("[" + strings.Join(values, ",") + "]")); err != nil {
-				return err
-			}
-		case utils.AjBoolOID:
-			fallthrough
-		case utils.BoolOID:
-			if fields[pgId] == "t" {
-				if err := t.chLoader.BulkAdd([]byte("1")); err != nil {
-					return err
-				}
-			} else if fields[pgId] == "f" {
-				if err := t.chLoader.BulkAdd([]byte("0")); err != nil {
-					return err
-				}
-
-			} else if fields[pgId] == "u" {
-				if err := t.chLoader.BulkAdd([]byte("2")); err != nil {
-					return err
-				}
-			}
-		default:
-			if err := t.chLoader.BulkAdd([]byte(fields[pgId])); err != nil {
-				return err
-			}
-		}
-	}
-
 	return nil
+	//fields := strings.Split(string(p), "\t") //TODO: rewrite split function into single scan of a string
+	//
+	//if len(fields) != len(t.tupleColumns) {
+	//	return fmt.Errorf("fields number mismatch")
+	//}
+	//
+	//for pgId, pgCol := range t.tupleColumns {
+	//	if pgId != 0 {
+	//		if err := t.chLoader.BulkAdd([]byte("\t")); err != nil {
+	//			return err
+	//		}
+	//	}
+	//
+	//	if fields[pgId] == `\N` {
+	//		if err := t.chLoader.BulkAdd([]byte(fields[pgId])); err != nil {
+	//			return err
+	//		}
+	//	}
+	//
+	//	val, err := convertColumn(pgCol.TypeOID, fields[pgId], false)
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	if err := t.chLoader.BulkAdd([]byte(strings.Join(val, "\t"))); err != nil {
+	//		return err
+	//	}
+	//
+	//	switch pgCol.TypeOID {
+	//	case utils.IstoreOID:
+	//		fallthrough
+	//	case utils.BigIstoreOID:
+	//		keys, values, err := utils.FlattenIstore(fields[pgId])
+	//		if err != nil {
+	//			return fmt.Errorf("could not parse istore: %v", err)
+	//		}
+	//
+	//		if err := t.chLoader.BulkAdd([]byte("[" + strings.Join(keys, ",") + "]\t")); err != nil {
+	//			return err
+	//		}
+	//
+	//		if err := t.chLoader.BulkAdd([]byte("[" + strings.Join(values, ",") + "]")); err != nil {
+	//			return err
+	//		}
+	//	case utils.AjBoolOID:
+	//		fallthrough
+	//	case utils.BoolOID:
+	//		if fields[pgId] == "t" {
+	//			if err := t.chLoader.BulkAdd([]byte("1")); err != nil {
+	//				return err
+	//			}
+	//		} else if fields[pgId] == "f" {
+	//			if err := t.chLoader.BulkAdd([]byte("0")); err != nil {
+	//				return err
+	//			}
+	//
+	//		} else if fields[pgId] == "u" {
+	//			if err := t.chLoader.BulkAdd([]byte("2")); err != nil {
+	//				return err
+	//			}
+	//		}
+	//	default:
+	//		if err := t.chLoader.BulkAdd([]byte(fields[pgId])); err != nil {
+	//			return err
+	//		}
+	//	}
+	//}
+	//
+	//return nil
 }
 
 func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
@@ -304,46 +312,35 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	return nil
 }
 
-func (t *genericTable) bufferAppend(cmdSet commandSet) {
-	bufItem := make([]bufRow, len(cmdSet))
-	for i := range cmdSet {
-		bufItem[i] = bufRow{rowID: t.bufferRowId, data: cmdSet[i]}
-		t.bufferRowId++
-	}
+//func (t *genericTable) writeLine(vals []sql.NullString) {
+//	ln := len(vals) - 1
+//	if ln == -1 {
+//		return
+//	}
+//	for colID, col := range vals {
+//		if col.Valid {
+//			col, err := convertColumn(t.tupleColumns[colID].TypeOID, col.String, false)
+//			log.Printf("col: %v", col)
+//			if err != nil {
+//				panic(err)
+//			}
+//			t.chLoader.Write([]byte(strings.Join(col, "\t")))
+//		} else {
+//			t.chLoader.Write([]byte(`\N`))
+//		}
+//
+//		if colID != ln {
+//			t.chLoader.Write([]byte("\t"))
+//		}
+//	}
+//
+//	t.chLoader.Write([]byte("\n"))
+//}
 
-	t.buffer[t.bufferCmdId] = bufItem
-	t.bufferCmdId++
-}
-
-func (t *genericTable) writeLine(vals []sql.NullString) {
-	ln := len(vals) - 1
-	if ln == -1 {
-		return
-	}
-	for colID, col := range vals {
-		if col.Valid {
-			col, err := convertColumn(t.tupleColumns[colID].TypeOID, col.String, false)
-			log.Printf("col: %v", col)
-			if err != nil {
-				panic(err)
-			}
-			t.chLoader.Write([]byte(strings.Join(col, "\t")))
-		} else {
-			t.chLoader.Write([]byte(`\N`))
-		}
-
-		if colID != ln {
-			t.chLoader.Write([]byte("\t"))
-		}
-	}
-
-	t.chLoader.Write([]byte("\n"))
-}
-
-func (t *genericTable) processCommandSet(set commandSet) (bool, error) {
+func (t *genericTable) processChTuples(set chTuples) (bool, error) {
 	if set != nil {
 		for _, row := range set {
-			t.chLoader.Add(row)
+			t.chLoader.Write(row)
 			t.bufferRowId++
 		}
 		t.bufferCmdId++
@@ -379,28 +376,28 @@ func (t *genericTable) syncConvertIntoRow(p []byte) ([]interface{}, int, error) 
 	return row, len(p), nil
 }
 
-func (t *genericTable) insertRow(row []sql.NullString) error {
-	var chTableName string
-
-	if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
-		chTableName = t.cfg.ChBufferTable
-		row = append(row, sql.NullString{String: strconv.Itoa(t.bufferRowId), Valid: true})
-	} else {
-		chTableName = t.cfg.ChMainTable
-	}
-	t.chLoader.Add(row)
-	if err := t.chLoader.Upload(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
-		return err
-	}
-
-	t.bufferRowId++
-
-	if t.bufferRowId%1000000 == 0 {
-		log.Printf("clickhouse %q table: %d rows inserted", chTableName, t.bufferRowId)
-	}
-
-	return nil
-}
+//func (t *genericTable) insertRow(row []sql.NullString) error {
+//	var chTableName string
+//
+//	if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
+//		chTableName = t.cfg.ChBufferTable
+//		row = append(row, sql.NullString{String: strconv.Itoa(t.bufferRowId), Valid: true})
+//	} else {
+//		chTableName = t.cfg.ChMainTable
+//	}
+//	t.chLoader.Add(row)
+//	if err := t.chLoader.Upload(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
+//		return err
+//	}
+//
+//	t.bufferRowId++
+//
+//	if t.bufferRowId%1000000 == 0 {
+//		log.Printf("clickhouse %q table: %d rows inserted", chTableName, t.bufferRowId)
+//	}
+//
+//	return nil
+//}
 
 func (t *genericTable) flushBuffer() error {
 	var err error
@@ -551,33 +548,26 @@ func convert(val string, chType config.ChColumn, pgType config.PgColumn) (interf
 	return nil, fmt.Errorf("unknown type: %v", chType)
 }
 
-func (t *genericTable) convertTuples(row message.Row) []sql.NullString {
-	res := make([]sql.NullString, 0)
+func (t *genericTable) convertRow(row message.Row) chTuple {
+	res := make([]byte, 0)
 
 	for colId, col := range t.tupleColumns {
 		if _, ok := t.columnMapping[col.Name]; !ok {
 			continue
 		}
 
-		values, err := convertColumn(col.TypeOID, string(row[colId].Value), row[colId].Kind == message.TupleNull)
-		if err != nil {
-			panic(err)
+		values := convertColumn(t.cfg.PgColumns[col.Name].BaseType, row[colId])
+		if colId > 0 {
+			res = append(res, '\t')
 		}
-
-		if len(values) == 0 {
-			res = append(res, sql.NullString{Valid: false})
-		} else {
-			for _, val := range values {
-				res = append(res, sql.NullString{
-					String: val,
-					Valid:  true,
-				})
-			}
-		}
+		res = append(res, values...)
 	}
 
 	if t.cfg.GenerationColumn != "" {
-		res = append(res, sql.NullString{String: strconv.FormatUint(*t.generationID, 10), Valid: true})
+		if len(res) > 0 {
+			res = append(res, '\t')
+		}
+		res = append(res, []byte(strconv.FormatUint(*t.generationID, 10))...)
 	}
 
 	return res
@@ -655,4 +645,23 @@ func (t *genericTable) compareRows(a, b message.Row) (bool, bool) {
 	}
 
 	return equal, keyColumnChanged
+}
+
+func appendField(str []byte, fields ...[]byte) []byte {
+	if len(str) == 0 {
+		res := make([]byte, 0)
+		for _, v := range fields {
+			res = append(res, v...)
+		}
+
+		return res
+	} else {
+		res := make([]byte, len(str))
+		copy(res, str)
+		for _, v := range fields {
+			res = append(res, append([]byte("\t"), v...)...)
+		}
+
+		return res
+	}
 }

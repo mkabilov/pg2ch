@@ -63,26 +63,26 @@ func (t *collapsingMergeTreeTable) Write(p []byte) (int, error) {
 
 // Insert handles incoming insert DML operation
 func (t *collapsingMergeTreeTable) Insert(lsn utils.LSN, new message.Row) (bool, error) {
-	return t.processCommandSet(commandSet{
-		append(t.convertTuples(new), oneStr),
+	return t.processChTuples(chTuples{
+		appendField(t.convertRow(new), oneStr),
 	})
 }
 
 // Update handles incoming update DML operation
 func (t *collapsingMergeTreeTable) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
 	if equal, _ := t.compareRows(old, new); equal {
-		return t.processCommandSet(nil)
+		return t.processChTuples(nil)
 	}
 
-	return t.processCommandSet(commandSet{
-		append(t.convertTuples(old), minusOneStr),
-		append(t.convertTuples(new), oneStr),
+	return t.processChTuples(chTuples{
+		appendField(t.convertRow(old), minusOneStr),
+		appendField(t.convertRow(new), oneStr),
 	})
 }
 
 // Delete handles incoming delete DML operation
 func (t *collapsingMergeTreeTable) Delete(lsn utils.LSN, old message.Row) (bool, error) {
-	return t.processCommandSet(commandSet{
-		append(t.convertTuples(old), minusOneStr),
+	return t.processChTuples(chTuples{
+		appendField(t.convertRow(old), minusOneStr),
 	})
 }

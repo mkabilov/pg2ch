@@ -192,7 +192,7 @@ func (r *Replicator) initAndSyncTables() error {
 		}
 
 		r.tableLSN[tblName] = lsn
-		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), lsn.Bytes()); err != nil {
+		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), lsn.FormattedBytes()); err != nil {
 			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 
@@ -412,7 +412,7 @@ func (r *Replicator) Run() error {
 			log.Printf("could not flush %s table: %v", tblName.String(), err)
 		}
 
-		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), r.finalLSN.Bytes()); err != nil {
+		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), r.finalLSN.FormattedBytes()); err != nil {
 			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 	}
@@ -621,7 +621,7 @@ func (r *Replicator) mergeTables() error {
 
 		delete(r.tablesToMerge, tblName)
 		r.tableLSN[tblName] = r.finalLSN
-		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), r.finalLSN.Bytes()); err != nil {
+		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), r.finalLSN.FormattedBytes()); err != nil {
 			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 	}
@@ -743,21 +743,39 @@ func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (c
 	if len(cfg.Columns) > 0 {
 		for pgCol, chCol := range cfg.Columns {
 			if chColCfg, ok := chColumns[chCol]; !ok {
-				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", chCol, cfg.ChMainTable)
+				if cfg.PgColumns[pgCol].IsIstore() {
+					cfg.ColumnMapping[pgCol] = config.ChColumn{Name: chCol}
+				} else {
+					return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", chCol, cfg.ChMainTable)
+				}
 			} else {
 				cfg.ColumnMapping[pgCol] = chColCfg
 			}
 		}
 	} else {
 		for _, pgCol := range cfg.TupleColumns {
-			if pgCol.TypeOID == utils.IstoreOID || pgCol.TypeOID == utils.BigIstoreOID {
-				cfg.ColumnMapping[pgCol.Name] = config.ChColumn{}
-				continue
-			}
 			if chColCfg, ok := chColumns[pgCol.Name]; !ok {
-				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", pgCol.Name, cfg.ChMainTable)
+				if cfg.PgColumns[pgCol.Name].IsIstore() {
+					cfg.ColumnMapping[pgCol.Name] = config.ChColumn{Name: pgCol.Name}
+				} else {
+					return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", pgCol.Name, cfg.ChMainTable)
+				}
 			} else {
 				cfg.ColumnMapping[pgCol.Name] = chColCfg
+			}
+		}
+	}
+
+	if cfg.ColumnProperties == nil {
+		cfg.ColumnProperties = make(map[string]config.ColumnProperty)
+	}
+
+	for pgCol := range cfg.ColumnMapping {
+		// we can't move that to the config struct because we need actual type of the column
+		if _, ok := cfg.ColumnProperties[pgCol]; !ok && cfg.PgColumns[pgCol].IsIstore() {
+			cfg.ColumnProperties[pgCol] = config.ColumnProperty{
+				IstoreKeysSuffix:   "keys",
+				IstoreValuesSuffix: "values",
 			}
 		}
 	}

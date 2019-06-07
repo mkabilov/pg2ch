@@ -1,9 +1,12 @@
 package utils
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -11,11 +14,7 @@ const (
 	OutputPlugin = "pgoutput"
 
 	copyNull = 'N'
-
-	IstoreOID    = OID(34111)
-	BigIstoreOID = OID(34117)
-	BoolOID      = OID(16)
-	AjBoolOID    = OID(16389)
+	lowerhex = "0123456789abcdef"
 )
 
 var decodeMap = map[byte]byte{
@@ -27,6 +26,11 @@ var decodeMap = map[byte]byte{
 	'v':  '\v',
 	'\\': '\\',
 }
+
+var (
+	colBuf = &bytes.Buffer{}
+	tmpStr = &bytes.Buffer{}
+)
 
 func decodeDigit(c byte, onlyOctal bool) (byte, bool) {
 	switch {
@@ -180,37 +184,100 @@ func ParseIstore(str string) (keys, values []int, err error) {
 	return
 }
 
-func SplitIstore(str string) (keys, values []string, err error) {
-	keys = make([]string, 0)
-	values = make([]string, 0)
+func FlattenIstore(str []byte) []byte {
+	keysBuf := bytes.NewBuffer([]byte{'['})
+	valuesBuf := bytes.NewBuffer([]byte{'['})
 
+	i := 0
 	isKey := true
-	tmpStr := strings.Builder{}
 	isNum := false
 	for _, c := range str {
 		switch c {
 		case '"':
-			isNum = !isNum
-			if !isNum {
+			if isNum {
 				if isKey {
-					keys = append(keys, tmpStr.String())
+					if i > 1 {
+						keysBuf.WriteByte(',')
+					}
+					keysBuf.Write(tmpStr.Bytes())
 				} else {
-					values = append(values, tmpStr.String())
+					if i > 1 {
+						valuesBuf.WriteByte(',')
+					}
+					valuesBuf.Write(tmpStr.Bytes())
 					isKey = true
 				}
 			} else {
 				tmpStr.Reset()
+				if isKey {
+					i++
+				}
 			}
+			isNum = !isNum
 		case '=':
 			isKey = false
 		case '>':
+		case ' ':
+		case ',':
 		default:
-			tmpStr.WriteRune(c)
+			tmpStr.WriteByte(c)
 		}
 	}
-	if len(keys) != len(values) {
-		err = fmt.Errorf("wrong istore")
+	keysBuf.WriteString("]\t")
+	keysBuf.Write(valuesBuf.Bytes())
+	keysBuf.WriteByte(']')
+
+	return keysBuf.Bytes()
+}
+
+func Quote(str string) string {
+	var runeTmp [utf8.UTFMax]byte
+
+	for _, r := range []rune(str) {
+		if strconv.IsPrint(r) {
+			n := utf8.EncodeRune(runeTmp[:], r)
+			colBuf.Write(runeTmp[:n])
+			continue
+		}
+
+		switch r {
+		case '\a':
+			colBuf.WriteString(`\a`)
+		case '\b':
+			colBuf.WriteString(`\b`)
+		case '\f':
+			colBuf.WriteString(`\f`)
+		case '\n':
+			colBuf.WriteString(`\n`)
+		case '\r':
+			colBuf.WriteString(`\r`)
+		case '\t':
+			colBuf.WriteString(`\t`)
+		case '\v':
+			colBuf.WriteString(`\v`)
+		default:
+			switch {
+			case r < ' ':
+				colBuf.WriteString(`\x`)
+				colBuf.WriteByte(lowerhex[byte(r)>>4])
+				colBuf.WriteByte(lowerhex[byte(r)&0xF])
+			case r > utf8.MaxRune:
+				r = 0xFFFD
+				fallthrough
+			case r < 0x10000:
+				colBuf.WriteString(`\u`)
+				for s := 12; s >= 0; s -= 4 {
+					colBuf.WriteByte(lowerhex[r>>uint(s)&0xF])
+				}
+			default:
+				colBuf.WriteString(`\U`)
+				for s := 28; s >= 0; s -= 4 {
+					colBuf.WriteByte(lowerhex[r>>uint(s)&0xF])
+				}
+			}
+		}
+
 	}
 
-	return
+	return colBuf.String()
 }

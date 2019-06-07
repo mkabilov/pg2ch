@@ -9,12 +9,10 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
-	"unicode/utf8"
-)
 
-const lowerhex = "0123456789abcdef"
+	"github.com/mkabilov/pg2ch/pkg/utils"
+)
 
 type CHLoader struct {
 	client     *http.Client
@@ -49,59 +47,6 @@ func (c *CHLoader) urlParams() url.Values {
 	return res
 }
 
-func (c *CHLoader) quote(str string) string {
-	var runeTmp [utf8.UTFMax]byte
-	defer c.colBuf.Reset()
-
-	for _, r := range []rune(str) {
-		if strconv.IsPrint(r) {
-			n := utf8.EncodeRune(runeTmp[:], r)
-			c.colBuf.Write(runeTmp[:n])
-			continue
-		}
-
-		switch r {
-		case '\a':
-			c.colBuf.WriteString(`\a`)
-		case '\b':
-			c.colBuf.WriteString(`\b`)
-		case '\f':
-			c.colBuf.WriteString(`\f`)
-		case '\n':
-			c.colBuf.WriteString(`\n`)
-		case '\r':
-			c.colBuf.WriteString(`\r`)
-		case '\t':
-			c.colBuf.WriteString(`\t`)
-		case '\v':
-			c.colBuf.WriteString(`\v`)
-		default:
-			switch {
-			case r < ' ':
-				c.colBuf.WriteString(`\x`)
-				c.colBuf.WriteByte(lowerhex[byte(r)>>4])
-				c.colBuf.WriteByte(lowerhex[byte(r)&0xF])
-			case r > utf8.MaxRune:
-				r = 0xFFFD
-				fallthrough
-			case r < 0x10000:
-				c.colBuf.WriteString(`\u`)
-				for s := 12; s >= 0; s -= 4 {
-					c.colBuf.WriteByte(lowerhex[r>>uint(s)&0xF])
-				}
-			default:
-				c.colBuf.WriteString(`\U`)
-				for s := 28; s >= 0; s -= 4 {
-					c.colBuf.WriteByte(lowerhex[r>>uint(s)&0xF])
-				}
-			}
-		}
-
-	}
-
-	return c.colBuf.String()
-}
-
 func (c *CHLoader) BulkAddSuffixedString(val []byte, suffixes ...string) error {
 	if _, err := c.pipeWriter.Write(val[:len(val)-1]); err != nil {
 		return err
@@ -134,7 +79,7 @@ func (c *CHLoader) BulkWriteNullableString(str sql.NullString) (err error) {
 	if !str.Valid {
 		_, err = c.pipeWriter.Write([]byte(`\N`))
 	} else {
-		_, err = c.pipeWriter.Write([]byte(c.quote(str.String)))
+		_, err = c.pipeWriter.Write([]byte(utils.Quote(str.String)))
 	}
 
 	return
@@ -174,30 +119,6 @@ func (c *CHLoader) BulkUpload(tableName string, columns []string) error {
 
 func (c *CHLoader) Write(val []byte) {
 	c.buf.Write(val)
-}
-
-func (c *CHLoader) WriteCol(val string) {
-	c.buf.WriteString(c.quote(val))
-}
-
-func (c *CHLoader) Add(vals []sql.NullString) {
-	ln := len(vals) - 1
-	if ln == -1 {
-		return
-	}
-	for colID, col := range vals {
-		if col.Valid {
-			c.buf.WriteString(c.quote(col.String))
-		} else {
-			c.buf.WriteString(`\N`)
-		}
-
-		if colID != ln {
-			c.buf.WriteString("\t")
-		}
-	}
-
-	c.buf.WriteString("\n")
 }
 
 func (c *CHLoader) generateQuery(tableName string, columns []string) string {

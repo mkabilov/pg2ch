@@ -2,9 +2,7 @@ package tableengines
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx"
@@ -74,50 +72,47 @@ func (t *replacingMergeTree) Write(p []byte) (int, error) {
 // Insert handles incoming insert DML operation
 func (t *replacingMergeTree) Insert(lsn utils.LSN, new message.Row) (bool, error) {
 	if t.cfg.VerColumn != "" {
-		return t.processCommandSet(commandSet{append(
-			t.convertTuples(new),
-			sql.NullString{String: strconv.FormatUint(uint64(lsn), 10), Valid: true},
-			sql.NullString{String: "0", Valid: true})})
+		return t.processChTuples(chTuples{appendField(t.convertRow(new), lsn.Bytes(), zeroStr)})
 	} else {
-		return t.processCommandSet(commandSet{append(t.convertTuples(new), sql.NullString{String: "0", Valid: true})})
+		return t.processChTuples(chTuples{appendField(t.convertRow(new), zeroStr)})
 	}
 }
 
 // Update handles incoming update DML operation
 func (t *replacingMergeTree) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
-	var cmdSet commandSet
+	var cmdSet chTuples
 	equal, keyChanged := t.compareRows(old, new)
 	if equal {
-		return t.processCommandSet(nil)
+		return t.processChTuples(nil)
 	}
-	lsnStr := sql.NullString{String: strconv.FormatUint(uint64(lsn), 10), Valid: true}
+	lsnStr := lsn.Bytes()
 
 	if keyChanged {
 		if t.cfg.VerColumn != "" {
-			cmdSet = commandSet{
-				append(t.convertTuples(old), lsnStr, oneStr),
-				append(t.convertTuples(new), lsnStr, zeroStr),
+			cmdSet = chTuples{
+				appendField(t.convertRow(old), lsnStr, oneStr),
+				appendField(t.convertRow(new), lsnStr, zeroStr),
 			}
 		} else {
-			cmdSet = commandSet{
-				append(t.convertTuples(old), oneStr),
-				append(t.convertTuples(new), zeroStr),
+			cmdSet = chTuples{
+				appendField(t.convertRow(old), oneStr),
+				appendField(t.convertRow(new), zeroStr),
 			}
 		}
 	} else if t.cfg.VerColumn != "" {
-		cmdSet = commandSet{append(t.convertTuples(new), lsnStr, zeroStr)}
+		cmdSet = chTuples{appendField(t.convertRow(new), lsnStr, zeroStr)}
 	} else {
-		cmdSet = commandSet{append(t.convertTuples(new), zeroStr)}
+		cmdSet = chTuples{appendField(t.convertRow(new), zeroStr)}
 	}
 
-	return t.processCommandSet(cmdSet)
+	return t.processChTuples(cmdSet)
 }
 
 // Delete handles incoming delete DML operation
 func (t *replacingMergeTree) Delete(lsn utils.LSN, old message.Row) (bool, error) {
 	if t.cfg.VerColumn != "" {
-		return t.processCommandSet(commandSet{append(t.convertTuples(old), sql.NullString{String: strconv.FormatUint(uint64(lsn), 10), Valid: true}, zeroStr)})
+		return t.processChTuples(chTuples{appendField(t.convertRow(old), lsn.Bytes(), zeroStr)})
 	} else {
-		return t.processCommandSet(commandSet{append(t.convertTuples(old), zeroStr)})
+		return t.processChTuples(chTuples{appendField(t.convertRow(old), zeroStr)})
 	}
 }

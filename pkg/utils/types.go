@@ -45,6 +45,9 @@ const (
 	PgUuid                     = "uuid"
 	PgBytea                    = "bytea"
 	PgInet                     = "inet"
-	PgIstore                   = "istore"
-	PgBigIstore                = "bigistore"
+
+	//adjust specific
+	PgIstore    = "istore"
+	PgBigIstore = "bigistore"
+	PgAjBool    = "ajbool"
 )

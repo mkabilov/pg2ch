@@ -59,15 +59,15 @@ func (t *mergeTreeTable) Write(p []byte) (int, error) {
 
 // Insert handles incoming insert DML operation
 func (t *mergeTreeTable) Insert(lsn utils.LSN, new message.Row) (bool, error) {
-	return t.processCommandSet(commandSet{t.convertTuples(new)})
+	return t.processChTuples(chTuples{t.convertRow(new)})
 }
 
 // Update handles incoming update DML operation
 func (t *mergeTreeTable) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
-	return t.processCommandSet(nil)
+	return t.processChTuples(nil)
 }
 
 // Delete handles incoming delete DML operation
 func (t *mergeTreeTable) Delete(lsn utils.LSN, old message.Row) (bool, error) {
-	return t.processCommandSet(nil)
+	return t.processChTuples(nil)
 }
