@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/mkabilov/pg2ch/pkg/message"
+	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
 const (
@@ -22,10 +23,13 @@ const (
 	defaultPostgresPort           = 5432
 	defaultPostgresHost           = "127.0.0.1"
 	defaultRowIdColumn            = "row_id"
-	defaultMaxBufferLength        = 1000
+	defaultMaxBufferLength        = 10000
 	defaultSignColumn             = "sign"
 	defaultVerColumn              = "ver"
+	defaultLsnColumn              = "lsn"
 	defaultIsDeletedColumn        = "is_deleted"
+
+	TableLSNKeyPrefix = "table_lsn_"
 )
 
 type tableEngine int
@@ -60,23 +64,41 @@ type PgTableName struct {
 	TableName  string
 }
 
+type ChTableName struct {
+	DatabaseName string
+	TableName    string
+}
+
+// ColumnProperty describes column properties
+type ColumnProperty struct {
+	FlattenIstore      bool   `yaml:"flatten_istore"`
+	FlattenIstoreMin   int    `yaml:"flatten_istore_min"` // needed for building ch table ddl
+	FlattenIstoreMax   int    `yaml:"flatten_istore_max"` // needed for building ch table ddl
+	FillIstoreGaps     bool   `yaml:"fill_gaps"`
+	IstoreKeysSuffix   string `yaml:"istore_keys_suffix"`
+	IstoreValuesSuffix string `yaml:"istore_values_suffix"`
+}
+
 // Table contains information about the table
 type Table struct {
-	BufferTableRowIdColumn  string            `yaml:"buffer_table_row_id"`
-	ChBufferTable           string            `yaml:"buffer_table"`
-	ChMainTable             string            `yaml:"main_table"`
-	MaxBufferLength         int               `yaml:"max_buffer_length"`
-	VerColumn               string            `yaml:"ver_column"`
-	IsDeletedColumn         string            `yaml:"is_deleted_column"`
-	SignColumn              string            `yaml:"sign_column"`
-	GenerationColumn        string            `yaml:"generation_column"`
-	Engine                  tableEngine       `yaml:"engine"`
-	FlushThreshold          int               `yaml:"flush_threshold"`
-	InitSyncSkip            bool              `yaml:"init_sync_skip"`
-	InitSyncSkipBufferTable bool              `yaml:"init_sync_skip_buffer_table"`
-	InitSyncSkipTruncate    bool              `yaml:"init_sync_skip_truncate"`
-	Columns                 map[string]string `yaml:"columns"`
+	BufferTableRowIdColumn string                    `yaml:"buffer_table_row_id"`
+	ChSyncAuxTable         ChTableName               `yaml:"sync_aux_table"`
+	ChBufferTable          ChTableName               `yaml:"buffer_table"`
+	ChMainTable            ChTableName               `yaml:"main_table"`
+	MaxBufferLength        int                       `yaml:"max_buffer_length"`
+	VerColumn              string                    `yaml:"ver_column"`
+	IsDeletedColumn        string                    `yaml:"is_deleted_column"`
+	SignColumn             string                    `yaml:"sign_column"`
+	GenerationColumn       string                    `yaml:"generation_column"`
+	Engine                 tableEngine               `yaml:"engine"`
+	FlushThreshold         int                       `yaml:"flush_threshold"`
+	InitSyncSkip           bool                      `yaml:"init_sync_skip"`
+	InitSyncSkipTruncate   bool                      `yaml:"init_sync_skip_truncate"`
+	Columns                map[string]string         `yaml:"columns"`
+	ColumnProperties       map[string]ColumnProperty `yaml:"column_properties"`
+	LsnColumnName          string                    `yaml:"lsn_column_name"`
 
+	PgOID         utils.OID           `yaml:"-"`
 	PgTableName   PgTableName         `yaml:"-"`
 	TupleColumns  []message.Column    `yaml:"-"` // columns in the order they are in the table
 	PgColumns     map[string]PgColumn `yaml:"-"`
@@ -100,6 +122,7 @@ type Config struct {
 	InactivityFlushTimeout time.Duration         `yaml:"inactivity_flush_timeout"`
 	PersStoragePath        string                `yaml:"db_path"`
 	RedisBind              string                `yaml:"redis_bind"`
+	SyncWorkers            int                   `yaml:"sync_workers"`
 }
 
 type Column struct {
@@ -188,6 +211,21 @@ func (tn *PgTableName) String() string {
 	return fmt.Sprintf(`%s.%s`, tn.SchemaName, tn.TableName)
 }
 
+func (tn PgTableName) KeyName() string {
+	return TableLSNKeyPrefix + tn.String()
+}
+
+func (tn *PgTableName) ParseKey(key string) error {
+	if len(key) < len(TableLSNKeyPrefix) {
+		return fmt.Errorf("too short key name")
+	}
+	if !strings.HasPrefix(key, TableLSNKeyPrefix) {
+		return fmt.Errorf("wrong key: %v", key)
+	}
+
+	return tn.Parse(key[len(TableLSNKeyPrefix):])
+}
+
 // New instantiates config
 func New(filepath string) (*Config, error) {
 	var cfg Config
@@ -245,7 +283,54 @@ func New(filepath string) (*Config, error) {
 		return nil, fmt.Errorf("db_filepath is not set")
 	}
 
+	for tblName, tbl := range cfg.Tables {
+		newTbl := cfg.Tables[tblName]
+		if !tbl.ChBufferTable.IsEmpty() && tbl.ChBufferTable.DatabaseName == "" {
+			newTbl.ChBufferTable.DatabaseName = cfg.ClickHouse.Database
+		}
+		if !tbl.ChMainTable.IsEmpty() && tbl.ChMainTable.DatabaseName == "" {
+			newTbl.ChMainTable.DatabaseName = cfg.ClickHouse.Database
+		}
+		if !tbl.ChSyncAuxTable.IsEmpty() && tbl.ChSyncAuxTable.DatabaseName == "" {
+			newTbl.ChSyncAuxTable.DatabaseName = cfg.ClickHouse.Database
+		}
+		cfg.Tables[tblName] = newTbl
+	}
+
 	return &cfg, nil
+}
+
+func (ct ChTableName) String() string {
+	return fmt.Sprintf("%s.%s", ct.DatabaseName, ct.TableName)
+}
+
+func (ct ChTableName) IsEmpty() bool {
+	return ct.DatabaseName == "" && ct.TableName == ""
+}
+
+func (ct *ChTableName) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var val string
+
+	if err := unmarshal(&val); err != nil {
+		return err
+	}
+
+	parts := strings.Split(val, ".")
+	if ln := len(parts); ln == 2 {
+		*ct = ChTableName{
+			DatabaseName: parts[0],
+			TableName:    parts[1],
+		}
+	} else if ln == 1 {
+		*ct = ChTableName{
+			DatabaseName: "",
+			TableName:    parts[0],
+		}
+	} else {
+		return fmt.Errorf("too many parts in the table name")
+	}
+
+	return nil
 }
 
 // UnmarshalYAML ...
@@ -257,7 +342,7 @@ func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return err
 	}
 
-	if val.ChBufferTable != "" && val.BufferTableRowIdColumn == "" {
+	if val.BufferTableRowIdColumn == "" {
 		val.BufferTableRowIdColumn = defaultRowIdColumn
 	}
 
@@ -275,6 +360,10 @@ func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 	if val.MaxBufferLength == 0 {
 		val.MaxBufferLength = defaultMaxBufferLength
+	}
+
+	if val.LsnColumnName == "" {
+		val.LsnColumnName = defaultLsnColumn
 	}
 
 	*t = Table(val)
@@ -295,4 +384,15 @@ func (c *chConnConfig) ConnectionString() string {
 	}
 
 	return fmt.Sprintf("tcp://%s:%d?%s", c.Host, c.Port, connStr.Encode())
+}
+
+func (c PgColumn) IsIstore() bool {
+	return c.BaseType == utils.PgAdjustIstore || c.BaseType == utils.PgAdjustBigIstore
+}
+
+func (c PgColumn) IsTime() bool {
+	return c.BaseType == utils.PgAdjustAjTime ||
+		c.BaseType == utils.PgTimestampWithoutTimeZone ||
+		c.BaseType == utils.PgTimestampWithTimeZone ||
+		c.BaseType == utils.PgDate
 }

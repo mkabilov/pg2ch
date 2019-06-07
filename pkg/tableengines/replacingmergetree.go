@@ -2,7 +2,6 @@ package tableengines
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -20,9 +19,9 @@ type replacingMergeTree struct {
 }
 
 // NewReplacingMergeTree instantiates replacingMergeTree
-func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID *uint64) *replacingMergeTree {
+func NewReplacingMergeTree(ctx context.Context, connUrl string, tblCfg config.Table, genID *uint64) *replacingMergeTree {
 	t := replacingMergeTree{
-		genericTable: newGenericTable(ctx, conn, tblCfg, genID),
+		genericTable: newGenericTable(ctx, connUrl, tblCfg, genID),
 		verColumn:    tblCfg.VerColumn,
 	}
 	if tblCfg.VerColumn != "" {
@@ -37,72 +36,85 @@ func NewReplacingMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Tabl
 }
 
 // Sync performs initial sync of the data; pgTx is a transaction in which temporary replication slot is created
-func (t *replacingMergeTree) Sync(pgTx *pgx.Tx) error {
-	return t.genSync(pgTx, t)
+func (t *replacingMergeTree) Sync(pgTx *pgx.Tx, lsn utils.LSN) error {
+	return t.genSync(pgTx, lsn, t)
 }
 
 // Write implements io.Writer which is used during the Sync process, see genSync method
 func (t *replacingMergeTree) Write(p []byte) (int, error) {
-	var row []interface{}
-
-	row, n, err := t.syncConvertIntoRow(p)
-	if err != nil {
+	if err := t.genSyncWrite(p); err != nil {
 		return 0, err
 	}
+
+	suffixes := make([]string, 0)
+
 	if t.cfg.GenerationColumn != "" {
-		row = append(row, 0) // "generationID"
+		suffixes = append(suffixes, "0") // generation id
 	}
 	if t.cfg.VerColumn != "" {
-		row = append(row, 0) // "version"
+		suffixes = append(suffixes, "0") // version
 	}
-	row = append(row, 0) // append "is_deleted" column
+	suffixes = append(suffixes, "0") // is_deleted
 
-	return n, t.insertRow(row)
+	if len(suffixes) > 0 {
+		if err := t.bulkUploader.Write([]byte(strings.Join(suffixes, "\t"))); err != nil {
+			return 0, err
+		}
+	}
+
+	if err := t.bulkUploader.Write([]byte("\n")); err != nil {
+		return 0, err
+	}
+
+	t.printSyncProgress()
+
+	return len(p), nil
 }
 
 // Insert handles incoming insert DML operation
 func (t *replacingMergeTree) Insert(lsn utils.LSN, new message.Row) (bool, error) {
 	if t.cfg.VerColumn != "" {
-		return t.processCommandSet(commandSet{append(t.convertTuples(new), uint64(lsn), 0)})
+		return t.processChTuples(lsn, chTuples{appendField(t.convertRow(new), lsn.StrBytes(), zeroStr)})
 	} else {
-		return t.processCommandSet(commandSet{append(t.convertTuples(new), 0)})
+		return t.processChTuples(lsn, chTuples{appendField(t.convertRow(new), zeroStr)})
 	}
 }
 
 // Update handles incoming update DML operation
 func (t *replacingMergeTree) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
-	var cmdSet commandSet
+	var cmdSet chTuples
 	equal, keyChanged := t.compareRows(old, new)
 	if equal {
-		return t.processCommandSet(nil)
+		return t.processChTuples(0, nil)
 	}
+	lsnStr := lsn.StrBytes()
 
 	if keyChanged {
 		if t.cfg.VerColumn != "" {
-			cmdSet = commandSet{
-				append(t.convertTuples(old), uint64(lsn), 1),
-				append(t.convertTuples(new), uint64(lsn), 0),
+			cmdSet = chTuples{
+				appendField(t.convertRow(old), lsnStr, oneStr),
+				appendField(t.convertRow(new), lsnStr, zeroStr),
 			}
 		} else {
-			cmdSet = commandSet{
-				append(t.convertTuples(old), 1),
-				append(t.convertTuples(new), 0),
+			cmdSet = chTuples{
+				appendField(t.convertRow(old), oneStr),
+				appendField(t.convertRow(new), zeroStr),
 			}
 		}
 	} else if t.cfg.VerColumn != "" {
-		cmdSet = commandSet{append(t.convertTuples(new), uint64(lsn), 0)}
+		cmdSet = chTuples{appendField(t.convertRow(new), lsnStr, zeroStr)}
 	} else {
-		cmdSet = commandSet{append(t.convertTuples(new), 0)}
+		cmdSet = chTuples{appendField(t.convertRow(new), zeroStr)}
 	}
 
-	return t.processCommandSet(cmdSet)
+	return t.processChTuples(lsn, cmdSet)
 }
 
 // Delete handles incoming delete DML operation
 func (t *replacingMergeTree) Delete(lsn utils.LSN, old message.Row) (bool, error) {
 	if t.cfg.VerColumn != "" {
-		return t.processCommandSet(commandSet{append(t.convertTuples(old), uint64(lsn), 0)})
+		return t.processChTuples(lsn, chTuples{appendField(t.convertRow(old), lsn.StrBytes(), zeroStr)})
 	} else {
-		return t.processCommandSet(commandSet{append(t.convertTuples(old), 0)})
+		return t.processChTuples(lsn, chTuples{appendField(t.convertRow(old), zeroStr)})
 	}
 }

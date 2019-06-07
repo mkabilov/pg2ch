@@ -2,12 +2,6 @@
 
 
 [[projects]]
-  branch = "master"
-  name = "github.com/cloudflare/golz4"
-  packages = ["."]
-  revision = "ef862a3cdc58a6f1fee4e3af3d44fbe279194cde"
-
-[[projects]]
   name = "github.com/google/btree"
   packages = ["."]
   revision = "4030bb1f1f0c35b30ca7009e9ebd06849dd45306"
@@ -24,24 +18,7 @@
     "pgproto3",
     "pgtype"
   ]
-  revision = "8faa4453fc7051d1076053f8854077753ab912f2"
-
-[[projects]]
-  name = "github.com/kshvakov/clickhouse"
-  packages = [
-    ".",
-    "lib/binary",
-    "lib/cityhash102",
-    "lib/column",
-    "lib/data",
-    "lib/leakypool",
-    "lib/lz4",
-    "lib/protocol",
-    "lib/types",
-    "lib/writebuffer"
-  ]
-  revision = "1d87030de2a38bbe8c05e1b13f5b2f27466fd5a8"
-  version = "v1.3.6"
+  revision = "762e68533f0090ecb6bb1166d51966b326597ec7"
 
 [[projects]]
   branch = "master"
@@ -71,7 +48,7 @@
   branch = "master"
   name = "golang.org/x/crypto"
   packages = ["pbkdf2"]
-  revision = "22d7a77e9e5f409e934ed268692e56707cd169e5"
+  revision = "cc06ce4a13d484c0101a9e92913248488a75786d"
 
 [[projects]]
   name = "golang.org/x/text"
@@ -110,6 +87,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "ec33d2502f97a14e88af7d340eb114425f966a47b7816819b329a453f6605a7e"
+  inputs-digest = "ecefb4445afb9e177a7a71f2c9ed5576f0e6743089eb4212702617d99c4721d0"
   solver-name = "gps-cdcl"
   solver-version = 1

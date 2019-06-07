@@ -2,19 +2,17 @@ package replicator
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx"
-	"github.com/kshvakov/clickhouse"
 	"github.com/peterbourgon/diskv"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
@@ -22,23 +20,27 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/message"
 	"github.com/mkabilov/pg2ch/pkg/tableengines"
 	"github.com/mkabilov/pg2ch/pkg/utils"
-	"github.com/mkabilov/pg2ch/pkg/utils/tableinfo"
 )
 
 const (
-	applicationName   = "pg2ch"
-	tableLSNKeyPrefix = "table_lsn_"
-	generationIDKey   = "generation_id"
+	applicationName = "pg2ch"
+	generationIDKey = "generation_id"
 )
 
 type clickHouseTable interface {
+	Init() error
+
+	InitSync() error
+	Sync(*pgx.Tx, utils.LSN) error
+
+	Begin() error
 	Insert(lsn utils.LSN, new message.Row) (mergeIsNeeded bool, err error)
 	Update(lsn utils.LSN, old message.Row, new message.Row) (mergeIsNeeded bool, err error)
 	Delete(lsn utils.LSN, old message.Row) (mergeIsNeeded bool, err error)
+	Truncate(lsn utils.LSN) error
+	Commit() error
+
 	SetTupleColumns([]message.Column)
-	Truncate() error
-	Sync(*pgx.Tx) error
-	Init() error
 	FlushToMainTable() error
 }
 
@@ -49,8 +51,9 @@ type Replicator struct {
 	cfg      config.Config
 	errCh    chan error
 
-	pgConn *pgx.Conn
-	chConn *sql.DB
+	chConnString string
+
+	pgDeltaConn *pgx.Conn
 
 	persStorage *diskv.Diskv
 
@@ -59,15 +62,19 @@ type Replicator struct {
 	tempSlotName string
 
 	finalLSN utils.LSN
-	tableLSN map[config.PgTableName]utils.LSN
+	beginMsg message.Begin
 
 	inTx               bool // indicates if we're inside tx
 	tablesToMergeMutex *sync.Mutex
-	tablesToMerge      map[config.PgTableName]struct{} // tables to be merged
-	inTxTables         map[config.PgTableName]struct{} // tables inside running tx
-	curTxMergeIsNeeded bool                            // if tables in the current transaction are needed to be merged
-	generationID       uint64
+	tablesToMerge      map[config.PgTableName]struct{}        // tables to be merged
+	inTxTables         map[config.PgTableName]clickHouseTable // tables inside running tx
+	curTxMergeIsNeeded bool                                   // if tables in the current transaction are needed to be merged
+	generationID       uint64                                 // wrap with lock
 	isEmptyTx          bool
+	syncJobTableName   config.PgTableName
+	syncJobs           chan config.PgTableName
+
+	pgxConnConfig pgx.ConnConfig
 }
 
 func New(cfg config.Config) *Replicator {
@@ -79,8 +86,12 @@ func New(cfg config.Config) *Replicator {
 
 		tablesToMergeMutex: &sync.Mutex{},
 		tablesToMerge:      make(map[config.PgTableName]struct{}),
-		inTxTables:         make(map[config.PgTableName]struct{}),
-		tableLSN:           make(map[config.PgTableName]utils.LSN),
+		inTxTables:         make(map[config.PgTableName]clickHouseTable),
+		chConnString:       fmt.Sprintf("http://%s:%d", cfg.ClickHouse.Host, cfg.ClickHouse.Port),
+		syncJobs:           make(chan config.PgTableName, cfg.SyncWorkers),
+		pgxConnConfig: cfg.Postgres.Merge(pgx.ConnConfig{
+			RuntimeParams:        map[string]string{"replication": "database", "application_name": applicationName},
+			PreferSimpleProtocol: true}),
 	}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 
@@ -94,76 +105,32 @@ func (r *Replicator) newTable(tblName config.PgTableName, tblConfig config.Table
 			return nil, fmt.Errorf("ReplacingMergeTree requires either version or generation column to be set")
 		}
 
-		return tableengines.NewReplacingMergeTree(r.ctx, r.chConn, tblConfig, &r.generationID), nil
+		return tableengines.NewReplacingMergeTree(r.ctx, r.chConnString, tblConfig, &r.generationID), nil
 	case config.CollapsingMergeTree:
 		if tblConfig.SignColumn == "" {
 			return nil, fmt.Errorf("CollapsingMergeTree requires sign column to be set")
 		}
 
-		return tableengines.NewCollapsingMergeTree(r.ctx, r.chConn, tblConfig, &r.generationID), nil
+		return tableengines.NewCollapsingMergeTree(r.ctx, r.chConnString, tblConfig, &r.generationID), nil
 	case config.MergeTree:
-		return tableengines.NewMergeTree(r.ctx, r.chConn, tblConfig, &r.generationID), nil
+		return tableengines.NewMergeTree(r.ctx, r.chConnString, tblConfig, &r.generationID), nil
 	}
 
 	return nil, fmt.Errorf("%s table engine is not implemented", tblConfig.Engine)
 }
 
-func (r *Replicator) checkPgSlotAndPub(tx *pgx.Tx) error {
-	var slotExists, pubExists bool
-
-	err := tx.QueryRow("select "+
-		"exists(select 1 from pg_replication_slots where slot_name = $1) as slot_exists, "+
-		"exists(select 1 from pg_publication where pubname = $2) as pub_exists",
-		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName).Scan(&slotExists, &pubExists)
-
+func (r *Replicator) initTables() error {
+	tx, err := r.pgBegin(r.pgDeltaConn)
 	if err != nil {
-		return fmt.Errorf("could not query: %v", err)
+		return err
 	}
+	defer r.pgRollback(tx)
 
-	errMsg := ""
-
-	if !slotExists {
-		errMsg += fmt.Sprintf("slot %q does not exist", r.cfg.Postgres.ReplicationSlotName)
-	}
-
-	if !pubExists {
-		if errMsg != "" {
-			errMsg += " and "
-		}
-		errMsg += fmt.Sprintf("publication %q does not exist", r.cfg.Postgres.PublicationName)
-	}
-
-	if errMsg != "" {
-		return fmt.Errorf(errMsg)
-	}
-
-	return nil
-}
-
-func (r *Replicator) initAndSyncTables() error {
 	for tblName := range r.cfg.Tables {
-		var (
-			lsn utils.LSN
-			err error
-		)
-
-		tx, err := r.pgBegin()
-		if err != nil {
-			return err
-		}
-
-		if _, ok := r.tableLSN[tblName]; !ok {
-			lsn, err = r.pgCreateTempRepSlot(tx, tblName) // create temp repl slot must the first command in the tx
-			if err != nil {
-				return fmt.Errorf("could not create temporary replication slot: %v", err)
-			}
-		}
-
 		tblConfig, err := r.fetchTableConfig(tx, tblName)
 		if err != nil {
 			return fmt.Errorf("could not get %s table config: %v", tblName.String(), err)
 		}
-		tblConfig.PgTableName = tblName
 
 		tbl, err := r.newTable(tblName, tblConfig)
 		if err != nil {
@@ -174,80 +141,80 @@ func (r *Replicator) initAndSyncTables() error {
 			return fmt.Errorf("could not init %s: %v", tblName.String(), err)
 		}
 
+		oid, err := r.fetchTableOID(tblName, tx)
+		if err != nil {
+			return fmt.Errorf("could not get table oid: %v", err)
+		}
+
+		r.oidName[oid] = tblName
 		r.chTables[tblName] = tbl
-
-		if _, ok := r.tableLSN[tblName]; ok {
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-
-			continue
-		}
-
-		if err := tbl.Sync(tx); err != nil {
-			return fmt.Errorf("could not sync %s: %v", tblName.String(), err)
-		}
-
-		r.tableLSN[tblName] = lsn
-		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), lsn.Bytes()); err != nil {
-			return fmt.Errorf("could not store lsn for table %s", tblName.String())
-		}
-
-		if err := r.pgDropRepSlot(tx); err != nil {
-			return fmt.Errorf("could not drop replication slot: %v", err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return err
-		}
 	}
-	r.incrementGeneration()
 
 	return nil
 }
 
-func (r *Replicator) pgBegin() (*pgx.Tx, error) {
-	tx, err := r.pgConn.BeginEx(r.ctx, &pgx.TxOptions{
-		IsoLevel:   pgx.RepeatableRead,
-		AccessMode: pgx.ReadOnly})
+func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
+	conn, err := pgx.Connect(r.pgxConnConfig)
 	if err != nil {
-		return nil, fmt.Errorf("could not start pg transaction: %v", err)
+		return fmt.Errorf("could not connect: %v", err)
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			r.errCh <- err
+		}
+	}()
+	connInfo, err := initPostgresql(conn)
+	if err != nil {
+		return fmt.Errorf("could not fetch conn info: %v", err)
+	}
+	conn.ConnInfo = connInfo
+
+	tx, err := r.pgBegin(conn)
+	if err != nil {
+		return err
+	}
+	defer r.pgRollback(tx)
+
+	tmpSlotName := genTempSlotName(pgTableName)
+	log.Printf("creating %q temporary logical replication slot for %q pg table",
+		tmpSlotName, pgTableName.String())
+	lsn, err := r.pgCreateTempRepSlot(tx, tmpSlotName)
+	if err != nil {
+		return err
 	}
 
-	return tx, nil
+	log.Printf("lsn %v for table %q", uint64(lsn), pgTableName.String())
+
+	tbl := r.chTables[pgTableName]
+	if err := tbl.Sync(tx, lsn); err != nil {
+		return fmt.Errorf("could not sync: %v", err)
+	}
+
+	if err := r.persStorage.Write(pgTableName.KeyName(), lsn.FormattedBytes()); err != nil {
+		return fmt.Errorf("could not store lsn for table %s", pgTableName.String())
+	}
+
+	return nil
 }
 
-func (r *Replicator) pgCommit(tx *pgx.Tx) error {
-	return tx.Commit()
+// go routine
+func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
+	defer func() {
+		doneCh <- struct{}{}
+	}()
+
+	for pgTableName := range r.syncJobs {
+		log.Printf("sync job %d: starting syncing %q pg table", i, pgTableName.String())
+		if err := r.syncTable(pgTableName); err != nil {
+			r.errCh <- err
+			return
+		}
+
+		log.Printf("sync job %d: %q table synced", i, pgTableName.String())
+	}
 }
 
 func (r *Replicator) readPersStorage() error {
-	for key := range r.persStorage.Keys(nil) {
-		if !strings.HasPrefix(key, tableLSNKeyPrefix) {
-			continue
-		}
-		if !r.persStorage.Has(key) {
-			continue
-		}
-		val, err := r.persStorage.Read(key)
-		if err != nil {
-			return fmt.Errorf("could not read %v key: %v", err)
-		}
-
-		tblName := &config.PgTableName{}
-		if err := tblName.Parse(key[len(tableLSNKeyPrefix):]); err != nil {
-			return err
-		}
-
-		lsn := utils.InvalidLSN
-		if err := lsn.Parse(string(val)); err != nil {
-			return fmt.Errorf("could not parse lsn %q: %v", string(val), err)
-		}
-
-		r.tableLSN[*tblName] = lsn
-		log.Printf("consuming changes for table %s starting from %v lsn position", tblName.String(), lsn)
-	}
-
 	if !r.persStorage.Has(generationIDKey) {
 		return nil
 	}
@@ -262,73 +229,13 @@ func (r *Replicator) readPersStorage() error {
 		log.Printf("incorrect value for generation_id in the pers storage: %v", err)
 	}
 
-	r.generationID = uint64(genID)
+	r.generationID = genID
 	log.Printf("generation_id: %v", r.generationID)
 
 	return nil
 }
 
-func (r *Replicator) initTables(tx *pgx.Tx) error {
-	for tblName := range r.cfg.Tables {
-		tblConfig, err := r.fetchTableConfig(tx, tblName)
-		if err != nil {
-			return fmt.Errorf("could not get %s table config: %v", tblName.String(), err)
-		}
-		tblConfig.PgTableName = tblName
-
-		tbl, err := r.newTable(tblName, tblConfig)
-		if err != nil {
-			return fmt.Errorf("could not instantiate table: %v", err)
-		}
-
-		if err := tbl.Init(); err != nil {
-			return fmt.Errorf("could not init %s: %v", tblName.String(), err)
-		}
-
-		r.chTables[tblName] = tbl
-	}
-
-	return nil
-}
-
-func (r *Replicator) minLSN() utils.LSN {
-	result := utils.InvalidLSN
-	if len(r.tableLSN) == 0 {
-		return result
-	}
-
-	for _, lsn := range r.tableLSN {
-		if !result.IsValid() || lsn < result {
-			result = lsn
-		}
-	}
-
-	return result
-}
-
-func (r *Replicator) pgCheck() error {
-	tx, err := r.pgBegin()
-	if err != nil {
-		return fmt.Errorf("could not begin: %v", err)
-	}
-
-	if err := r.checkPgSlotAndPub(tx); err != nil {
-		return err
-	}
-
-	if err := r.pgCommit(tx); err != nil {
-		return fmt.Errorf("could not commit: %v", err)
-	}
-
-	return nil
-}
-
 func (r *Replicator) Run() error {
-	var (
-		tx  *pgx.Tx
-		err error
-	)
-
 	r.persStorage = diskv.New(diskv.Options{
 		BasePath:     r.cfg.PersStoragePath,
 		CacheSizeMax: 1024 * 1024, // 1MB
@@ -342,55 +249,50 @@ func (r *Replicator) Run() error {
 		return err
 	}
 
-	if err := r.chConnect(); err != nil {
-		return fmt.Errorf("could not connect to clickhouse: %v", err)
-	}
-	defer r.chDisconnect()
-
 	if err := r.readPersStorage(); err != nil {
 		return fmt.Errorf("could not get start lsn positions: %v", err)
 	}
 
 	syncNeeded := false
+
 	for tblName := range r.cfg.Tables {
-		if _, ok := r.tableLSN[tblName]; !ok {
+		if !r.persStorage.Has(tblName.KeyName()) {
 			syncNeeded = true
 			break
 		}
 	}
 
-	if syncNeeded {
-		// in case of init sync, the replication slot must be created, which must be called before any query
-		if err := r.initAndSyncTables(); err != nil {
-			return fmt.Errorf("could not sync tables: %v", err)
-		}
-
-		tx, err = r.pgBegin()
-		if err != nil {
-			return err
-		}
-	} else {
-		tx, err = r.pgBegin()
-		if err != nil {
-			return err
-		}
-
-		if err := r.initTables(tx); err != nil {
-			return fmt.Errorf("could not init tables: %v", err)
-		}
-	}
-
-	if err := r.fetchPgTablesInfo(tx); err != nil {
-		return fmt.Errorf("table check failed: %v", err)
-	}
-
-	if err := r.pgCommit(tx); err != nil {
-		return err
+	if err := r.initTables(); err != nil {
+		return fmt.Errorf("could not init tables: %v", err)
 	}
 
 	r.finalLSN = r.minLSN()
 	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Postgres.ConnConfig,
 		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.finalLSN)
+
+	syncTables := make([]config.PgTableName, 0)
+	if syncNeeded {
+		for tblName := range r.cfg.Tables {
+			if !r.persStorage.Has(tblName.KeyName()) || r.cfg.Tables[tblName].InitSyncSkip {
+				continue
+			}
+
+			if err := r.chTables[tblName].InitSync(); err != nil {
+				return fmt.Errorf("could not init sync %q: %v", tblName, err)
+			}
+			syncTables = append(syncTables, tblName)
+		}
+	}
+
+	sort.SliceStable(syncTables, func(i, j int) bool {
+		if len(syncTables[i].TableName) > 6 && len(syncTables[j].TableName) > 6 {
+			part1 := syncTables[i].TableName[len(syncTables[i].TableName)-7:]
+			part2 := syncTables[j].TableName[len(syncTables[j].TableName)-7:]
+			return part1 > part2
+		}
+
+		return false
+	})
 
 	if err := r.consumer.Run(r); err != nil {
 		return err
@@ -403,6 +305,26 @@ func (r *Replicator) Run() error {
 		go r.redisServer()
 	}
 
+	if syncNeeded {
+		doneCh := make(chan struct{}, r.cfg.SyncWorkers)
+		for i := 0; i < r.cfg.SyncWorkers; i++ {
+			go r.syncJob(i, doneCh)
+		}
+
+		for _, tblName := range syncTables {
+			r.syncJobs <- tblName
+		}
+		close(r.syncJobs)
+
+		go func() {
+			for i := 0; i < r.cfg.SyncWorkers; i++ {
+				<-doneCh
+			}
+
+			log.Printf("all synced!")
+		}()
+	}
+
 	r.waitForShutdown()
 	r.cancel()
 	r.consumer.Wait()
@@ -412,7 +334,11 @@ func (r *Replicator) Run() error {
 			log.Printf("could not flush %s table: %v", tblName.String(), err)
 		}
 
-		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), r.finalLSN.Bytes()); err != nil {
+		if !r.finalLSN.IsValid() {
+			continue
+		}
+
+		if err := r.persStorage.Write(tblName.KeyName(), r.finalLSN.FormattedBytes()); err != nil {
 			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 	}
@@ -456,124 +382,9 @@ func (r *Replicator) logErrCh() {
 		case <-r.ctx.Done():
 			return
 		case err := <-r.errCh:
-			log.Println(err)
+			log.Fatalln(err)
 		}
 	}
-}
-
-func (r *Replicator) fetchPgTablesInfo(tx *pgx.Tx) error {
-	rows, err := tx.Query(`
-			select c.oid,
-				   n.nspname,
-				   c.relname,
-				   c.relreplident
-			from pg_class c
-				   join pg_namespace n on n.oid = c.relnamespace
-      			   join pg_publication_tables pub on (c.relname = pub.tablename and n.nspname = pub.schemaname)
-			where
-				c.relkind = 'r'
-				and pub.pubname = $1`, r.cfg.Postgres.PublicationName)
-
-	if err != nil {
-		return fmt.Errorf("could not exec: %v", err)
-	}
-
-	for rows.Next() {
-		var (
-			oid                   utils.OID
-			schemaName, tableName string
-			replicaIdentity       message.ReplicaIdentity
-		)
-
-		if err := rows.Scan(&oid, &schemaName, &tableName, &replicaIdentity); err != nil {
-			return fmt.Errorf("could not scan: %v", err)
-		}
-
-		fqName := config.PgTableName{SchemaName: schemaName, TableName: tableName}
-
-		if _, ok := r.cfg.Tables[fqName]; ok && replicaIdentity != message.ReplicaIdentityFull {
-			return fmt.Errorf("table %s must have FULL replica identity(currently it is %q)", tableName, replicaIdentity)
-		}
-
-		r.oidName[oid] = fqName
-	}
-
-	return nil
-}
-
-func (r *Replicator) chConnect() error {
-	var err error
-
-	r.chConn, err = sql.Open("clickhouse", r.cfg.ClickHouse.ConnectionString())
-	if err != nil {
-		log.Fatal(err)
-	}
-	if err := r.chConn.Ping(); err != nil {
-		if exception, ok := err.(*clickhouse.Exception); ok {
-			return fmt.Errorf("[%d] %s %s", exception.Code, exception.Message, exception.StackTrace)
-		}
-
-		return fmt.Errorf("could not ping: %v", err)
-	}
-
-	return nil
-}
-
-func (r *Replicator) chDisconnect() {
-	if err := r.chConn.Close(); err != nil {
-		log.Printf("could not close connection to clickhouse: %v", err)
-	}
-}
-
-func (r *Replicator) pgConnect() error {
-	var err error
-
-	r.pgConn, err = pgx.Connect(r.cfg.Postgres.Merge(pgx.ConnConfig{
-		RuntimeParams:        map[string]string{"replication": "database", "application_name": applicationName},
-		PreferSimpleProtocol: true}))
-	if err != nil {
-		return fmt.Errorf("could not rep connect to pg: %v", err)
-	}
-
-	connInfo, err := initPostgresql(r.pgConn)
-	if err != nil {
-		return fmt.Errorf("could not fetch conn info: %v", err)
-	}
-	r.pgConn.ConnInfo = connInfo
-
-	return nil
-}
-
-func (r *Replicator) pgDisconnect() {
-	if err := r.pgConn.Close(); err != nil {
-		log.Printf("could not close connection to postgresql: %v", err)
-	}
-}
-
-func (r *Replicator) pgDropRepSlot(tx *pgx.Tx) error {
-	_, err := tx.Exec(fmt.Sprintf("DROP_REPLICATION_SLOT %s", r.tempSlotName))
-
-	return err
-}
-
-func (r *Replicator) pgCreateTempRepSlot(tx *pgx.Tx, tblName config.PgTableName) (utils.LSN, error) {
-	var (
-		snapshotLSN, snapshotName, plugin sql.NullString
-		lsn                               utils.LSN
-	)
-
-	row := tx.QueryRow(fmt.Sprintf("CREATE_REPLICATION_SLOT %s TEMPORARY LOGICAL %s USE_SNAPSHOT",
-		fmt.Sprintf("ch_tmp_%s_%s", tblName.SchemaName, tblName.TableName), utils.OutputPlugin))
-
-	if err := row.Scan(&r.tempSlotName, &snapshotLSN, &snapshotName, &plugin); err != nil {
-		return utils.InvalidLSN, fmt.Errorf("could not scan: %v", err)
-	}
-
-	if err := lsn.Parse(snapshotLSN.String); err != nil {
-		return utils.InvalidLSN, fmt.Errorf("could not parse LSN: %v", err)
-	}
-
-	return lsn, nil
 }
 
 func (r *Replicator) waitForShutdown() {
@@ -598,189 +409,4 @@ loop:
 			}
 		}
 	}
-}
-
-// TODO: merge with getTable
-func (r *Replicator) skipTableMessage(tblName config.PgTableName) bool {
-	lsn, ok := r.tableLSN[tblName]
-	if !ok {
-		return false
-	}
-
-	return r.finalLSN <= lsn
-}
-
-func (r *Replicator) getTable(oid utils.OID) (config.PgTableName, clickHouseTable) {
-	tblName, ok := r.oidName[oid]
-	if !ok {
-		return config.PgTableName{}, nil
-	}
-
-	chTbl, ok := r.chTables[tblName]
-	if !ok {
-		return config.PgTableName{}, nil
-	}
-
-	// TODO: skip adding tables with no buffer table
-	if _, ok := r.inTxTables[tblName]; !ok {
-		r.inTxTables[tblName] = struct{}{}
-	}
-
-	if _, ok := r.tablesToMerge[tblName]; !ok {
-		r.tablesToMerge[tblName] = struct{}{}
-	}
-
-	return tblName, chTbl
-}
-
-func (r *Replicator) mergeTables() error {
-	for tblName := range r.tablesToMerge {
-		if _, ok := r.inTxTables[tblName]; ok {
-			continue
-		}
-
-		if err := r.chTables[tblName].FlushToMainTable(); err != nil {
-			return fmt.Errorf("could not commit %s table: %v", tblName.String(), err)
-		}
-
-		delete(r.tablesToMerge, tblName)
-		r.tableLSN[tblName] = r.finalLSN
-		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), r.finalLSN.Bytes()); err != nil {
-			return fmt.Errorf("could not store lsn for table %s", tblName.String())
-		}
-	}
-
-	r.advanceLSN()
-
-	return nil
-}
-
-func (r *Replicator) incrementGeneration() {
-	r.generationID++
-	if err := r.persStorage.Write("generation_id", []byte(fmt.Sprintf("%v", r.generationID))); err != nil {
-		log.Printf("could not save generation id: %v", err)
-	}
-}
-
-// HandleMessage processes the incoming wal message
-func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
-	r.tablesToMergeMutex.Lock()
-	defer r.tablesToMergeMutex.Unlock()
-
-	switch v := msg.(type) {
-	case message.Begin:
-		r.inTx = true
-		r.finalLSN = v.FinalLSN
-		r.curTxMergeIsNeeded = false
-		r.isEmptyTx = true
-	case message.Commit:
-		if r.curTxMergeIsNeeded {
-			if err := r.mergeTables(); err != nil {
-				return fmt.Errorf("could not merge tables: %v", err)
-			}
-		} else {
-			r.advanceLSN()
-		}
-		if !r.isEmptyTx {
-			r.incrementGeneration()
-		}
-		r.inTxTables = make(map[config.PgTableName]struct{})
-		r.inTx = false
-	case message.Relation:
-		_, chTbl := r.getTable(v.OID)
-		if chTbl == nil {
-			break
-		}
-
-		chTbl.SetTupleColumns(v.Columns)
-	case message.Insert:
-		tblName, chTbl := r.getTable(v.RelationOID)
-		if chTbl == nil || r.skipTableMessage(tblName) {
-			break
-		}
-
-		if mergeIsNeeded, err := chTbl.Insert(r.finalLSN, v.NewRow); err != nil {
-			return fmt.Errorf("could not insert: %v", err)
-		} else {
-			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
-		}
-		r.isEmptyTx = false
-	case message.Update:
-		tblName, chTbl := r.getTable(v.RelationOID)
-		if chTbl == nil || r.skipTableMessage(tblName) {
-			break
-		}
-
-		if mergeIsNeeded, err := chTbl.Update(r.finalLSN, v.OldRow, v.NewRow); err != nil {
-			return fmt.Errorf("could not update: %v", err)
-		} else {
-			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
-		}
-		r.isEmptyTx = false
-	case message.Delete:
-		tblName, chTbl := r.getTable(v.RelationOID)
-		if chTbl == nil || r.skipTableMessage(tblName) {
-			break
-		}
-
-		if mergeIsNeeded, err := chTbl.Delete(r.finalLSN, v.OldRow); err != nil {
-			return fmt.Errorf("could not delete: %v", err)
-		} else {
-			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
-		}
-		r.isEmptyTx = false
-	case message.Truncate:
-		for _, oid := range v.RelationOIDs {
-			if tblName, chTbl := r.getTable(oid); chTbl == nil || r.skipTableMessage(tblName) {
-				continue
-			} else {
-				if err := chTbl.Truncate(); err != nil {
-					return err
-				}
-			}
-		}
-		r.isEmptyTx = false
-	}
-
-	return nil
-}
-
-func (r *Replicator) advanceLSN() {
-	r.consumer.AdvanceLSN(r.finalLSN)
-}
-
-func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (config.Table, error) {
-	var err error
-	cfg := r.cfg.Tables[tblName]
-
-	cfg.TupleColumns, cfg.PgColumns, err = tableinfo.TablePgColumns(tx, tblName)
-	if err != nil {
-		return cfg, fmt.Errorf("could not get columns for %s postgres table: %v", tblName.String(), err)
-	}
-
-	chColumns, err := tableinfo.TableChColumns(r.chConn, r.cfg.ClickHouse.Database, cfg.ChMainTable)
-	if err != nil {
-		return cfg, fmt.Errorf("could not get columns for %q clickhouse table: %v", cfg.ChMainTable, err)
-	}
-
-	cfg.ColumnMapping = make(map[string]config.ChColumn)
-	if len(cfg.Columns) > 0 {
-		for pgCol, chCol := range cfg.Columns {
-			if chColCfg, ok := chColumns[chCol]; !ok {
-				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", chCol, cfg.ChMainTable)
-			} else {
-				cfg.ColumnMapping[pgCol] = chColCfg
-			}
-		}
-	} else {
-		for _, pgCol := range cfg.TupleColumns {
-			if chColCfg, ok := chColumns[pgCol.Name]; !ok {
-				return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", pgCol.Name, cfg.ChMainTable)
-			} else {
-				cfg.ColumnMapping[pgCol.Name] = chColCfg
-			}
-		}
-	}
-
-	return cfg, nil
 }

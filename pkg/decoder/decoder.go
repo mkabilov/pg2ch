@@ -20,6 +20,16 @@ type decoder struct {
 const (
 	truncateCascadeBit         = 1
 	truncateRestartIdentityBit = 2
+
+	InsertMsgType   = 'I'
+	DeleteMsgType   = 'D'
+	UpdateMsgType   = 'U'
+	TruncateMsgType = 'T'
+	BeginMsgType    = 'B'
+	CommitMsgType   = 'C'
+	TypeMsgType     = 'Y'
+	OriginMsgType   = 'O'
+	RelationMsgType = 'R'
 )
 
 func (d *decoder) bool() bool { return d.buf.Next(1)[0] != 0 }
@@ -99,7 +109,7 @@ func Parse(src []byte) (message.Message, error) {
 	msgType := src[0]
 	d := &decoder{order: binary.BigEndian, buf: bytes.NewBuffer(src[1:])}
 	switch msgType {
-	case 'B':
+	case BeginMsgType:
 		m := message.Begin{
 			Raw: make([]byte, len(src)),
 		}
@@ -110,7 +120,7 @@ func Parse(src []byte) (message.Message, error) {
 		m.XID = d.int32()
 
 		return m, nil
-	case 'C':
+	case CommitMsgType:
 		m := message.Commit{
 			Raw: make([]byte, len(src)),
 		}
@@ -122,7 +132,7 @@ func Parse(src []byte) (message.Message, error) {
 		m.Timestamp = d.timestamp()
 
 		return m, nil
-	case 'O':
+	case OriginMsgType:
 		m := message.Origin{
 			Raw: make([]byte, len(src)),
 		}
@@ -132,7 +142,7 @@ func Parse(src []byte) (message.Message, error) {
 		m.Name = d.string()
 
 		return m, nil
-	case 'R':
+	case RelationMsgType:
 		m := message.Relation{
 			Raw: make([]byte, len(src)),
 		}
@@ -145,7 +155,7 @@ func Parse(src []byte) (message.Message, error) {
 		m.Columns = d.columns()
 
 		return m, nil
-	case 'Y':
+	case TypeMsgType:
 		m := message.Type{
 			Raw: make([]byte, len(src)),
 		}
@@ -156,7 +166,7 @@ func Parse(src []byte) (message.Message, error) {
 		m.Name = d.string()
 
 		return m, nil
-	case 'I':
+	case InsertMsgType:
 		m := message.Insert{
 			Raw: make([]byte, len(src)),
 		}
@@ -167,7 +177,7 @@ func Parse(src []byte) (message.Message, error) {
 		m.NewRow = d.tupledata()
 
 		return m, nil
-	case 'U':
+	case UpdateMsgType:
 		m := message.Update{
 			Raw: make([]byte, len(src)),
 		}
@@ -183,7 +193,7 @@ func Parse(src []byte) (message.Message, error) {
 		m.NewRow = d.tupledata()
 
 		return m, nil
-	case 'D':
+	case DeleteMsgType:
 		m := message.Delete{
 			Raw: make([]byte, len(src)),
 		}
@@ -195,7 +205,7 @@ func Parse(src []byte) (message.Message, error) {
 		m.OldRow = d.tupledata()
 
 		return m, nil
-	case 'T':
+	case TruncateMsgType:
 		m := message.Truncate{
 			Raw: make([]byte, len(src)),
 		}

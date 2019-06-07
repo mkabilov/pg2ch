@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/jackc/pgx"
 )
@@ -72,6 +73,10 @@ func (l *LSN) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
-func (l *LSN) Bytes() []byte {
+func (l LSN) FormattedBytes() []byte {
 	return []byte(l.String())
+}
+
+func (l LSN) StrBytes() []byte {
+	return []byte(strconv.FormatUint(uint64(l), 10))
 }

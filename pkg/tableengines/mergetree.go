@@ -2,7 +2,6 @@ package tableengines
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -18,12 +17,12 @@ type mergeTreeTable struct {
 }
 
 // NewMergeTree instantiates mergeTreeTable
-func NewMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID *uint64) *mergeTreeTable {
+func NewMergeTree(ctx context.Context, connUrl string, tblCfg config.Table, genID *uint64) *mergeTreeTable {
 	t := mergeTreeTable{
-		genericTable: newGenericTable(ctx, conn, tblCfg, genID),
+		genericTable: newGenericTable(ctx, connUrl, tblCfg, genID),
 	}
 
-	if t.cfg.ChBufferTable == "" {
+	if t.cfg.ChBufferTable.IsEmpty() {
 		return &t
 	}
 
@@ -34,37 +33,41 @@ func NewMergeTree(ctx context.Context, conn *sql.DB, tblCfg config.Table, genID 
 }
 
 // Sync performs initial sync of the data; pgTx is a transaction in which temporary replication slot is created
-func (t *mergeTreeTable) Sync(pgTx *pgx.Tx) error {
-	return t.genSync(pgTx, t)
+func (t *mergeTreeTable) Sync(pgTx *pgx.Tx, lsn utils.LSN) error {
+	return t.genSync(pgTx, lsn, t)
 }
 
 // Write implements io.Writer which is used during the Sync process, see genSync method
 func (t *mergeTreeTable) Write(p []byte) (int, error) {
-	var row []interface{}
-
-	row, n, err := t.syncConvertIntoRow(p)
-	if err != nil {
+	if err := t.genSyncWrite(p); err != nil {
 		return 0, err
 	}
 
 	if t.cfg.GenerationColumn != "" {
-		row = append(row, 0)
+		if err := t.bulkUploader.Write([]byte("\t0")); err != nil { // generation id
+			return 0, err
+		}
+	}
+	if err := t.bulkUploader.Write([]byte("\n")); err != nil {
+		return 0, err
 	}
 
-	return n, t.insertRow(row)
+	t.printSyncProgress()
+
+	return len(p), nil
 }
 
 // Insert handles incoming insert DML operation
 func (t *mergeTreeTable) Insert(lsn utils.LSN, new message.Row) (bool, error) {
-	return t.processCommandSet(commandSet{t.convertTuples(new)})
+	return t.processChTuples(lsn, chTuples{t.convertRow(new)})
 }
 
 // Update handles incoming update DML operation
 func (t *mergeTreeTable) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
-	return t.processCommandSet(nil)
+	return t.processChTuples(0, nil)
 }
 
 // Delete handles incoming delete DML operation
 func (t *mergeTreeTable) Delete(lsn utils.LSN, old message.Row) (bool, error) {
-	return t.processCommandSet(nil)
+	return t.processChTuples(0, nil)
 }

@@ -45,4 +45,13 @@ const (
 	PgUuid                     = "uuid"
 	PgBytea                    = "bytea"
 	PgInet                     = "inet"
+
+	//adjust specific
+	PgAdjustIstore     = "istore"
+	PgAdjustBigIstore  = "bigistore"
+	PgAdjustAjBool     = "ajbool"
+	PgAdjustAjTime     = "ajtime"
+	PgAdjustCountry    = "country"
+	PgAdjustDeviceType = "device_type"
+	PgAdjustOsName     = "os_name"
 )

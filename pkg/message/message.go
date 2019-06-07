@@ -1,6 +1,7 @@
 package message
 
 import (
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"time"
@@ -19,13 +20,13 @@ type (
 
 const (
 	ReplicaIdentityDefault ReplicaIdentity = 'd'
-	ReplicaIdentityNothing                 = 'n'
-	ReplicaIdentityIndex                   = 'i'
-	ReplicaIdentityFull                    = 'f'
+	ReplicaIdentityNothing ReplicaIdentity = 'n'
+	ReplicaIdentityIndex   ReplicaIdentity = 'i'
+	ReplicaIdentityFull    ReplicaIdentity = 'f'
 
 	TupleNull      TupleKind = 'n' // Identifies the data as NULL value.
-	TupleUnchanged           = 'u' // Identifies unchanged TOASTed value (the actual value is not sent).
-	TupleText                = 't' // Identifies the data as text formatted value.
+	TupleUnchanged TupleKind = 'u' // Identifies unchanged TOASTed value (the actual value is not sent).
+	TupleText      TupleKind = 't' // Identifies the data as text formatted value.
 
 	MsgInsert MType = iota
 	MsgUpdate
@@ -59,7 +60,7 @@ var (
 	}
 )
 
-type Row []Tuple
+type Row []Tuple // set of columns
 
 type Message interface {
 	fmt.Stringer
@@ -174,6 +175,28 @@ func (t Tuple) String() string {
 	}
 
 	return "unknown"
+}
+
+func (t Tuple) Bytes() []byte {
+	res := []byte{uint8(t.Kind)}
+
+	if t.Kind == TupleText {
+		sz := make([]byte, 4)
+		binary.BigEndian.PutUint32(sz, uint32(len(t.Value)))
+		res = append(res, sz...)
+		res = append(res, t.Value...)
+	}
+
+	return res
+}
+
+func (r Row) Bytes() []byte {
+	res := make([]byte, 0)
+	for _, tuple := range r {
+		res = append(res, tuple.Bytes()...)
+	}
+
+	return res
 }
 
 func (m Begin) String() string {

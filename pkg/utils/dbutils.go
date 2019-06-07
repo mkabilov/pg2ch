@@ -1,45 +1,25 @@
 package utils
 
 import (
-	"database/sql"
+	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync"
+	"unicode/utf8"
 )
 
 const (
 	// OutputPlugin contains logical decoder plugin name
 	OutputPlugin = "pgoutput"
 
-	copyNull = 'N'
+	lowerhex = "0123456789abcdef"
 )
 
-var decodeMap = map[byte]byte{
-	'b':  '\b',
-	'f':  '\f',
-	'n':  '\n',
-	'r':  '\r',
-	't':  '\t',
-	'v':  '\v',
-	'\\': '\\',
-}
-
-func decodeDigit(c byte, onlyOctal bool) (byte, bool) {
-	switch {
-	case c >= '0' && c <= '7':
-		return c - '0', true
-	case !onlyOctal && c >= '8' && c <= '9':
-		return c - '0', true
-	case !onlyOctal && c >= 'a' && c <= 'f':
-		return c - 'a' + 10, true
-	case !onlyOctal && c >= 'A' && c <= 'F':
-		return c - 'A' + 10, true
-	default:
-		return 0, false
-	}
-}
-
-func decodeOctDigit(c byte) (byte, bool) { return decodeDigit(c, true) }
-func decodeHexDigit(c byte) (byte, bool) { return decodeDigit(c, false) }
+var bytesBufPool = sync.Pool{
+	New: func() interface{} {
+		return bytes.NewBuffer([]byte{})
+	}}
 
 //QuoteLiteral quotes string literal
 func QuoteLiteral(str string) string {
@@ -70,90 +50,183 @@ func QuoteLiteral(str string) string {
 	return `'` + res + `'`
 }
 
-//DecodeCopy extracts fields from the postgresql text copy format
-// based on DecodeCopy from https://github.com/cockroachdb/cockroach/blob/master/pkg/sql/copy.go
-func DecodeCopy(in []byte) ([]sql.NullString, error) {
-	result := make([]sql.NullString, 0)
-
-	isValid := true
-	str := &strings.Builder{}
-	for i, n := 0, len(in); i < n; i++ {
-		if in[i] == '\t' {
-			result = append(result, sql.NullString{Valid: isValid, String: str.String()})
-			isValid = true
-			str.Reset()
-			continue
-		} else if in[i] == '\n' {
-			result = append(result, sql.NullString{Valid: isValid, String: str.String()})
-			return result, nil
-		} else if in[i] != '\\' {
-			str.WriteByte(in[i])
-			continue
-		}
-		i++
-		if i >= n {
-			return nil, fmt.Errorf("unknown escape sequence: %q", in[i-1:])
+func ParseIstore(str string) (keys, values []int, err error) {
+	keys = make([]int, 0)
+	values = make([]int, 0)
+	for _, pair := range strings.Split(str, ",") {
+		var key, value int
+		n, err := fmt.Sscanf(strings.TrimLeft(pair, " "), `"%d"=>"%d"`, &key, &value)
+		if err != nil || n != 2 {
+			return nil, nil, fmt.Errorf("could not parse istore: %v(%d)", err, n)
 		}
 
-		ch := in[i]
-		if ch == copyNull {
-			isValid = false
-			continue
-		}
-
-		if decodedChar, ok := decodeMap[ch]; ok {
-			str.WriteByte(decodedChar)
-			continue
-		}
-
-		if ch == 'x' {
-			// \x can be followed by 1 or 2 hex digits.
-			i++
-			if i >= n {
-				return nil, fmt.Errorf("unknown escape sequence: %q", in[i-2:])
-			}
-
-			ch = in[i]
-			digit, ok := decodeHexDigit(ch)
-			if !ok {
-				return nil, fmt.Errorf("unknown escape sequence: %q", in[i-2:i])
-			}
-			if i+1 < n {
-				if v, ok := decodeHexDigit(in[i+1]); ok {
-					i++
-					digit <<= 4
-					digit += v
-				}
-			}
-			str.WriteByte(digit)
-
-			continue
-		}
-
-		if ch >= '0' && ch <= '7' {
-			digit, _ := decodeOctDigit(ch)
-			// 1 to 2 more octal digits follow.
-			if i+1 < n {
-				if v, ok := decodeOctDigit(in[i+1]); ok {
-					i++
-					digit <<= 3
-					digit += v
-				}
-			}
-			if i+1 < n {
-				if v, ok := decodeOctDigit(in[i+1]); ok {
-					i++
-					digit <<= 3
-					digit += v
-				}
-			}
-			str.WriteByte(digit)
-
-			continue
-		}
-
-		return nil, fmt.Errorf("unknown escape sequence: %q", in[i-1:i+1])
+		keys = append(keys, key)
+		values = append(values, value)
 	}
 
-	return result, nil
+	return
+}
+
+func IstoreToArrays(str []byte) []byte {
+	tmpStr := *bytesBufPool.Get().(*bytes.Buffer)
+	defer func() {
+		tmpStr.Reset()
+		bytesBufPool.Put(&tmpStr)
+	}()
+
+	keysBuf := bytes.NewBuffer([]byte{'['})
+	valuesBuf := bytes.NewBuffer([]byte{'['})
+
+	i := 0
+	isKey := true
+	isNum := false
+	for _, c := range str {
+		switch c {
+		case '"':
+			if isNum {
+				if isKey {
+					if i > 1 {
+						keysBuf.WriteByte(',')
+					}
+					keysBuf.Write(tmpStr.Bytes())
+				} else {
+					if i > 1 {
+						valuesBuf.WriteByte(',')
+					}
+					valuesBuf.Write(tmpStr.Bytes())
+					isKey = true
+				}
+			} else {
+				tmpStr.Reset()
+				if isKey {
+					i++
+				}
+			}
+			isNum = !isNum
+		case '=':
+			isKey = false
+		case '>':
+		case ' ':
+		case ',':
+		default:
+			tmpStr.WriteByte(c)
+		}
+	}
+	keysBuf.WriteString("]\t")
+	keysBuf.Write(valuesBuf.Bytes())
+	keysBuf.WriteByte(']')
+
+	return keysBuf.Bytes()
+}
+
+//TODO check istore key value
+func IstoreValues(str []byte, min, max int) []byte {
+	tmpStr := *bytesBufPool.Get().(*bytes.Buffer)
+	defer func() {
+		tmpStr.Reset()
+		bytesBufPool.Put(&tmpStr)
+	}()
+
+	values := make([][]byte, max-min+1)
+
+	isKey := true
+	isNum := false
+	curKey := 0
+	for _, c := range str {
+		switch c {
+		case '"':
+			if isNum {
+				if isKey {
+					curKey, _ = strconv.Atoi(tmpStr.String())
+				} else {
+					if curKey <= max {
+						values[curKey-min] = make([]byte, tmpStr.Len())
+						copy(values[curKey-min], tmpStr.Bytes())
+					}
+					isKey = true
+				}
+			} else {
+				tmpStr.Reset()
+			}
+			isNum = !isNum
+		case '=':
+			isKey = false
+		case '>':
+		case ' ':
+		case ',':
+		default:
+			tmpStr.WriteByte(c)
+		}
+	}
+	res := make([]byte, 0)
+	for i, v := range values {
+		if i > 0 {
+			res = append(res, '\t')
+		}
+		if v == nil {
+			res = append(res, `\N`...)
+		} else {
+			res = append(res, v...)
+		}
+	}
+
+	return res
+}
+
+func Quote(str string) string {
+	colBuf := *bytesBufPool.Get().(*bytes.Buffer)
+	defer func() {
+		colBuf.Reset()
+		bytesBufPool.Put(&colBuf)
+	}()
+
+	var runeTmp [utf8.UTFMax]byte
+
+	for _, r := range []rune(str) {
+		if strconv.IsPrint(r) {
+			n := utf8.EncodeRune(runeTmp[:], r)
+			colBuf.Write(runeTmp[:n])
+			continue
+		}
+
+		switch r {
+		case '\a':
+			colBuf.WriteString(`\a`)
+		case '\b':
+			colBuf.WriteString(`\b`)
+		case '\f':
+			colBuf.WriteString(`\f`)
+		case '\n':
+			colBuf.WriteString(`\n`)
+		case '\r':
+			colBuf.WriteString(`\r`)
+		case '\t':
+			colBuf.WriteString(`\t`)
+		case '\v':
+			colBuf.WriteString(`\v`)
+		default:
+			switch {
+			case r < ' ':
+				colBuf.WriteString(`\x`)
+				colBuf.WriteByte(lowerhex[byte(r)>>4])
+				colBuf.WriteByte(lowerhex[byte(r)&0xF])
+			case r > utf8.MaxRune:
+				r = 0xFFFD
+				fallthrough
+			case r < 0x10000:
+				colBuf.WriteString(`\u`)
+				for s := 12; s >= 0; s -= 4 {
+					colBuf.WriteByte(lowerhex[r>>uint(s)&0xF])
+				}
+			default:
+				colBuf.WriteString(`\U`)
+				for s := 28; s >= 0; s -= 4 {
+					colBuf.WriteByte(lowerhex[r>>uint(s)&0xF])
+				}
+			}
+		}
+
+	}
+
+	return colBuf.String()
 }
