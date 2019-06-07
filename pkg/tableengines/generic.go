@@ -135,11 +135,14 @@ func (t *genericTable) pgStatLiveTuples(pgTx *pgx.Tx) (int64, error) {
 	return rows.Int64, nil
 }
 
-func convertColumn(colOID utils.OID, value string) ([]string, error) {
+func convertColumn(colOID utils.OID, value string, isNull bool) ([]string, error) {
 	switch colOID {
 	case utils.IstoreOID:
 		fallthrough
 	case utils.BigIstoreOID:
+		if isNull {
+			return []string{"[]", "[]"}, nil
+		}
 		keys, values, err := utils.SplitIstore(value)
 		if err != nil {
 			return nil, fmt.Errorf("could not parse istore: %v", err)
@@ -181,7 +184,7 @@ func (t *genericTable) genWrite(p []byte) error {
 			}
 		}
 
-		val, err := convertColumn(pgCol.TypeOID, fields[pgId])
+		val, err := convertColumn(pgCol.TypeOID, fields[pgId], false)
 		if err != nil {
 			return err
 		}
@@ -313,7 +316,7 @@ func (t *genericTable) writeLine(vals []sql.NullString) {
 	}
 	for colID, col := range vals {
 		if col.Valid {
-			col, err := convertColumn(t.tupleColumns[colID].TypeOID, col.String)
+			col, err := convertColumn(t.tupleColumns[colID].TypeOID, col.String, false)
 			log.Printf("col: %v", col)
 			if err != nil {
 				panic(err)
@@ -554,7 +557,7 @@ func (t *genericTable) convertTuples(row message.Row) []sql.NullString {
 			res = append(res, sql.NullString{Valid: false})
 		}
 
-		values, err := convertColumn(col.TypeOID, string(row[colId].Value))
+		values, err := convertColumn(col.TypeOID, string(row[colId].Value), row[colId].Kind == message.TupleNull)
 		if err != nil {
 			panic(err)
 		}
