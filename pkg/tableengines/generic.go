@@ -129,6 +129,32 @@ func (t *genericTable) pgStatLiveTuples(pgTx *pgx.Tx) (int64, error) {
 	return rows.Int64, nil
 }
 
+func convertColumn(colOID utils.OID, value string) ([]byte, error) {
+	switch colOID {
+	case utils.IstoreOID:
+		fallthrough
+	case utils.BigIstoreOID:
+		keys, values, err := utils.SplitIstore(value)
+		if err != nil {
+			return nil, fmt.Errorf("could not parse istore: %v", err)
+		}
+
+		return []byte("[" + strings.Join(keys, ",") + "]\t[" + strings.Join(values, ",") + "]"), nil
+	case utils.AjBoolOID:
+		fallthrough
+	case utils.BoolOID:
+		if value == "t" {
+			return []byte("1"), nil
+		} else if value == "f" {
+			return []byte("0"), nil
+		} else if value == "u" {
+			return []byte("2"), nil
+		}
+	}
+
+	return []byte(value), nil
+}
+
 func (t *genericTable) genWrite(p []byte) error {
 	fields := strings.Split(string(p), "\t") //TODO: rewrite split function into single scan of a string
 
@@ -147,6 +173,15 @@ func (t *genericTable) genWrite(p []byte) error {
 			if err := t.chLoader.BulkAdd([]byte(fields[pgId])); err != nil {
 				return err
 			}
+		}
+
+		val, err := convertColumn(pgCol.TypeOID, fields[pgId])
+		if err != nil {
+			return err
+		}
+
+		if err := t.chLoader.BulkAdd(val); err != nil {
+			return err
 		}
 
 		switch pgCol.TypeOID {
@@ -265,11 +300,35 @@ func (t *genericTable) bufferAppend(cmdSet commandSet) {
 	t.bufferCmdId++
 }
 
+func (t *genericTable) writeLine(vals []sql.NullString) {
+	ln := len(vals) - 1
+	if ln == -1 {
+		return
+	}
+	for colID, col := range vals {
+		if col.Valid {
+			col, err := convertColumn(t.tupleColumns[colID].TypeOID, col.String)
+			if err != nil {
+				panic(err)
+			}
+			t.chLoader.Write(col)
+		} else {
+			t.chLoader.Write([]byte(`\N`))
+		}
+
+		if colID != ln {
+			t.chLoader.Write([]byte("\t"))
+		}
+	}
+
+	t.chLoader.Write([]byte("\n"))
+}
+
 func (t *genericTable) processCommandSet(set commandSet) (bool, error) {
 	if set != nil {
 		//t.bufferAppend(set)
 		for _, row := range set {
-			t.chLoader.Add(row)
+			t.writeLine(row)
 			t.bufferRowId++
 		}
 		t.bufferCmdId++

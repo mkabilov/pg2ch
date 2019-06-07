@@ -172,6 +172,14 @@ func (c *CHLoader) BulkUpload(tableName string, columns []string) error {
 	return nil
 }
 
+func (c *CHLoader) Write(val []byte) {
+	c.buf.Write(val)
+}
+
+func (c *CHLoader) WriteCol(val string) {
+	c.buf.WriteString(c.quote(val))
+}
+
 func (c *CHLoader) Add(vals []sql.NullString) {
 	ln := len(vals) - 1
 	if ln == -1 {
