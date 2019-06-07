@@ -22,7 +22,7 @@ const (
 	defaultPostgresPort           = 5432
 	defaultPostgresHost           = "127.0.0.1"
 	defaultRowIdColumn            = "row_id"
-	defaultMaxBufferLength        = 1000
+	defaultMaxBufferLength        = 10000
 	defaultSignColumn             = "sign"
 	defaultVerColumn              = "ver"
 	defaultIsDeletedColumn        = "is_deleted"
