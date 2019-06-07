@@ -152,6 +152,9 @@ func convertColumn(colOID utils.OID, value string, isNull bool) ([]string, error
 	case utils.AjBoolOID:
 		fallthrough
 	case utils.BoolOID:
+		if isNull {
+			return []string{}, nil
+		}
 		if value == "t" {
 			return []string{"1"}, nil
 		} else if value == "f" {
@@ -159,6 +162,9 @@ func convertColumn(colOID utils.OID, value string, isNull bool) ([]string, error
 		} else if value == "u" {
 			return []string{"2"}, nil
 		}
+	}
+	if isNull {
+		return []string{}, nil
 	}
 
 	return []string{value}, nil
@@ -553,19 +559,20 @@ func (t *genericTable) convertTuples(row message.Row) []sql.NullString {
 			continue
 		}
 
-		if row[colId].Kind == message.TupleNull {
-			res = append(res, sql.NullString{Valid: false})
-		}
-
 		values, err := convertColumn(col.TypeOID, string(row[colId].Value), row[colId].Kind == message.TupleNull)
 		if err != nil {
 			panic(err)
 		}
-		for _, val := range values {
-			res = append(res, sql.NullString{
-				String: val,
-				Valid:  true,
-			})
+
+		if len(values) == 0 {
+			res = append(res, sql.NullString{Valid: false})
+		} else {
+			for _, val := range values {
+				res = append(res, sql.NullString{
+					String: val,
+					Valid:  true,
+				})
+			}
 		}
 	}
 
