@@ -117,8 +117,9 @@ func (c *CHLoader) BulkUpload(tableName string, columns []string) error {
 	return nil
 }
 
-func (c *CHLoader) Write(val []byte) {
+func (c *CHLoader) WriteLine(val []byte) {
 	c.buf.Write(val)
+	c.buf.WriteByte('\n')
 }
 
 func (c *CHLoader) generateQuery(tableName string, columns []string) string {

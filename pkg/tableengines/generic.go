@@ -340,7 +340,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 func (t *genericTable) processChTuples(set chTuples) (bool, error) {
 	if set != nil {
 		for _, row := range set {
-			t.chLoader.Write(row)
+			t.chLoader.WriteLine(row)
 			t.bufferRowId++
 		}
 		t.bufferCmdId++
