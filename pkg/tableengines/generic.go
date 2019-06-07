@@ -86,8 +86,14 @@ func newGenericTable(ctx context.Context, connUrl, dbName string, tblCfg config.
 		}
 
 		t.columnMapping[pgCol.Name] = chCol
-		t.chUsedColumns = append(t.chUsedColumns, chCol.Name)
 		t.pgUsedColumns = append(t.pgUsedColumns, pgCol.Name)
+
+		if pgCol.TypeOID == utils.IstoreOID || pgCol.TypeOID == utils.BigIstoreOID {
+			t.chUsedColumns = append(t.chUsedColumns, pgCol.Name+"_keys")
+			t.chUsedColumns = append(t.chUsedColumns, pgCol.Name+"_values")
+		} else {
+			t.chUsedColumns = append(t.chUsedColumns, chCol.Name)
+		}
 	}
 
 	if tblCfg.GenerationColumn != "" {
@@ -129,7 +135,7 @@ func (t *genericTable) pgStatLiveTuples(pgTx *pgx.Tx) (int64, error) {
 	return rows.Int64, nil
 }
 
-func convertColumn(colOID utils.OID, value string) ([]byte, error) {
+func convertColumn(colOID utils.OID, value string) ([]string, error) {
 	switch colOID {
 	case utils.IstoreOID:
 		fallthrough
@@ -139,20 +145,20 @@ func convertColumn(colOID utils.OID, value string) ([]byte, error) {
 			return nil, fmt.Errorf("could not parse istore: %v", err)
 		}
 
-		return []byte("[" + strings.Join(keys, ",") + "]\t[" + strings.Join(values, ",") + "]"), nil
+		return []string{"[" + strings.Join(keys, ",") + "]", "[" + strings.Join(values, ",") + "]"}, nil
 	case utils.AjBoolOID:
 		fallthrough
 	case utils.BoolOID:
 		if value == "t" {
-			return []byte("1"), nil
+			return []string{"1"}, nil
 		} else if value == "f" {
-			return []byte("0"), nil
+			return []string{"0"}, nil
 		} else if value == "u" {
-			return []byte("2"), nil
+			return []string{"2"}, nil
 		}
 	}
 
-	return []byte(value), nil
+	return []string{value}, nil
 }
 
 func (t *genericTable) genWrite(p []byte) error {
@@ -180,7 +186,7 @@ func (t *genericTable) genWrite(p []byte) error {
 			return err
 		}
 
-		if err := t.chLoader.BulkAdd(val); err != nil {
+		if err := t.chLoader.BulkAdd([]byte(strings.Join(val, "\t"))); err != nil {
 			return err
 		}
 
@@ -308,10 +314,11 @@ func (t *genericTable) writeLine(vals []sql.NullString) {
 	for colID, col := range vals {
 		if col.Valid {
 			col, err := convertColumn(t.tupleColumns[colID].TypeOID, col.String)
+			log.Printf("col: %v", col)
 			if err != nil {
 				panic(err)
 			}
-			t.chLoader.Write(col)
+			t.chLoader.Write([]byte(strings.Join(col, "\t")))
 		} else {
 			t.chLoader.Write([]byte(`\N`))
 		}
@@ -326,9 +333,8 @@ func (t *genericTable) writeLine(vals []sql.NullString) {
 
 func (t *genericTable) processCommandSet(set commandSet) (bool, error) {
 	if set != nil {
-		//t.bufferAppend(set)
 		for _, row := range set {
-			t.writeLine(row)
+			t.chLoader.Add(row)
 			t.bufferRowId++
 		}
 		t.bufferCmdId++
@@ -416,7 +422,6 @@ func (t *genericTable) attemptFlushBuffer() error {
 		return nil
 	}
 
-	log.Printf("table: %q columns: %v", t.cfg.ChMainTable, t.chUsedColumns)
 	if err := t.chLoader.Upload(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
 		return err
 	}
@@ -538,21 +543,29 @@ func convert(val string, chType config.ChColumn, pgType config.PgColumn) (interf
 }
 
 func (t *genericTable) convertTuples(row message.Row) []sql.NullString {
-	res := make([]sql.NullString, len(t.tupleColumns))
+	res := make([]sql.NullString, 0)
 
 	for colId, col := range t.tupleColumns {
-		val := sql.NullString{}
 		if _, ok := t.columnMapping[col.Name]; !ok {
 			continue
 		}
 
-		if row[colId].Kind != message.TupleNull {
-			val.Valid = true
-			val.String = string(row[colId].Value)
+		if row[colId].Kind == message.TupleNull {
+			res = append(res, sql.NullString{Valid: false})
 		}
 
-		res[colId] = val
+		values, err := convertColumn(col.TypeOID, string(row[colId].Value))
+		if err != nil {
+			panic(err)
+		}
+		for _, val := range values {
+			res = append(res, sql.NullString{
+				String: val,
+				Valid:  true,
+			})
+		}
 	}
+
 	if t.cfg.GenerationColumn != "" {
 		res = append(res, sql.NullString{String: strconv.FormatUint(*t.generationID, 10), Valid: true})
 	}

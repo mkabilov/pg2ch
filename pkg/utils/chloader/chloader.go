@@ -189,7 +189,7 @@ func (c *CHLoader) Add(vals []sql.NullString) {
 		if col.Valid {
 			c.buf.WriteString(c.quote(col.String))
 		} else {
-			c.buf.WriteString("\\N")
+			c.buf.WriteString(`\N`)
 		}
 
 		if colID != ln {
