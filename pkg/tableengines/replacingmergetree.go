@@ -42,7 +42,7 @@ func (t *replacingMergeTree) Sync(pgTx *pgx.Tx) error {
 
 // Write implements io.Writer which is used during the Sync process, see genSync method
 func (t *replacingMergeTree) Write(p []byte) (int, error) {
-	if err := t.genWrite(p); err != nil {
+	if err := t.genSyncWrite(p); err != nil {
 		return 0, err
 	}
 
@@ -57,14 +57,16 @@ func (t *replacingMergeTree) Write(p []byte) (int, error) {
 	suffixes = append(suffixes, "0") // is_deleted
 
 	if len(suffixes) > 0 {
-		if err := t.chLoader.BulkAdd([]byte(strings.Join(suffixes, "\t"))); err != nil {
+		if err := t.chLoader.PipeWrite([]byte(strings.Join(suffixes, "\t"))); err != nil {
 			return 0, err
 		}
 	}
 
-	if err := t.chLoader.BulkAdd([]byte("\n")); err != nil {
+	if err := t.chLoader.PipeWrite([]byte("\n")); err != nil {
 		return 0, err
 	}
+
+	t.syncPrintStatus()
 
 	return len(p), nil
 }

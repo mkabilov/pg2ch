@@ -179,7 +179,7 @@ func (r *Replicator) initAndSyncTables() error {
 
 		r.chTables[tblName] = tbl
 
-		if _, ok := r.tableLSN[tblName]; ok {
+		if _, ok := r.tableLSN[tblName]; ok || r.cfg.Tables[tblName].InitSyncSkip {
 			if err := tx.Commit(); err != nil {
 				return err
 			}

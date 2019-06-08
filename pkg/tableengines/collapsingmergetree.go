@@ -39,24 +39,25 @@ func (t *collapsingMergeTreeTable) Sync(pgTx *pgx.Tx) error {
 
 // Write implements io.Writer which is used during the Sync process, see genSync method
 func (t *collapsingMergeTreeTable) Write(p []byte) (int, error) {
-	if err := t.genWrite(p); err != nil {
+	if err := t.genSyncWrite(p); err != nil {
 		return 0, err
 	}
 
 	if t.cfg.GenerationColumn != "" {
-		if err := t.chLoader.BulkAdd([]byte("\t0\t1")); err != nil {
+		if err := t.chLoader.PipeWrite([]byte("\t0\t1")); err != nil { // generation id and sign
 			return 0, err
 		}
 	} else {
-		if err := t.chLoader.BulkAdd([]byte("\t1")); err != nil {
+		if err := t.chLoader.PipeWrite([]byte("\t1")); err != nil { // sign
 			return 0, err
 		}
 	}
-	if err := t.chLoader.BulkAdd([]byte("\n")); err != nil {
+
+	if err := t.chLoader.PipeWrite([]byte("\n")); err != nil {
 		return 0, err
 	}
 
-	t.bufferRowId++
+	t.syncPrintStatus()
 
 	return len(p), nil
 }

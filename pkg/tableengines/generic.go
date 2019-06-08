@@ -12,13 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mkabilov/pg2ch/pkg/utils/chloader"
-
 	"github.com/jackc/pgx"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
 	"github.com/mkabilov/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/utils/chloader"
+	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
 )
 
 // Generic table is a "parent" struct for all the table engines
@@ -26,26 +26,31 @@ const (
 	attemptInterval = time.Second
 	maxAttempts     = 100
 
-	pgTrue  = "t"
-	pgFalse = "f"
+	pgTrue  = 't'
+	pgFalse = 'f'
+
+	//ajBool specific value
+	ajBoolUnknown   = 'u'
+	columnDelimiter = '\t'
+
+	timestampLength = 19 // ->2019-06-08 15:50:01<- clickhouse does not support milliseconds
+
+	syncProgressBatch = 1000000
 )
 
 var (
-	zeroStr     = []byte("0")
-	oneStr      = []byte("1")
-	minusOneStr = []byte("-1")
-	nullStr     = []byte(`\N`)
-)
+	zeroStr            = []byte("0")
+	oneStr             = []byte("1")
+	minusOneStr        = []byte("-1")
+	ajBoolUnkownValue  = []byte("2")
+	nullStr            = []byte(`\N`)
+	columnDelimiterStr = []byte("\t")
 
-type bufRow struct {
-	rowID int
-	data  []sql.NullString
-}
+	istoreNull = []byte("[]\t[]")
+)
 
 type chTuple []byte
 type chTuples []chTuple
-
-type bufCommand []bufRow
 
 type genericTable struct {
 	ctx      context.Context
@@ -57,13 +62,14 @@ type genericTable struct {
 	pgUsedColumns  []string
 	columnMapping  map[string]config.ChColumn // [pg column name]ch column description
 	flushMutex     *sync.Mutex
-	buffer         []bufCommand
-	bufferCmdId    int // number of commands in the current buffer
-	bufferRowId    int // row id in the buffer
+	bufferCmdId    int // number of pg DML commands in the current buffer, i.e. 1 update pg dml command => 2 ch inserts
+	bufferRowId    int // row id in the buffer, will be used as a sorting column while flushing to the main table
 	bufferFlushCnt int // number of flushed buffers
 	flushQueries   []string
 	tupleColumns   []message.Column // Columns description taken from RELATION rep message
 	generationID   *uint64
+
+	syncLastBatchTime time.Time //to calculate speed
 }
 
 func newGenericTable(ctx context.Context, connUrl, dbName string, tblCfg config.Table, genID *uint64) genericTable {
@@ -78,8 +84,6 @@ func newGenericTable(ctx context.Context, connUrl, dbName string, tblCfg config.
 		tupleColumns:  tblCfg.TupleColumns,
 		generationID:  genID,
 	}
-
-	t.buffer = make([]bufCommand, t.cfg.MaxBufferLength)
 
 	for _, pgCol := range t.tupleColumns {
 		chCol, ok := tblCfg.ColumnMapping[pgCol.Name]
@@ -158,7 +162,7 @@ func convertColumn(colType string, val message.Tuple, colProps config.ColumnProp
 			return utils.IstoreValues(val.Value, colProps.FlattenIstoreMin, colProps.FlattenIstoreMax)
 		} else {
 			if val.Kind == message.TupleNull {
-				return []byte("[]\t[]")
+				return istoreNull
 			}
 
 			return utils.IstoreToArrays(val.Value)
@@ -171,13 +175,28 @@ func convertColumn(colType string, val message.Tuple, colProps config.ColumnProp
 		}
 
 		switch val.Value[0] {
-		case 't':
+		case pgTrue:
 			return oneStr
-		case 'f':
+		case pgFalse:
 			return zeroStr
-		case 'u':
-			return []byte{'2'}
+		case ajBoolUnknown:
+			return ajBoolUnkownValue
 		}
+	case utils.PgTimestampWithTimeZone:
+		fallthrough
+	case utils.PgTimestamp:
+		if val.Kind == message.TupleNull {
+			return nullStr
+		}
+
+		return val.Value[:timestampLength]
+
+	case utils.PgTime:
+		fallthrough
+	case utils.PgTimeWithoutTimeZone:
+		//TODO
+	case utils.PgTimeWithTimeZone:
+		//TODO
 	}
 	if val.Kind == message.TupleNull {
 		return nullStr
@@ -186,83 +205,39 @@ func convertColumn(colType string, val message.Tuple, colProps config.ColumnProp
 	return val.Value
 }
 
-func (t *genericTable) genWrite(p []byte) error {
+func (t *genericTable) genSyncWrite(p []byte) error {
+	row, err := pgutils.DecodeCopyToTuples(p)
+	if err != nil {
+		return fmt.Errorf("could not parse copy string: %v", err)
+	}
+
+	if err := t.chLoader.PipeWrite(t.convertRow(row)); err != nil {
+		return err
+	}
+
+	t.bufferCmdId++
+
 	return nil
-	//fields := strings.Split(string(p), "\t") //TODO: rewrite split function into single scan of a string
-	//
-	//if len(fields) != len(t.tupleColumns) {
-	//	return fmt.Errorf("fields number mismatch")
-	//}
-	//
-	//for pgId, pgCol := range t.tupleColumns {
-	//	if pgId != 0 {
-	//		if err := t.chLoader.BulkAdd([]byte("\t")); err != nil {
-	//			return err
-	//		}
-	//	}
-	//
-	//	if fields[pgId] == `\N` {
-	//		if err := t.chLoader.BulkAdd([]byte(fields[pgId])); err != nil {
-	//			return err
-	//		}
-	//	}
-	//
-	//	val, err := convertColumn(pgCol.TypeOID, fields[pgId], false)
-	//	if err != nil {
-	//		return err
-	//	}
-	//
-	//	if err := t.chLoader.BulkAdd([]byte(strings.Join(val, "\t"))); err != nil {
-	//		return err
-	//	}
-	//
-	//	switch pgCol.TypeOID {
-	//	case utils.IstoreOID:
-	//		fallthrough
-	//	case utils.BigIstoreOID:
-	//		keys, values, err := utils.IstoreToArrays(fields[pgId])
-	//		if err != nil {
-	//			return fmt.Errorf("could not parse istore: %v", err)
-	//		}
-	//
-	//		if err := t.chLoader.BulkAdd([]byte("[" + strings.Join(keys, ",") + "]\t")); err != nil {
-	//			return err
-	//		}
-	//
-	//		if err := t.chLoader.BulkAdd([]byte("[" + strings.Join(values, ",") + "]")); err != nil {
-	//			return err
-	//		}
-	//	case utils.AjBoolOID:
-	//		fallthrough
-	//	case utils.BoolOID:
-	//		if fields[pgId] == "t" {
-	//			if err := t.chLoader.BulkAdd([]byte("1")); err != nil {
-	//				return err
-	//			}
-	//		} else if fields[pgId] == "f" {
-	//			if err := t.chLoader.BulkAdd([]byte("0")); err != nil {
-	//				return err
-	//			}
-	//
-	//		} else if fields[pgId] == "u" {
-	//			if err := t.chLoader.BulkAdd([]byte("2")); err != nil {
-	//				return err
-	//			}
-	//		}
-	//	default:
-	//		if err := t.chLoader.BulkAdd([]byte(fields[pgId])); err != nil {
-	//			return err
-	//		}
-	//	}
-	//}
-	//
-	//return nil
+}
+
+func (t *genericTable) syncPrintStatus() {
+	if t.bufferCmdId%syncProgressBatch == 0 {
+		var destinationTable string
+		if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
+			destinationTable = t.cfg.ChBufferTable
+		} else {
+			destinationTable = t.cfg.ChMainTable
+		}
+
+		log.Printf("copied %d from %q to %q (speed: %.0f rows/s)",
+			t.bufferCmdId, t.cfg.PgTableName.String(), destinationTable, float64(syncProgressBatch)/time.Since(t.syncLastBatchTime).Seconds())
+
+		t.syncLastBatchTime = time.Now()
+	}
 }
 
 func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
-	if t.cfg.InitSyncSkip {
-		return nil
-	}
+	var destinationTable string
 
 	tblLiveTuples, err := t.pgStatLiveTuples(pgTx)
 	if err != nil {
@@ -270,81 +245,55 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	}
 
 	if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
-		log.Printf("Copy from %s postgres table to %q clickhouse table via %q buffer table started. ~%v rows to copy",
+		log.Printf("Copy from %q postgres table to %q clickhouse table via %q buffer table started. ~%v rows to copy",
 			t.cfg.PgTableName.String(), t.cfg.ChMainTable, t.cfg.ChBufferTable, tblLiveTuples)
 		if err := t.truncateBufTable(); err != nil {
 			return fmt.Errorf("could not truncate buffer table: %v", err)
 		}
+		destinationTable = t.cfg.ChBufferTable
 	} else {
-		log.Printf("Copy from %s postgres table to %q clickhouse table started. ~%v rows to copy",
+		log.Printf("Copy from %q postgres table to %q clickhouse table started. ~%v rows to copy",
 			t.cfg.PgTableName.String(), t.cfg.ChMainTable, tblLiveTuples)
 		if !t.cfg.InitSyncSkipTruncate {
 			if err := t.truncateMainTable(); err != nil {
 				return fmt.Errorf("could not truncate main table: %v", err)
 			}
 		}
+		destinationTable = t.cfg.ChMainTable
 	}
+
+	t.bufferCmdId = 0
 
 	loaderErrCh := make(chan error, 1)
 	go func(errCh chan error) {
-		errCh <- t.chLoader.BulkUpload(t.cfg.ChMainTable, nil)
+		errCh <- t.chLoader.BulkUpload(destinationTable, t.chUsedColumns)
 	}(loaderErrCh)
 
 	query := fmt.Sprintf("copy %s(%s) to stdout", t.cfg.PgTableName.String(), strings.Join(t.pgUsedColumns, ", "))
-	if _, err := pgTx.CopyToWriter(w, query); err != nil {
+	log.Printf("copy command: %q", query)
+
+	t.syncLastBatchTime = time.Now()
+	ct, err := pgTx.CopyToWriter(w, query)
+	if err != nil {
 		return fmt.Errorf("could not copy: %v", err)
 	}
 
-	t.chLoader.BulkFinish()
+	if err := t.chLoader.PipeFinishWriting(); err != nil {
+		return fmt.Errorf("could not close pipe: %v", err)
+	}
+
+	log.Printf("copy: %d rows", ct.RowsAffected())
+	log.Printf("inserted to CH: %d rows", t.bufferCmdId)
+
+	t.bufferCmdId = 0
+
 	if err := <-loaderErrCh; err != nil {
 		return fmt.Errorf("could not load to CH: %v", err)
 	}
 	close(loaderErrCh)
 
-	rows := t.bufferRowId
-	t.bufferCmdId = 0
-	if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
-		if !t.cfg.InitSyncSkipTruncate {
-			if err := t.truncateMainTable(); err != nil {
-				return fmt.Errorf("could not truncate main table: %v", err)
-			}
-		}
-
-		t.bufferFlushCnt++
-		if err := t.FlushToMainTable(); err != nil {
-			return fmt.Errorf("could not move from buffer to the main table: %v", err)
-		}
-	}
-	t.bufferRowId = 0
-	log.Printf("Pg table %s: %d rows copied to ClickHouse %q table", t.cfg.PgTableName.String(), rows, t.cfg.ChMainTable)
-
 	return nil
 }
-
-//func (t *genericTable) writeLine(vals []sql.NullString) {
-//	ln := len(vals) - 1
-//	if ln == -1 {
-//		return
-//	}
-//	for colID, col := range vals {
-//		if col.Valid {
-//			col, err := convertColumn(t.tupleColumns[colID].TypeOID, col.String, false)
-//			log.Printf("col: %v", col)
-//			if err != nil {
-//				panic(err)
-//			}
-//			t.chLoader.Write([]byte(strings.Join(col, "\t")))
-//		} else {
-//			t.chLoader.Write([]byte(`\N`))
-//		}
-//
-//		if colID != ln {
-//			t.chLoader.Write([]byte("\t"))
-//		}
-//	}
-//
-//	t.chLoader.Write([]byte("\n"))
-//}
 
 func (t *genericTable) processChTuples(set chTuples) (bool, error) {
 	if set != nil {
@@ -370,43 +319,6 @@ func (t *genericTable) processChTuples(set chTuples) (bool, error) {
 
 	return t.bufferFlushCnt >= t.cfg.FlushThreshold, nil
 }
-
-func (t *genericTable) syncConvertIntoRow(p []byte) ([]interface{}, int, error) {
-	rec, err := utils.DecodeCopy(p)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	row, err := t.syncConvertStrings(rec)
-	if err != nil {
-		return nil, 0, fmt.Errorf("could not parse record: %v", err)
-	}
-
-	return row, len(p), nil
-}
-
-//func (t *genericTable) insertRow(row []sql.NullString) error {
-//	var chTableName string
-//
-//	if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
-//		chTableName = t.cfg.ChBufferTable
-//		row = append(row, sql.NullString{String: strconv.Itoa(t.bufferRowId), Valid: true})
-//	} else {
-//		chTableName = t.cfg.ChMainTable
-//	}
-//	t.chLoader.Add(row)
-//	if err := t.chLoader.Upload(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
-//		return err
-//	}
-//
-//	t.bufferRowId++
-//
-//	if t.bufferRowId%1000000 == 0 {
-//		log.Printf("clickhouse %q table: %d rows inserted", chTableName, t.bufferRowId)
-//	}
-//
-//	return nil
-//}
 
 func (t *genericTable) flushBuffer() error {
 	var err error
@@ -503,60 +415,6 @@ func (t *genericTable) FlushToMainTable() error {
 	return nil
 }
 
-func convert(val string, chType config.ChColumn, pgType config.PgColumn) (interface{}, error) {
-	switch chType.BaseType {
-	case utils.ChInt8:
-		return strconv.ParseInt(val, 10, 8)
-	case utils.ChInt16:
-		return strconv.ParseInt(val, 10, 16)
-	case utils.ChInt32:
-		return strconv.ParseInt(val, 10, 32)
-	case utils.ChInt64:
-		return strconv.ParseInt(val, 10, 64)
-	case utils.ChUInt8:
-		if pgType.BaseType == utils.PgBoolean {
-			if val == pgTrue {
-				return 1, nil
-			} else if val == pgFalse {
-				return 0, nil
-			}
-		}
-
-		return nil, fmt.Errorf("can't convert %v to %v", pgType.BaseType, chType.BaseType)
-	case utils.ChUInt16:
-		return strconv.ParseUint(val, 10, 16)
-	case utils.ChUint32:
-		if pgType.BaseType == utils.PgTimeWithoutTimeZone {
-			t, err := time.Parse("15:04:05", val)
-			if err != nil {
-				return nil, err
-			}
-
-			return t.Hour()*3600 + t.Minute()*60 + t.Second(), nil
-		}
-
-		return strconv.ParseUint(val, 10, 32)
-	case utils.ChUint64:
-		return strconv.ParseUint(val, 10, 64)
-	case utils.ChFloat32:
-		return strconv.ParseFloat(val, 32)
-	case utils.ChDecimal:
-		return strconv.ParseFloat(val, 64)
-	case utils.ChFloat64:
-		return strconv.ParseFloat(val, 64)
-	case utils.ChFixedString:
-		fallthrough
-	case utils.ChString:
-		return val, nil
-	case utils.ChDate:
-		return time.Parse("2006-01-02", val[:10])
-	case utils.ChDateTime:
-		return time.Parse("2006-01-02 15:04:05", val[:19])
-	}
-
-	return nil, fmt.Errorf("unknown type: %v", chType)
-}
-
 func (t *genericTable) convertRow(row message.Row) chTuple {
 	res := make([]byte, 0)
 
@@ -567,45 +425,19 @@ func (t *genericTable) convertRow(row message.Row) chTuple {
 
 		values := convertColumn(t.cfg.PgColumns[col.Name].BaseType, row[colId], t.cfg.ColumnProperties[col.Name])
 		if colId > 0 {
-			res = append(res, '\t')
+			res = append(res, columnDelimiter)
 		}
 		res = append(res, values...)
 	}
 
 	if t.cfg.GenerationColumn != "" {
 		if len(res) > 0 {
-			res = append(res, '\t')
+			res = append(res, columnDelimiter)
 		}
 		res = append(res, []byte(strconv.FormatUint(*t.generationID, 10))...)
 	}
 
 	return res
-}
-
-// gets row from the copy
-func (t *genericTable) syncConvertStrings(fields []sql.NullString) ([]interface{}, error) {
-	res := make([]interface{}, 0)
-	for i, field := range fields {
-		pgColName := t.pgUsedColumns[i]
-		column := t.columnMapping[pgColName]
-
-		if !field.Valid {
-			if !column.IsNullable {
-				return nil, fmt.Errorf("got null in %s field, which is not nullable on the ClickHouse side", pgColName)
-			}
-			res = append(res, nil)
-			continue
-		}
-
-		val, err := convert(field.String, column, t.cfg.PgColumns[pgColName])
-		if err != nil {
-			return nil, fmt.Errorf("could not parse %q field with %s type: %v", pgColName, column.BaseType, err)
-		}
-
-		res = append(res, val)
-	}
-
-	return res, nil
 }
 
 // Truncate truncates main and buffer(if used) tables
@@ -668,7 +500,7 @@ func appendField(str []byte, fields ...[]byte) []byte {
 		res := make([]byte, len(str))
 		copy(res, str)
 		for _, v := range fields {
-			res = append(res, append([]byte("\t"), v...)...)
+			res = append(res, append(columnDelimiterStr, v...)...)
 		}
 
 		return res

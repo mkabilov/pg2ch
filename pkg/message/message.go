@@ -19,13 +19,13 @@ type (
 
 const (
 	ReplicaIdentityDefault ReplicaIdentity = 'd'
-	ReplicaIdentityNothing                 = 'n'
-	ReplicaIdentityIndex                   = 'i'
-	ReplicaIdentityFull                    = 'f'
+	ReplicaIdentityNothing ReplicaIdentity = 'n'
+	ReplicaIdentityIndex   ReplicaIdentity = 'i'
+	ReplicaIdentityFull    ReplicaIdentity = 'f'
 
 	TupleNull      TupleKind = 'n' // Identifies the data as NULL value.
-	TupleUnchanged           = 'u' // Identifies unchanged TOASTed value (the actual value is not sent).
-	TupleText                = 't' // Identifies the data as text formatted value.
+	TupleUnchanged TupleKind = 'u' // Identifies unchanged TOASTed value (the actual value is not sent).
+	TupleText      TupleKind = 't' // Identifies the data as text formatted value.
 
 	MsgInsert MType = iota
 	MsgUpdate

@@ -3,15 +3,12 @@ package chloader
 import (
 	"bufio"
 	"bytes"
-	"database/sql"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
-
-	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
 type CHLoader struct {
@@ -47,45 +44,13 @@ func (c *CHLoader) urlParams() url.Values {
 	return res
 }
 
-func (c *CHLoader) BulkAddSuffixedString(val []byte, suffixes ...string) error {
-	if _, err := c.pipeWriter.Write(val[:len(val)-1]); err != nil {
-		return err
-	}
-
-	if len(suffixes) > 0 {
-		if _, err := c.pipeWriter.Write([]byte("\t")); err != nil {
-			return err
-		}
-
-		if _, err := c.pipeWriter.Write([]byte(strings.Join(suffixes, "\t"))); err != nil {
-			return err
-		}
-	}
-
-	if _, err := c.pipeWriter.Write([]byte("\n")); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (c *CHLoader) BulkAdd(val []byte) error {
+func (c *CHLoader) PipeWrite(val []byte) error {
 	_, err := c.pipeWriter.Write(val)
 
 	return err
 }
 
-func (c *CHLoader) BulkWriteNullableString(str sql.NullString) (err error) {
-	if !str.Valid {
-		_, err = c.pipeWriter.Write([]byte(`\N`))
-	} else {
-		_, err = c.pipeWriter.Write([]byte(utils.Quote(str.String)))
-	}
-
-	return
-}
-
-func (c *CHLoader) BulkFinish() error {
+func (c *CHLoader) PipeFinishWriting() error {
 	return c.pipeWriter.Close()
 }
 
