@@ -230,6 +230,53 @@ func IstoreToArrays(str []byte) []byte {
 	return keysBuf.Bytes()
 }
 
+func IstoreValues(str []byte, min, max int) []byte {
+	values := make([][]byte, max-min+1)
+
+	isKey := true
+	isNum := false
+	curKey := 0
+	for _, c := range str {
+		switch c {
+		case '"':
+			if isNum {
+				if isKey {
+					curKey, _ = strconv.Atoi(tmpStr.String())
+				} else {
+					if curKey <= max {
+						values[curKey-min] = make([]byte, tmpStr.Len())
+						copy(values[curKey-min], tmpStr.Bytes())
+					}
+					isKey = true
+				}
+			} else {
+				tmpStr.Reset()
+			}
+			isNum = !isNum
+		case '=':
+			isKey = false
+		case '>':
+		case ' ':
+		case ',':
+		default:
+			tmpStr.WriteByte(c)
+		}
+	}
+	res := make([]byte, 0)
+	for i, v := range values {
+		if i > 0 {
+			res = append(res, '\t')
+		}
+		if v == nil {
+			res = append(res, `\N`...)
+		} else {
+			res = append(res, v...)
+		}
+	}
+
+	return res
+}
+
 func Quote(str string) string {
 	var runeTmp [utf8.UTFMax]byte
 

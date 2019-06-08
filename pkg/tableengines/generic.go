@@ -151,11 +151,16 @@ func convertColumn(colType string, val message.Tuple, colProps config.ColumnProp
 		fallthrough
 	case utils.PgBigIstore:
 		if colProps.FlattenIstore {
-			//TODO
+			if val.Kind == message.TupleNull {
+				return []byte(strings.Repeat("\t\\N", colProps.FlattenIstoreMax-colProps.FlattenIstoreMin+1))[1:]
+			}
+
+			return utils.IstoreValues(val.Value, colProps.FlattenIstoreMin, colProps.FlattenIstoreMax)
 		} else {
 			if val.Kind == message.TupleNull {
 				return []byte("[]\t[]")
 			}
+
 			return utils.IstoreToArrays(val.Value)
 		}
 	case utils.PgAjBool:
