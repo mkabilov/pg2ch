@@ -2,7 +2,6 @@ package tableengines
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"database/sql"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/andybalholm/brotli"
 	"github.com/jackc/pgx"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
@@ -71,8 +71,8 @@ type genericTable struct {
 	tupleColumns   []message.Column // Columns description taken from RELATION rep message
 	generationID   *uint64
 
-	syncLastBatchTime time.Time //to calculate speed
-	syncGzWriter      *gzip.Writer
+	syncLastBatchTime  time.Time //to calculate speed
+	syncCompressWriter *brotli.Writer
 }
 
 func newGenericTable(ctx context.Context, connUrl, dbName string, tblCfg config.Table, genID *uint64) genericTable {
@@ -214,7 +214,7 @@ func (t *genericTable) genSyncWrite(p []byte) error {
 		return fmt.Errorf("could not parse copy string: %v", err)
 	}
 
-	if _, err := t.syncGzWriter.Write(t.convertRow(row)); err != nil {
+	if _, err := t.syncCompressWriter.Write(t.convertRow(row)); err != nil {
 		return err
 	}
 
@@ -239,7 +239,7 @@ func (t *genericTable) syncFlushGzip() {
 	}
 
 	if t.bufferCmdId%gzipFlushCount == 0 {
-		if err := t.syncGzWriter.Flush(); err != nil {
+		if err := t.syncCompressWriter.Flush(); err != nil {
 			log.Printf("could not gzip flush: %v", err)
 		}
 	}
@@ -271,10 +271,10 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		destinationTable = t.cfg.ChMainTable
 	}
 
-	t.syncGzWriter, err = gzip.NewWriterLevel(t.chLoader, gzip.BestSpeed)
-	if err != nil {
-		return fmt.Errorf("could not initialize gzip: %v", err)
-	}
+	t.syncCompressWriter = brotli.NewWriterLevel(t.chLoader, brotli.BestSpeed)
+	//if err != nil {
+	//	return fmt.Errorf("could not initialize gzip: %v", err)
+	//}
 
 	t.bufferCmdId = 0
 
@@ -292,11 +292,11 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		return fmt.Errorf("could not copy: %v", err)
 	}
 
-	if err := t.syncGzWriter.Flush(); err != nil {
+	if err := t.syncCompressWriter.Flush(); err != nil {
 		return fmt.Errorf("could not gzip flush: %v", err)
 	}
 
-	if err := t.syncGzWriter.Close(); err != nil {
+	if err := t.syncCompressWriter.Close(); err != nil {
 		return fmt.Errorf("could not close gzip: %v", err)
 	}
 

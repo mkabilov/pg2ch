@@ -3,9 +3,18 @@
 
 [[projects]]
   branch = "master"
-  name = "github.com/cloudflare/golz4"
+  name = "github.com/andybalholm/brotli"
   packages = ["."]
-  revision = "ef862a3cdc58a6f1fee4e3af3d44fbe279194cde"
+  revision = "5c318f9037cbb3f11f12485fe56fc15a19a5e07d"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/golang/gddo"
+  packages = [
+    "httputil",
+    "httputil/header"
+  ]
+  revision = "af0f2af80721261f4d211b2c9563f7b46b2aab06"
 
 [[projects]]
   name = "github.com/google/btree"
@@ -24,24 +33,7 @@
     "pgproto3",
     "pgtype"
   ]
-  revision = "8faa4453fc7051d1076053f8854077753ab912f2"
-
-[[projects]]
-  name = "github.com/kshvakov/clickhouse"
-  packages = [
-    ".",
-    "lib/binary",
-    "lib/cityhash102",
-    "lib/column",
-    "lib/data",
-    "lib/leakypool",
-    "lib/lz4",
-    "lib/protocol",
-    "lib/types",
-    "lib/writebuffer"
-  ]
-  revision = "1d87030de2a38bbe8c05e1b13f5b2f27466fd5a8"
-  version = "v1.3.6"
+  revision = "762e68533f0090ecb6bb1166d51966b326597ec7"
 
 [[projects]]
   branch = "master"
@@ -71,7 +63,7 @@
   branch = "master"
   name = "golang.org/x/crypto"
   packages = ["pbkdf2"]
-  revision = "22d7a77e9e5f409e934ed268692e56707cd169e5"
+  revision = "f99c8df09eb5bff426315721bfa5f16a99cad32c"
 
 [[projects]]
   name = "golang.org/x/text"
@@ -110,6 +102,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "ec33d2502f97a14e88af7d340eb114425f966a47b7816819b329a453f6605a7e"
+  inputs-digest = "2ca775cb5cb973296b6fa3afd6f1274c8ae257553aa0c4310bf623ad70d11394"
   solver-name = "gps-cdcl"
   solver-version = 1

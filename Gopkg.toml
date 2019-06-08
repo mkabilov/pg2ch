@@ -26,12 +26,12 @@
 
 
 [[constraint]]
-  name = "github.com/jackc/pgx"
+  name = "github.com/andybalholm/brotli"
   branch = "master"
 
 [[constraint]]
-  name = "github.com/kshvakov/clickhouse"
-  version = "1.3.6"
+  name = "github.com/jackc/pgx"
+  branch = "master"
 
 [[constraint]]
   name = "github.com/peterbourgon/diskv"

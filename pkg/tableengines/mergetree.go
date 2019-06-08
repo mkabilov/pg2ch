@@ -44,11 +44,11 @@ func (t *mergeTreeTable) Write(p []byte) (int, error) {
 	}
 
 	if t.cfg.GenerationColumn != "" {
-		if _, err := t.syncGzWriter.Write([]byte("\t0")); err != nil { // generation id
+		if _, err := t.syncCompressWriter.Write([]byte("\t0")); err != nil { // generation id
 			return 0, err
 		}
 	}
-	if _, err := t.syncGzWriter.Write([]byte("\n")); err != nil {
+	if _, err := t.syncCompressWriter.Write([]byte("\n")); err != nil {
 		return 0, err
 	}
 
