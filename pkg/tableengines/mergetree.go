@@ -44,15 +44,15 @@ func (t *mergeTreeTable) Write(p []byte) (int, error) {
 	}
 
 	if t.cfg.GenerationColumn != "" {
-		if err := t.chLoader.PipeWrite([]byte("\t0")); err != nil { // generation id
+		if _, err := t.syncGzWriter.Write([]byte("\t0")); err != nil { // generation id
 			return 0, err
 		}
 	}
-	if err := t.chLoader.PipeWrite([]byte("\n")); err != nil {
+	if _, err := t.syncGzWriter.Write([]byte("\n")); err != nil {
 		return 0, err
 	}
 
-	t.syncPrintStatus()
+	t.syncFlushGzip()
 
 	return len(p), nil
 }

@@ -57,16 +57,16 @@ func (t *replacingMergeTree) Write(p []byte) (int, error) {
 	suffixes = append(suffixes, "0") // is_deleted
 
 	if len(suffixes) > 0 {
-		if err := t.chLoader.PipeWrite([]byte(strings.Join(suffixes, "\t"))); err != nil {
+		if _, err := t.syncGzWriter.Write([]byte(strings.Join(suffixes, "\t"))); err != nil {
 			return 0, err
 		}
 	}
 
-	if err := t.chLoader.PipeWrite([]byte("\n")); err != nil {
+	if _, err := t.syncGzWriter.Write([]byte("\n")); err != nil {
 		return 0, err
 	}
 
-	t.syncPrintStatus()
+	t.syncFlushGzip()
 
 	return len(p), nil
 }

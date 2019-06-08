@@ -2,6 +2,7 @@ package tableengines
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"fmt"
@@ -36,6 +37,7 @@ const (
 	timestampLength = 19 // ->2019-06-08 15:50:01<- clickhouse does not support milliseconds
 
 	syncProgressBatch = 1000000
+	gzipFlushCount    = 1000
 )
 
 var (
@@ -70,6 +72,7 @@ type genericTable struct {
 	generationID   *uint64
 
 	syncLastBatchTime time.Time //to calculate speed
+	syncGzWriter      *gzip.Writer
 }
 
 func newGenericTable(ctx context.Context, connUrl, dbName string, tblCfg config.Table, genID *uint64) genericTable {
@@ -211,7 +214,7 @@ func (t *genericTable) genSyncWrite(p []byte) error {
 		return fmt.Errorf("could not parse copy string: %v", err)
 	}
 
-	if err := t.chLoader.PipeWrite(t.convertRow(row)); err != nil {
+	if _, err := t.syncGzWriter.Write(t.convertRow(row)); err != nil {
 		return err
 	}
 
@@ -220,7 +223,7 @@ func (t *genericTable) genSyncWrite(p []byte) error {
 	return nil
 }
 
-func (t *genericTable) syncPrintStatus() {
+func (t *genericTable) syncFlushGzip() {
 	if t.bufferCmdId%syncProgressBatch == 0 {
 		var destinationTable string
 		if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
@@ -233,6 +236,12 @@ func (t *genericTable) syncPrintStatus() {
 			t.bufferCmdId, t.cfg.PgTableName.String(), destinationTable, float64(syncProgressBatch)/time.Since(t.syncLastBatchTime).Seconds())
 
 		t.syncLastBatchTime = time.Now()
+	}
+
+	if t.bufferCmdId%gzipFlushCount == 0 {
+		if err := t.syncGzWriter.Flush(); err != nil {
+			log.Printf("could not gzip flush: %v", err)
+		}
 	}
 }
 
@@ -262,6 +271,8 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		destinationTable = t.cfg.ChMainTable
 	}
 
+	t.syncGzWriter = gzip.NewWriter(t.chLoader)
+
 	t.bufferCmdId = 0
 
 	loaderErrCh := make(chan error, 1)
@@ -276,6 +287,14 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	ct, err := pgTx.CopyToWriter(w, query)
 	if err != nil {
 		return fmt.Errorf("could not copy: %v", err)
+	}
+
+	if err := t.syncGzWriter.Flush(); err != nil {
+		return fmt.Errorf("could not gzip flush: %v", err)
+	}
+
+	if err := t.syncGzWriter.Close(); err != nil {
+		return fmt.Errorf("could not close gzip: %v", err)
 	}
 
 	if err := t.chLoader.PipeFinishWriting(); err != nil {
