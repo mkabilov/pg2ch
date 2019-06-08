@@ -145,15 +145,19 @@ func (t *genericTable) pgStatLiveTuples(pgTx *pgx.Tx) (int64, error) {
 	return rows.Int64, nil
 }
 
-func convertColumn(colType string, val message.Tuple) []byte {
+func convertColumn(colType string, val message.Tuple, colProps config.ColumnProperty) []byte {
 	switch colType {
 	case utils.PgIstore:
 		fallthrough
 	case utils.PgBigIstore:
-		if val.Kind == message.TupleNull {
-			return []byte("[]\t[]")
+		if colProps.FlattenIstore {
+			//TODO
+		} else {
+			if val.Kind == message.TupleNull {
+				return []byte("[]\t[]")
+			}
+			return utils.IstoreToArrays(val.Value)
 		}
-		return utils.FlattenIstore(val.Value)
 	case utils.PgAjBool:
 		fallthrough
 	case utils.PgBoolean:
@@ -211,7 +215,7 @@ func (t *genericTable) genWrite(p []byte) error {
 	//	case utils.IstoreOID:
 	//		fallthrough
 	//	case utils.BigIstoreOID:
-	//		keys, values, err := utils.FlattenIstore(fields[pgId])
+	//		keys, values, err := utils.IstoreToArrays(fields[pgId])
 	//		if err != nil {
 	//			return fmt.Errorf("could not parse istore: %v", err)
 	//		}
@@ -556,7 +560,7 @@ func (t *genericTable) convertRow(row message.Row) chTuple {
 			continue
 		}
 
-		values := convertColumn(t.cfg.PgColumns[col.Name].BaseType, row[colId])
+		values := convertColumn(t.cfg.PgColumns[col.Name].BaseType, row[colId], t.cfg.ColumnProperties[col.Name])
 		if colId > 0 {
 			res = append(res, '\t')
 		}

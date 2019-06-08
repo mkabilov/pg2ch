@@ -184,7 +184,7 @@ func ParseIstore(str string) (keys, values []int, err error) {
 	return
 }
 
-func FlattenIstore(str []byte) []byte {
+func IstoreToArrays(str []byte) []byte {
 	keysBuf := bytes.NewBuffer([]byte{'['})
 	valuesBuf := bytes.NewBuffer([]byte{'['})
 
