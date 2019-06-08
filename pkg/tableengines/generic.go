@@ -271,7 +271,10 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		destinationTable = t.cfg.ChMainTable
 	}
 
-	t.syncGzWriter = gzip.NewWriter(t.chLoader)
+	t.syncGzWriter, err = gzip.NewWriterLevel(t.chLoader, gzip.BestSpeed)
+	if err != nil {
+		return fmt.Errorf("could not initialize gzip: %v", err)
+	}
 
 	t.bufferCmdId = 0
 
