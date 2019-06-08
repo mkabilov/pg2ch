@@ -2,6 +2,7 @@ package tableengines
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"fmt"
@@ -12,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andybalholm/brotli"
 	"github.com/jackc/pgx"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
@@ -72,7 +72,7 @@ type genericTable struct {
 	generationID   *uint64
 
 	syncLastBatchTime  time.Time //to calculate speed
-	syncCompressWriter *brotli.Writer
+	syncCompressWriter *gzip.Writer
 }
 
 func newGenericTable(ctx context.Context, connUrl, dbName string, tblCfg config.Table, genID *uint64) genericTable {
@@ -271,10 +271,10 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		destinationTable = t.cfg.ChMainTable
 	}
 
-	t.syncCompressWriter = brotli.NewWriterLevel(t.chLoader, brotli.BestSpeed)
-	//if err != nil {
-	//	return fmt.Errorf("could not initialize gzip: %v", err)
-	//}
+	t.syncCompressWriter, err = gzip.NewWriterLevel(t.chLoader, gzip.NoCompression)
+	if err != nil {
+		return fmt.Errorf("could not initialize gzip: %v", err)
+	}
 
 	t.bufferCmdId = 0
 

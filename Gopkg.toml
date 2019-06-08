@@ -26,10 +26,6 @@
 
 
 [[constraint]]
-  name = "github.com/andybalholm/brotli"
-  branch = "master"
-
-[[constraint]]
   name = "github.com/jackc/pgx"
   branch = "master"
 

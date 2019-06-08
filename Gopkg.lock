@@ -2,21 +2,6 @@
 
 
 [[projects]]
-  branch = "master"
-  name = "github.com/andybalholm/brotli"
-  packages = ["."]
-  revision = "5c318f9037cbb3f11f12485fe56fc15a19a5e07d"
-
-[[projects]]
-  branch = "master"
-  name = "github.com/golang/gddo"
-  packages = [
-    "httputil",
-    "httputil/header"
-  ]
-  revision = "af0f2af80721261f4d211b2c9563f7b46b2aab06"
-
-[[projects]]
   name = "github.com/google/btree"
   packages = ["."]
   revision = "4030bb1f1f0c35b30ca7009e9ebd06849dd45306"
@@ -102,6 +87,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "2ca775cb5cb973296b6fa3afd6f1274c8ae257553aa0c4310bf623ad70d11394"
+  inputs-digest = "ecefb4445afb9e177a7a71f2c9ed5576f0e6743089eb4212702617d99c4721d0"
   solver-name = "gps-cdcl"
   solver-version = 1
