@@ -44,30 +44,30 @@ func (t *mergeTreeTable) Write(p []byte) (int, error) {
 	}
 
 	if t.cfg.GenerationColumn != "" {
-		if _, err := t.syncCompressWriter.Write([]byte("\t0")); err != nil { // generation id
+		if err := t.syncUploader.Write([]byte("\t0")); err != nil { // generation id
 			return 0, err
 		}
 	}
-	if _, err := t.syncCompressWriter.Write([]byte("\n")); err != nil {
+	if err := t.syncUploader.Write([]byte("\n")); err != nil {
 		return 0, err
 	}
 
-	t.syncFlushGzip()
+	t.printSyncProgress()
 
 	return len(p), nil
 }
 
 // Insert handles incoming insert DML operation
 func (t *mergeTreeTable) Insert(lsn utils.LSN, new message.Row) (bool, error) {
-	return t.processChTuples(chTuples{t.convertRow(new)})
+	return t.processChTuples(lsn, chTuples{t.convertRow(new)})
 }
 
 // Update handles incoming update DML operation
 func (t *mergeTreeTable) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
-	return t.processChTuples(nil)
+	return t.processChTuples(0, nil)
 }
 
 // Delete handles incoming delete DML operation
 func (t *mergeTreeTable) Delete(lsn utils.LSN, old message.Row) (bool, error) {
-	return t.processChTuples(nil)
+	return t.processChTuples(0, nil)
 }

@@ -44,27 +44,27 @@ func (t *collapsingMergeTreeTable) Write(p []byte) (int, error) {
 	}
 
 	if t.cfg.GenerationColumn != "" {
-		if _, err := t.syncCompressWriter.Write([]byte("\t0\t1")); err != nil { // generation id and sign
+		if err := t.syncUploader.Write([]byte("\t0\t1")); err != nil { // generation id and sign
 			return 0, err
 		}
 	} else {
-		if _, err := t.syncCompressWriter.Write([]byte("\t1")); err != nil { // sign
+		if err := t.syncUploader.Write([]byte("\t1")); err != nil { // sign
 			return 0, err
 		}
 	}
 
-	if _, err := t.syncCompressWriter.Write([]byte("\n")); err != nil {
+	if err := t.syncUploader.Write([]byte("\n")); err != nil {
 		return 0, err
 	}
 
-	t.syncFlushGzip()
+	t.printSyncProgress()
 
 	return len(p), nil
 }
 
 // Insert handles incoming insert DML operation
 func (t *collapsingMergeTreeTable) Insert(lsn utils.LSN, new message.Row) (bool, error) {
-	return t.processChTuples(chTuples{
+	return t.processChTuples(lsn, chTuples{
 		appendField(t.convertRow(new), oneStr),
 	})
 }
@@ -72,10 +72,10 @@ func (t *collapsingMergeTreeTable) Insert(lsn utils.LSN, new message.Row) (bool,
 // Update handles incoming update DML operation
 func (t *collapsingMergeTreeTable) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
 	if equal, _ := t.compareRows(old, new); equal {
-		return t.processChTuples(nil)
+		return t.processChTuples(0, nil)
 	}
 
-	return t.processChTuples(chTuples{
+	return t.processChTuples(lsn, chTuples{
 		appendField(t.convertRow(old), minusOneStr),
 		appendField(t.convertRow(new), oneStr),
 	})
@@ -83,7 +83,7 @@ func (t *collapsingMergeTreeTable) Update(lsn utils.LSN, old, new message.Row) (
 
 // Delete handles incoming delete DML operation
 func (t *collapsingMergeTreeTable) Delete(lsn utils.LSN, old message.Row) (bool, error) {
-	return t.processChTuples(chTuples{
+	return t.processChTuples(lsn, chTuples{
 		appendField(t.convertRow(old), minusOneStr),
 	})
 }

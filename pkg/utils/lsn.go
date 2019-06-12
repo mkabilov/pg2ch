@@ -77,6 +77,6 @@ func (l LSN) FormattedBytes() []byte {
 	return []byte(l.String())
 }
 
-func (l LSN) Bytes() []byte {
+func (l LSN) StrBytes() []byte {
 	return []byte(strconv.FormatUint(uint64(l), 10))
 }

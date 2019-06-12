@@ -2,6 +2,7 @@ package chutils
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/utils"
@@ -71,4 +72,14 @@ func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
 	}
 
 	return chType, nil
+}
+
+func InsertQuery(tableName string, columns []string) string {
+	columnsStr := ""
+	queryFormat := "INSERT INTO %s%s FORMAT TabSeparated"
+	if columns != nil && len(columns) > 0 {
+		columnsStr = "(" + strings.Join(columns, ", ") + ")"
+	}
+
+	return fmt.Sprintf(queryFormat, tableName, columnsStr)
 }

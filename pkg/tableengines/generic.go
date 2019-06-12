@@ -2,7 +2,6 @@ package tableengines
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"database/sql"
 	"fmt"
@@ -18,7 +17,8 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
 	"github.com/mkabilov/pg2ch/pkg/utils"
-	"github.com/mkabilov/pg2ch/pkg/utils/chloader"
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils/bulkupload"
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils/loader"
 	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
 )
 
@@ -36,8 +36,9 @@ const (
 
 	timestampLength = 19 // ->2019-06-08 15:50:01<- clickhouse does not support milliseconds
 
-	syncProgressBatch = 1000000
+	syncProgressBatch = 100000
 	gzipFlushCount    = 1000
+	lsnColumn         = "lsn"
 )
 
 var (
@@ -55,8 +56,10 @@ type chTuple []byte
 type chTuples []chTuple
 
 type genericTable struct {
+	sync.Mutex
+
 	ctx      context.Context
-	chLoader *chloader.CHLoader
+	chLoader *loader.CHLoader
 
 	cfg config.Table
 
@@ -71,14 +74,20 @@ type genericTable struct {
 	tupleColumns   []message.Column // Columns description taken from RELATION rep message
 	generationID   *uint64
 
-	syncLastBatchTime  time.Time //to calculate speed
-	syncCompressWriter *gzip.Writer
+	syncLastBatchTime time.Time //to calculate rate
+
+	inSync      bool
+	inSyncRowID uint64
+	syncRows    uint64
+
+	syncUploader *bulkupload.BulkUpload
 }
 
 func newGenericTable(ctx context.Context, connUrl, dbName string, tblCfg config.Table, genID *uint64) genericTable {
 	t := genericTable{
+		Mutex:         sync.Mutex{},
 		ctx:           ctx,
-		chLoader:      chloader.New(connUrl, dbName),
+		chLoader:      loader.New(connUrl, dbName),
 		cfg:           tblCfg,
 		columnMapping: make(map[string]config.ChColumn),
 		chUsedColumns: make([]string, 0),
@@ -86,6 +95,7 @@ func newGenericTable(ctx context.Context, connUrl, dbName string, tblCfg config.
 		flushMutex:    &sync.Mutex{},
 		tupleColumns:  tblCfg.TupleColumns,
 		generationID:  genID,
+		syncUploader:  bulkupload.New(connUrl, dbName, gzipFlushCount),
 	}
 
 	for _, pgCol := range t.tupleColumns {
@@ -118,6 +128,26 @@ func newGenericTable(ctx context.Context, connUrl, dbName string, tblCfg config.
 	}
 
 	return t
+}
+
+func (t *genericTable) writeLSN(lsn utils.LSN) error {
+	if err := t.chLoader.BufferWrite(append(lsn.StrBytes(), '\t')); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (t *genericTable) writeLine(val []byte) error {
+	if err := t.chLoader.BufferWrite(val); err != nil {
+		return err
+	}
+
+	if err := t.chLoader.BufferWrite([]byte("\n")); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (t *genericTable) truncateMainTable() error {
@@ -214,17 +244,17 @@ func (t *genericTable) genSyncWrite(p []byte) error {
 		return fmt.Errorf("could not parse copy string: %v", err)
 	}
 
-	if _, err := t.syncCompressWriter.Write(t.convertRow(row)); err != nil {
+	if err := t.syncUploader.Write(t.convertRow(row)); err != nil {
 		return err
 	}
 
-	t.bufferCmdId++
+	t.syncRows++
 
 	return nil
 }
 
-func (t *genericTable) syncFlushGzip() {
-	if t.bufferCmdId%syncProgressBatch == 0 {
+func (t *genericTable) printSyncProgress() {
+	if t.syncRows%syncProgressBatch == 0 {
 		var destinationTable string
 		if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
 			destinationTable = t.cfg.ChBufferTable
@@ -236,12 +266,6 @@ func (t *genericTable) syncFlushGzip() {
 			t.bufferCmdId, t.cfg.PgTableName.String(), destinationTable, float64(syncProgressBatch)/time.Since(t.syncLastBatchTime).Seconds())
 
 		t.syncLastBatchTime = time.Now()
-	}
-
-	if t.bufferCmdId%gzipFlushCount == 0 {
-		if err := t.syncCompressWriter.Flush(); err != nil {
-			log.Printf("could not gzip flush: %v", err)
-		}
 	}
 }
 
@@ -270,17 +294,11 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		}
 		destinationTable = t.cfg.ChMainTable
 	}
-
-	t.syncCompressWriter, err = gzip.NewWriterLevel(t.chLoader, gzip.NoCompression)
-	if err != nil {
-		return fmt.Errorf("could not initialize gzip: %v", err)
-	}
-
-	t.bufferCmdId = 0
+	t.syncRows = 0
 
 	loaderErrCh := make(chan error, 1)
 	go func(errCh chan error) {
-		errCh <- t.chLoader.BulkUpload(destinationTable, t.chUsedColumns)
+		errCh <- t.syncUploader.BulkUpload(destinationTable, t.chUsedColumns)
 	}(loaderErrCh)
 
 	query := fmt.Sprintf("copy %s(%s) to stdout", t.cfg.PgTableName.String(), strings.Join(t.pgUsedColumns, ", "))
@@ -292,22 +310,15 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 		return fmt.Errorf("could not copy: %v", err)
 	}
 
-	if err := t.syncCompressWriter.Flush(); err != nil {
-		return fmt.Errorf("could not gzip flush: %v", err)
-	}
-
-	if err := t.syncCompressWriter.Close(); err != nil {
+	if err := t.syncUploader.PipeFinishWriting(); err != nil {
 		return fmt.Errorf("could not close gzip: %v", err)
 	}
 
-	if err := t.chLoader.PipeFinishWriting(); err != nil {
-		return fmt.Errorf("could not close pipe: %v", err)
+	if ct.RowsAffected() != int64(t.syncRows) {
+		return fmt.Errorf("number of rows inserted to clickhouse doesn't match the initial number of rows in pg")
 	}
 
-	log.Printf("copy: %d rows", ct.RowsAffected())
-	log.Printf("inserted to CH: %d rows", t.bufferCmdId)
-
-	t.bufferCmdId = 0
+	log.Printf("inserted to CH: %d rows", t.syncRows)
 
 	if err := <-loaderErrCh; err != nil {
 		return fmt.Errorf("could not load to CH: %v", err)
@@ -317,19 +328,29 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	return nil
 }
 
-func (t *genericTable) processChTuples(set chTuples) (bool, error) {
+func (t *genericTable) processChTuples(lsn utils.LSN, set chTuples) (mergeIsNeeded bool, err error) {
 	if set != nil {
 		for _, row := range set {
-			t.chLoader.WriteLine(row)
+			if t.inSync {
+				row = append(row, '\t')
+				row = append(row, strconv.FormatUint(t.inSyncRowID, 10)...)
+				row = append(row, '\t')
+				row = append(row, lsn.StrBytes()...)
+
+				t.inSyncRowID++
+			}
+
+			if err := t.writeLine(row); err != nil {
+				return false, err
+			}
+
 			t.bufferRowId++
 		}
+
 		t.bufferCmdId++
 	}
 
 	if t.bufferCmdId == t.cfg.MaxBufferLength {
-		t.flushMutex.Lock()
-		defer t.flushMutex.Unlock()
-
 		if err := t.flushBuffer(); err != nil {
 			return false, fmt.Errorf("could not flush buffer: %v", err)
 		}
@@ -371,9 +392,16 @@ func (t *genericTable) attemptFlushBuffer() error {
 		return nil
 	}
 
-	if err := t.chLoader.Upload(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
-		return err
+	if t.inSync {
+		if err := t.chLoader.BufferFlush(t.cfg.ChSyncAuxTable, t.syncAuxTableColumns()); err != nil {
+			return err
+		}
+	} else {
+		if err := t.chLoader.BufferFlush(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
+			return err
+		}
 	}
+
 	log.Printf("buffer flushed %d commands", t.bufferCmdId)
 
 	t.bufferCmdId = 0
@@ -397,8 +425,8 @@ func (t *genericTable) tryFlushToMainTable() error { //TODO: consider better nam
 
 //FlushToMainTable flushes data from buffer table to the main one
 func (t *genericTable) FlushToMainTable() error {
-	t.flushMutex.Lock()
-	defer t.flushMutex.Unlock()
+	t.Lock()
+	defer t.Unlock()
 
 	if err := t.flushBuffer(); err != nil {
 		return fmt.Errorf("could not flush buffers: %v", err)
@@ -463,7 +491,7 @@ func (t *genericTable) convertRow(row message.Row) chTuple {
 }
 
 // Truncate truncates main and buffer(if used) tables
-func (t *genericTable) Truncate() error {
+func (t *genericTable) Truncate(lsn utils.LSN) error {
 	t.bufferCmdId = 0
 
 	if err := t.truncateMainTable(); err != nil {
@@ -527,4 +555,67 @@ func appendField(str []byte, fields ...[]byte) []byte {
 
 		return res
 	}
+}
+
+func (t *genericTable) syncAuxTableColumns() []string {
+	return append(t.chUsedColumns, t.cfg.BufferTableRowIdColumn, lsnColumn)
+}
+
+func (t *genericTable) bufTableColumns() []string {
+	return append(t.chUsedColumns, t.cfg.BufferTableRowIdColumn)
+}
+
+func (t *genericTable) InitSync() error {
+	if err := t.chLoader.Exec(fmt.Sprintf("TRUNCATE TABLE %s", t.cfg.ChSyncAuxTable)); err != nil {
+		return fmt.Errorf("could not truncat table: %v", err)
+	}
+	t.inSync = true
+
+	return nil
+}
+
+func (t *genericTable) deltaSize(lsn utils.LSN) string {
+	res, err := t.chLoader.Query(fmt.Sprintf("SELECT count() FROM %s WHERE %s > %d",
+		t.cfg.ChSyncAuxTable, lsnColumn, uint64(lsn)))
+	if err != nil {
+		log.Fatalf("query error: %v", err)
+	}
+	return res[0][0]
+}
+
+func (t *genericTable) FinishSync(lsn utils.LSN) error {
+	t.Lock()
+	defer t.Unlock()
+
+	if err := t.chLoader.BufferFlush(t.cfg.ChSyncAuxTable, t.syncAuxTableColumns()); err != nil {
+		return fmt.Errorf("could not flush buffer: %v", err)
+	}
+	chColumns := strings.Join(t.chUsedColumns, ",")
+
+	log.Printf("delta size: %s", t.deltaSize(lsn))
+
+	query := fmt.Sprintf("INSERT INTO %s(%s) SELECT %s FROM %s WHERE %s > %d ORDER BY %s",
+		t.cfg.ChMainTable, chColumns, chColumns, t.cfg.ChSyncAuxTable, lsnColumn, uint64(lsn), t.cfg.BufferTableRowIdColumn)
+
+	if err := t.chLoader.Exec(query); err != nil {
+		return fmt.Errorf("could not merge with sync aux table: %v", err)
+	}
+
+	if err := t.chLoader.Exec(fmt.Sprintf("TRUNCATE TABLE %s", t.cfg.ChSyncAuxTable)); err != nil {
+		return fmt.Errorf("could not truncat table: %v", err)
+	}
+
+	t.inSync = false
+
+	return nil
+}
+
+func (t *genericTable) Begin() error {
+	t.Lock()
+	return nil
+}
+
+func (t *genericTable) Commit() error {
+	t.Unlock()
+	return nil
 }

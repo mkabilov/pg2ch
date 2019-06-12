@@ -112,6 +112,7 @@ func IstoreToArrays(str []byte) []byte {
 	return keysBuf.Bytes()
 }
 
+//TODO check istore key value
 func IstoreValues(str []byte, min, max int) []byte {
 	values := make([][]byte, max-min+1)
 

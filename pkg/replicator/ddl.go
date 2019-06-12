@@ -17,7 +17,7 @@ func (r *Replicator) GenerateChDDL() error {
 		return fmt.Errorf("could not connect to pg: %v", err)
 	}
 
-	tx, err := r.pgBegin()
+	tx, err := r.pgBegin(r.pgDeltaConn)
 	if err != nil {
 		return fmt.Errorf("could not start transaction on pg side: %v", err)
 	}

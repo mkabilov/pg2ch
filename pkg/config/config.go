@@ -74,6 +74,7 @@ type ColumnProperty struct {
 // Table contains information about the table
 type Table struct {
 	BufferTableRowIdColumn  string                    `yaml:"buffer_table_row_id"`
+	ChSyncAuxTable          string                    `yaml:"sync_aux_table"`
 	ChBufferTable           string                    `yaml:"buffer_table"`
 	ChMainTable             string                    `yaml:"main_table"`
 	MaxBufferLength         int                       `yaml:"max_buffer_length"`
@@ -89,6 +90,7 @@ type Table struct {
 	Columns                 map[string]string         `yaml:"columns"`
 	ColumnProperties        map[string]ColumnProperty `yaml:"column_properties"`
 
+	PgOID         utils.OID           `yaml:"-"`
 	PgTableName   PgTableName         `yaml:"-"`
 	TupleColumns  []message.Column    `yaml:"-"` // columns in the order they are in the table
 	PgColumns     map[string]PgColumn `yaml:"-"`
@@ -269,7 +271,7 @@ func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return err
 	}
 
-	if val.ChBufferTable != "" && val.BufferTableRowIdColumn == "" {
+	if val.BufferTableRowIdColumn == "" {
 		val.BufferTableRowIdColumn = defaultRowIdColumn
 	}
 
