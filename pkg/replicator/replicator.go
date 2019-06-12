@@ -34,8 +34,7 @@ type clickHouseTable interface {
 	Init() error
 
 	InitSync() error
-	Sync(*pgx.Tx) error
-	FinishSync(lsn utils.LSN) error
+	Sync(*pgx.Tx, utils.LSN) error
 
 	Begin() error
 	Insert(lsn utils.LSN, new message.Row) (mergeIsNeeded bool, err error)
@@ -194,12 +193,8 @@ func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 	log.Printf("lsn %v for table %q", uint64(lsn), pgTableName.String())
 
 	tbl := r.chTables[pgTableName]
-	if err := tbl.Sync(tx); err != nil {
+	if err := tbl.Sync(tx, lsn); err != nil {
 		return fmt.Errorf("could not sync: %v", err)
-	}
-
-	if err := tbl.FinishSync(lsn); err != nil {
-		return fmt.Errorf("could not finish sync: %v", err)
 	}
 
 	r.tableLSN[pgTableName] = lsn

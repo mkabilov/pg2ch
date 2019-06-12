@@ -253,23 +253,7 @@ func (t *genericTable) genSyncWrite(p []byte) error {
 	return nil
 }
 
-func (t *genericTable) printSyncProgress() {
-	if t.syncRows%syncProgressBatch == 0 {
-		var destinationTable string
-		if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
-			destinationTable = t.cfg.ChBufferTable
-		} else {
-			destinationTable = t.cfg.ChMainTable
-		}
-
-		log.Printf("copied %d from %q to %q (speed: %.0f rows/s)",
-			t.bufferCmdId, t.cfg.PgTableName.String(), destinationTable, float64(syncProgressBatch)/time.Since(t.syncLastBatchTime).Seconds())
-
-		t.syncLastBatchTime = time.Now()
-	}
-}
-
-func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
+func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
 	var destinationTable string
 
 	tblLiveTuples, err := t.pgStatLiveTuples(pgTx)
@@ -325,6 +309,31 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, w io.Writer) error {
 	}
 	close(loaderErrCh)
 
+	// post sync
+	t.Lock()
+	defer t.Unlock()
+
+	log.Printf("finish sync: %d", t.bufferCmdId)
+	if err := t.flushBuffer(); err != nil {
+		return fmt.Errorf("could not flush buffer: %v", err)
+	}
+	chColumns := strings.Join(t.chUsedColumns, ",")
+
+	log.Printf("delta size: %s, skipped: %s", t.deltaSize(lsn), t.oldSize(lsn))
+
+	query = fmt.Sprintf("INSERT INTO %s(%s) SELECT %s FROM %s WHERE %s > %d ORDER BY %s",
+		t.cfg.ChMainTable, chColumns, chColumns, t.cfg.ChSyncAuxTable, lsnColumn, uint64(lsn), t.cfg.BufferTableRowIdColumn)
+
+	if err := t.chLoader.Exec(query); err != nil {
+		return fmt.Errorf("could not merge with sync aux table: %v", err)
+	}
+
+	if err := t.chLoader.Exec(fmt.Sprintf("TRUNCATE TABLE %s", t.cfg.ChSyncAuxTable)); err != nil {
+		return fmt.Errorf("could not truncat table: %v", err)
+	}
+
+	t.inSync = false
+
 	return nil
 }
 
@@ -366,6 +375,7 @@ func (t *genericTable) processChTuples(lsn utils.LSN, set chTuples) (mergeIsNeed
 func (t *genericTable) flushBuffer() error {
 	var err error
 
+	log.Printf("flushing buffers")
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		err = t.attemptFlushBuffer()
 		if err == nil {
@@ -396,13 +406,13 @@ func (t *genericTable) attemptFlushBuffer() error {
 		if err := t.chLoader.BufferFlush(t.cfg.ChSyncAuxTable, t.syncAuxTableColumns()); err != nil {
 			return err
 		}
+		log.Printf("in sync buffer flushed %d commands", t.bufferCmdId)
 	} else {
 		if err := t.chLoader.BufferFlush(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
 			return err
 		}
+		log.Printf("buffer flushed %d commands", t.bufferCmdId)
 	}
-
-	log.Printf("buffer flushed %d commands", t.bufferCmdId)
 
 	t.bufferCmdId = 0
 	t.bufferFlushCnt++
@@ -428,6 +438,7 @@ func (t *genericTable) FlushToMainTable() error {
 	t.Lock()
 	defer t.Unlock()
 
+	log.Printf("flush to main table")
 	if err := t.flushBuffer(); err != nil {
 		return fmt.Errorf("could not flush buffers: %v", err)
 	}
@@ -583,31 +594,13 @@ func (t *genericTable) deltaSize(lsn utils.LSN) string {
 	return res[0][0]
 }
 
-func (t *genericTable) FinishSync(lsn utils.LSN) error {
-	t.Lock()
-	defer t.Unlock()
-
-	if err := t.chLoader.BufferFlush(t.cfg.ChSyncAuxTable, t.syncAuxTableColumns()); err != nil {
-		return fmt.Errorf("could not flush buffer: %v", err)
+func (t *genericTable) oldSize(lsn utils.LSN) string {
+	res, err := t.chLoader.Query(fmt.Sprintf("SELECT count() FROM %s WHERE %s <= %d",
+		t.cfg.ChSyncAuxTable, lsnColumn, uint64(lsn)))
+	if err != nil {
+		log.Fatalf("query error: %v", err)
 	}
-	chColumns := strings.Join(t.chUsedColumns, ",")
-
-	log.Printf("delta size: %s", t.deltaSize(lsn))
-
-	query := fmt.Sprintf("INSERT INTO %s(%s) SELECT %s FROM %s WHERE %s > %d ORDER BY %s",
-		t.cfg.ChMainTable, chColumns, chColumns, t.cfg.ChSyncAuxTable, lsnColumn, uint64(lsn), t.cfg.BufferTableRowIdColumn)
-
-	if err := t.chLoader.Exec(query); err != nil {
-		return fmt.Errorf("could not merge with sync aux table: %v", err)
-	}
-
-	if err := t.chLoader.Exec(fmt.Sprintf("TRUNCATE TABLE %s", t.cfg.ChSyncAuxTable)); err != nil {
-		return fmt.Errorf("could not truncat table: %v", err)
-	}
-
-	t.inSync = false
-
-	return nil
+	return res[0][0]
 }
 
 func (t *genericTable) Begin() error {
