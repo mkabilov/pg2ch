@@ -57,11 +57,11 @@ func (c *CHLoader) urlParams() url.Values {
 	return res
 }
 
-func (c *CHLoader) performRequest(query string, body io.Reader) error {
+func (c *CHLoader) performRequest(query string, reqBody io.Reader) error {
 	vals := c.urlParams()
 	vals.Add("query", query)
 
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+"?"+vals.Encode(), body)
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"?"+vals.Encode(), reqBody)
 	if err != nil {
 		return fmt.Errorf("could not create request: %v", err)
 	}

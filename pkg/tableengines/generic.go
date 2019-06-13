@@ -403,12 +403,12 @@ func (t *genericTable) attemptFlushBuffer() error {
 
 	if t.inSync {
 		if err := t.chLoader.BufferFlush(t.cfg.ChSyncAuxTable, t.syncAuxTableColumns()); err != nil {
-			return err
+			return fmt.Errorf("could not flush buffer for %q table: %v", t.cfg.ChSyncAuxTable)
 		}
 		log.Printf("in sync buffer flushed %d commands", t.bufferCmdId)
 	} else {
 		if err := t.chLoader.BufferFlush(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
-			return err
+			return fmt.Errorf("could not flush buffer for %q table: %v", t.cfg.ChMainTable)
 		}
 		log.Printf("buffer flushed %d commands", t.bufferCmdId)
 	}

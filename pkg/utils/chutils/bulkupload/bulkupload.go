@@ -95,14 +95,16 @@ func (c *BulkUpload) BulkUpload(tableName string, columns []string) error {
 
 func (c *BulkUpload) Write(p []byte) error {
 	c.gzipBufBytes += len(p)
+
+	_, err := c.gzipWriter.Write(p)
+
 	if c.gzipBufBytes >= c.gzipBufSize {
+		log.Printf("bulkupload flush: %v %v", c.gzipBufBytes, c.gzipBufSize)
 		if err := c.gzipWriter.Flush(); err != nil {
 			return fmt.Errorf("could not flush gzip: %v", err)
 		}
 		c.gzipBufBytes = 0
 	}
-
-	_, err := c.gzipWriter.Write(p)
 
 	return err
 }
