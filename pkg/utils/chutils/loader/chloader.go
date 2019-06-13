@@ -111,7 +111,8 @@ func (c *CHLoader) BufferFlush(tableName string, columns []string) error {
 
 func (c *CHLoader) Exec(query string) error {
 	log.Printf("exec: %q", query)
-	req, err := http.NewRequest(http.MethodPost, c.baseURL, bytes.NewBufferString(query))
+
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"?"+c.urlParams().Encode(), bytes.NewBufferString(query))
 	if err != nil {
 		return fmt.Errorf("could not create request: %v", err)
 	}
@@ -138,7 +139,7 @@ func (c *CHLoader) Query(query string) ([][]string, error) {
 	log.Printf("query: %q", query)
 	res := make([][]string, 0)
 
-	req, err := http.NewRequest(http.MethodPost, c.baseURL, bytes.NewBufferString(query))
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"?"+c.urlParams().Encode(), bytes.NewBufferString(query))
 	if err != nil {
 		return nil, fmt.Errorf("could not create request: %v", err)
 	}
