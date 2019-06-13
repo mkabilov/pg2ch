@@ -3,7 +3,6 @@ package loader
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -14,25 +13,24 @@ import (
 )
 
 type CHLoader struct {
-	client        *http.Client
-	baseURL       string
-	urlValues     url.Values
-	gzipWriter    *gzip.Writer
+	client    *http.Client
+	baseURL   string
+	urlValues url.Values
+	//gzipWriter    *gzip.Writer
 	requestBuffer *bytes.Buffer
 }
 
 func New(baseURL, dbName string) *CHLoader {
-	var err error
 	ch := &CHLoader{
 		client:        &http.Client{},
 		urlValues:     url.Values{},
 		baseURL:       strings.TrimRight(baseURL, "/") + "/",
 		requestBuffer: &bytes.Buffer{},
 	}
-	ch.gzipWriter, err = gzip.NewWriterLevel(ch.requestBuffer, gzip.BestSpeed)
-	if err != nil {
-		log.Fatalf("could not create gzip writer: %v", err)
-	}
+	//ch.gzipWriter, err = gzip.NewWriterLevel(ch.requestBuffer, gzip.BestSpeed)
+	//if err != nil {
+	//	log.Fatalf("could not create gzip writer: %v", err)
+	//}
 	ch.urlValues.Add("database", dbName)
 
 	return ch
@@ -86,7 +84,7 @@ func (c *CHLoader) performRequest(query string, reqBody io.Reader) error {
 }
 
 func (c *CHLoader) BufferWrite(p []byte) error {
-	_, err := c.gzipWriter.Write(p)
+	_, err := c.requestBuffer.Write(p)
 	if err != nil {
 		return err
 	}
@@ -95,16 +93,10 @@ func (c *CHLoader) BufferWrite(p []byte) error {
 }
 
 func (c *CHLoader) BufferFlush(tableName string, columns []string) error {
-	if err := c.gzipWriter.Close(); err != nil {
-		return fmt.Errorf("could not close gzip writer: %v", err)
-	}
-
 	if err := c.performRequest(insertQuery(tableName, columns), c.requestBuffer); err != nil {
 		return err
 	}
 	c.requestBuffer.Reset()
-
-	c.gzipWriter.Reset(c.requestBuffer)
 
 	return nil
 }

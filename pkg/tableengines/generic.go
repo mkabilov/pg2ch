@@ -359,7 +359,7 @@ func (t *genericTable) processChTuples(lsn utils.LSN, set chTuples) (mergeIsNeed
 
 	if t.bufferCmdId == t.cfg.MaxBufferLength {
 		if err := t.flushBuffer(); err != nil {
-			return false, fmt.Errorf("could not flush buffer: %v", err)
+			return false, err
 		}
 	}
 
