@@ -73,22 +73,21 @@ type ColumnProperty struct {
 
 // Table contains information about the table
 type Table struct {
-	BufferTableRowIdColumn  string                    `yaml:"buffer_table_row_id"`
-	ChSyncAuxTable          string                    `yaml:"sync_aux_table"`
-	ChBufferTable           string                    `yaml:"buffer_table"`
-	ChMainTable             string                    `yaml:"main_table"`
-	MaxBufferLength         int                       `yaml:"max_buffer_length"`
-	VerColumn               string                    `yaml:"ver_column"`
-	IsDeletedColumn         string                    `yaml:"is_deleted_column"`
-	SignColumn              string                    `yaml:"sign_column"`
-	GenerationColumn        string                    `yaml:"generation_column"`
-	Engine                  tableEngine               `yaml:"engine"`
-	FlushThreshold          int                       `yaml:"flush_threshold"`
-	InitSyncSkip            bool                      `yaml:"init_sync_skip"`
-	InitSyncSkipBufferTable bool                      `yaml:"init_sync_skip_buffer_table"`
-	InitSyncSkipTruncate    bool                      `yaml:"init_sync_skip_truncate"`
-	Columns                 map[string]string         `yaml:"columns"`
-	ColumnProperties        map[string]ColumnProperty `yaml:"column_properties"`
+	BufferTableRowIdColumn string                    `yaml:"buffer_table_row_id"`
+	ChSyncAuxTable         string                    `yaml:"sync_aux_table"`
+	ChBufferTable          string                    `yaml:"buffer_table"`
+	ChMainTable            string                    `yaml:"main_table"`
+	MaxBufferLength        int                       `yaml:"max_buffer_length"`
+	VerColumn              string                    `yaml:"ver_column"`
+	IsDeletedColumn        string                    `yaml:"is_deleted_column"`
+	SignColumn             string                    `yaml:"sign_column"`
+	GenerationColumn       string                    `yaml:"generation_column"`
+	Engine                 tableEngine               `yaml:"engine"`
+	FlushThreshold         int                       `yaml:"flush_threshold"`
+	InitSyncSkip           bool                      `yaml:"init_sync_skip"`
+	InitSyncSkipTruncate   bool                      `yaml:"init_sync_skip_truncate"`
+	Columns                map[string]string         `yaml:"columns"`
+	ColumnProperties       map[string]ColumnProperty `yaml:"column_properties"`
 
 	PgOID         utils.OID           `yaml:"-"`
 	PgTableName   PgTableName         `yaml:"-"`

@@ -296,6 +296,33 @@ func (r *Replicator) Run() error {
 		return fmt.Errorf("could not init tables: %v", err)
 	}
 
+	r.finalLSN = r.minLSN()
+	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Postgres.ConnConfig,
+		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.finalLSN)
+
+	if syncNeeded {
+		for tblName := range r.cfg.Tables {
+			if _, ok := r.tableLSN[tblName]; ok || r.cfg.Tables[tblName].InitSyncSkip {
+				continue
+			}
+
+			if err := r.chTables[tblName].InitSync(); err != nil {
+				return fmt.Errorf("could not init sync %q: %v", tblName, err)
+			}
+		}
+	}
+
+	if err := r.consumer.Run(r); err != nil {
+		return err
+	}
+
+	go r.logErrCh()
+	go r.inactivityMerge()
+
+	if r.cfg.RedisBind != "" {
+		go r.redisServer()
+	}
+
 	if syncNeeded {
 		doneCh := make(chan struct{}, syncJobsNum)
 		for i := 0; i < syncJobsNum; i++ {
@@ -307,9 +334,6 @@ func (r *Replicator) Run() error {
 				continue
 			}
 
-			if err := r.chTables[tblName].InitSync(); err != nil {
-				return fmt.Errorf("could not init sync %q: %v", tblName, err)
-			}
 			r.syncJobs <- tblName
 		}
 		close(r.syncJobs)
@@ -321,21 +345,6 @@ func (r *Replicator) Run() error {
 
 			log.Printf("all synced!")
 		}()
-	}
-
-	r.finalLSN = r.minLSN()
-	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Postgres.ConnConfig,
-		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.finalLSN)
-
-	if err := r.consumer.Run(r); err != nil {
-		return err
-	}
-
-	go r.logErrCh()
-	go r.inactivityMerge()
-
-	if r.cfg.RedisBind != "" {
-		go r.redisServer()
 	}
 
 	r.waitForShutdown()

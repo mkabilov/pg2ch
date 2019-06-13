@@ -81,6 +81,7 @@ type genericTable struct {
 	syncRows    uint64
 
 	syncUploader *bulkupload.BulkUpload
+	minLSN       utils.LSN
 }
 
 func newGenericTable(ctx context.Context, connUrl, dbName string, tblCfg config.Table, genID *uint64) genericTable {
@@ -254,42 +255,30 @@ func (t *genericTable) genSyncWrite(p []byte) error {
 }
 
 func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
-	var destinationTable string
-
+	t.minLSN = lsn
 	tblLiveTuples, err := t.pgStatLiveTuples(pgTx)
 	if err != nil {
 		log.Printf("Could not get approx number of rows in the source table: %v", err)
 	}
 
-	if t.cfg.ChBufferTable != "" && !t.cfg.InitSyncSkipBufferTable {
-		log.Printf("Copy from %q postgres table to %q clickhouse table via %q buffer table started. ~%v rows to copy",
-			t.cfg.PgTableName.String(), t.cfg.ChMainTable, t.cfg.ChBufferTable, tblLiveTuples)
-		if err := t.truncateBufTable(); err != nil {
-			return fmt.Errorf("could not truncate buffer table: %v", err)
+	log.Printf("Copy from %q postgres table to %q clickhouse table started. ~%d rows to copy",
+		t.cfg.PgTableName.String(), t.cfg.ChMainTable, tblLiveTuples)
+	if !t.cfg.InitSyncSkipTruncate {
+		if err := t.truncateMainTable(); err != nil {
+			return fmt.Errorf("could not truncate main table: %v", err)
 		}
-		destinationTable = t.cfg.ChBufferTable
-	} else {
-		log.Printf("Copy from %q postgres table to %q clickhouse table started. ~%v rows to copy",
-			t.cfg.PgTableName.String(), t.cfg.ChMainTable, tblLiveTuples)
-		if !t.cfg.InitSyncSkipTruncate {
-			if err := t.truncateMainTable(); err != nil {
-				return fmt.Errorf("could not truncate main table: %v", err)
-			}
-		}
-		destinationTable = t.cfg.ChMainTable
 	}
 	t.syncRows = 0
 
 	loaderErrCh := make(chan error, 1)
 	go func(errCh chan error) {
-		errCh <- t.syncUploader.BulkUpload(destinationTable, t.chUsedColumns)
+		errCh <- t.syncUploader.BulkUpload(t.cfg.ChMainTable, t.chUsedColumns)
 	}(loaderErrCh)
 
-	query := fmt.Sprintf("copy %s(%s) to stdout", t.cfg.PgTableName.String(), strings.Join(t.pgUsedColumns, ", "))
-	log.Printf("copy command: %q", query)
-
 	t.syncLastBatchTime = time.Now()
-	ct, err := pgTx.CopyToWriter(w, query)
+	ct, err := pgTx.CopyToWriter(w, fmt.Sprintf(
+		"copy %s(%s) to stdout",
+		t.cfg.PgTableName.String(), strings.Join(t.pgUsedColumns, ", ")))
 	if err != nil {
 		return fmt.Errorf("could not copy: %v", err)
 	}
@@ -302,26 +291,30 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
 		return fmt.Errorf("number of rows inserted to clickhouse doesn't match the initial number of rows in pg")
 	}
 
-	log.Printf("inserted to CH: %d rows", t.syncRows)
+	log.Printf("copied during sync: %d rows", t.syncRows)
 
 	if err := <-loaderErrCh; err != nil {
 		return fmt.Errorf("could not load to CH: %v", err)
 	}
 	close(loaderErrCh)
 
+	return t.postSync(lsn)
+}
+
+func (t *genericTable) postSync(lsn utils.LSN) error {
 	// post sync
 	t.Lock()
 	defer t.Unlock()
 
-	log.Printf("finish sync: %d", t.bufferCmdId)
 	if err := t.flushBuffer(); err != nil {
 		return fmt.Errorf("could not flush buffer: %v", err)
 	}
+
 	chColumns := strings.Join(t.chUsedColumns, ",")
 
 	log.Printf("delta size: %s, skipped: %s", t.deltaSize(lsn), t.oldSize(lsn))
 
-	query = fmt.Sprintf("INSERT INTO %s(%s) SELECT %s FROM %s WHERE %s > %d ORDER BY %s",
+	query := fmt.Sprintf("INSERT INTO %s(%s) SELECT %s FROM %s WHERE %s > %d ORDER BY %s",
 		t.cfg.ChMainTable, chColumns, chColumns, t.cfg.ChSyncAuxTable, lsnColumn, uint64(lsn), t.cfg.BufferTableRowIdColumn)
 
 	if err := t.chLoader.Exec(query); err != nil {
@@ -347,6 +340,11 @@ func (t *genericTable) processChTuples(lsn utils.LSN, set chTuples) (mergeIsNeed
 				row = append(row, lsn.StrBytes()...)
 
 				t.inSyncRowID++
+			} else {
+				if lsn < t.minLSN {
+					log.Printf("skipping tuples: %v < %v", uint64(lsn), uint64(t.minLSN))
+					return false, nil
+				}
 			}
 
 			if err := t.writeLine(row); err != nil {
@@ -374,8 +372,9 @@ func (t *genericTable) processChTuples(lsn utils.LSN, set chTuples) (mergeIsNeed
 
 func (t *genericTable) flushBuffer() error {
 	var err error
+	t.flushMutex.Lock()
+	defer t.flushMutex.Unlock()
 
-	log.Printf("flushing buffers")
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		err = t.attemptFlushBuffer()
 		if err == nil {
