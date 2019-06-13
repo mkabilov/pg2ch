@@ -360,8 +360,6 @@ func (t *genericTable) processChTuples(lsn utils.LSN, set chTuples) (mergeIsNeed
 
 	if t.bufferCmdId == t.cfg.MaxBufferLength {
 		if err := t.flushBuffer(); err != nil {
-			debug.PrintStack()
-			log.Fatalf("could not flush buffer: %v", err)
 			return false, err
 		}
 	}
@@ -406,6 +404,9 @@ func (t *genericTable) attemptFlushBuffer() error {
 
 	if t.inSync {
 		if err := t.chLoader.BufferFlush(t.cfg.ChSyncAuxTable, t.syncAuxTableColumns()); err != nil {
+			debug.PrintStack()
+			log.Fatalf("could not flush buffer : %v", err)
+
 			return fmt.Errorf("could not flush buffer for %q table: %v", t.cfg.ChSyncAuxTable, err)
 		}
 		log.Printf("in sync buffer flushed %d commands", t.bufferCmdId)
