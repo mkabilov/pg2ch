@@ -63,7 +63,7 @@ func (c *CHLoader) performRequest(query string, reqBody io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("could not create request: %v", err)
 	}
-	req.Header.Add("Content-Encoding", "gzip")
+	//req.Header.Add("Content-Encoding", "gzip")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
