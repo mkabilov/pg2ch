@@ -403,7 +403,7 @@ func (t *genericTable) attemptFlushBuffer() error {
 
 	if t.inSync {
 		if err := t.chLoader.BufferFlush(t.cfg.ChSyncAuxTable, t.syncAuxTableColumns()); err != nil {
-			return fmt.Errorf("could not flush buffer for %q table: %v", t.cfg.ChSyncAuxTable)
+			return fmt.Errorf("could not flush buffer for %q table: %v", t.cfg.ChSyncAuxTable, err)
 		}
 		log.Printf("in sync buffer flushed %d commands", t.bufferCmdId)
 	} else {
