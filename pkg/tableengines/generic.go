@@ -274,8 +274,10 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
 	loaderErrCh := make(chan error, 1)
 	go func(errCh chan error) {
 		if err := t.bulkuploader.BulkUpload(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
+			errCh <- err
 			log.Fatalf("could not sync upload: %v", err)
 		}
+		errCh <- nil
 	}(loaderErrCh)
 
 	t.syncLastBatchTime = time.Now()
@@ -306,6 +308,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
 
 func (t *genericTable) postSync(lsn utils.LSN) error {
 	// post sync
+	log.Println("starting post sync. waiting for current tx to finish")
 	t.Lock()
 	defer t.Unlock()
 
