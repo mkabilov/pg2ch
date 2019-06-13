@@ -71,6 +71,10 @@ func (r *Replicator) pgCreateTempRepSlot(tx *pgx.Tx, slotName string) (utils.LSN
 		return utils.InvalidLSN, fmt.Errorf("could not parse LSN: %v", err)
 	}
 
+	if _, err := tx.Exec(fmt.Sprintf("DROP_REPLICATION_SLOT %s", slotName)); err != nil {
+		return utils.InvalidLSN, fmt.Errorf("could not drop replication slot: %v", err)
+	}
+
 	return lsn, nil
 }
 
