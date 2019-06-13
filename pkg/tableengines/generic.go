@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -359,6 +360,8 @@ func (t *genericTable) processChTuples(lsn utils.LSN, set chTuples) (mergeIsNeed
 
 	if t.bufferCmdId == t.cfg.MaxBufferLength {
 		if err := t.flushBuffer(); err != nil {
+			debug.PrintStack()
+			log.Fatalf("could not flush buffer: %v", err)
 			return false, err
 		}
 	}
