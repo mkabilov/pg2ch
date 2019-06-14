@@ -39,6 +39,7 @@ var pgToChMap = map[string]string{
 	utils.PgIstore:    utils.ChInt32,    // type for istore values
 	utils.PgBigIstore: utils.ChInt64,    // type for bigistore values
 	utils.PgAjTime:    utils.ChDateTime, // adjust time
+	utils.PgAjBool:    utils.ChUInt8,    // adjust boolean: true, false, unknown
 }
 
 // ToClickHouseType converts pg type into clickhouse type
