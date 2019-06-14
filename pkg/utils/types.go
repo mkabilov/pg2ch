@@ -50,4 +50,5 @@ const (
 	PgIstore    = "istore"
 	PgBigIstore = "bigistore"
 	PgAjBool    = "ajbool"
+	PgAjTime    = "ajtime"
 )

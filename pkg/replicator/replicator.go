@@ -170,7 +170,7 @@ func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 			r.errCh <- err
 		}
 	}()
-	connInfo, err := initPostgresql(r.pgDeltaConn)
+	connInfo, err := initPostgresql(conn)
 	if err != nil {
 		return fmt.Errorf("could not fetch conn info: %v", err)
 	}
