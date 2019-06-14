@@ -38,7 +38,6 @@ const (
 
 	syncProgressBatch = 1000000
 	gzipFlushCount    = 1000
-	lsnColumn         = "lsn"
 )
 
 var (
@@ -76,9 +75,10 @@ type genericTable struct {
 
 	syncLastBatchTime time.Time //to calculate rate
 
-	inSync      bool
-	inSyncRowID uint64
-	syncRows    uint64
+	inSync        bool
+	inSyncRowID   uint64
+	syncRows      uint64
+	syncTotalRows uint64
 
 	bulkuploader *bulkupload.BulkUpload
 	minLSN       utils.LSN
@@ -171,7 +171,7 @@ func (t *genericTable) truncateBufTable() error {
 	return nil
 }
 
-func (t *genericTable) pgStatLiveTuples(pgTx *pgx.Tx) (int64, error) {
+func (t *genericTable) pgStatLiveTuples(pgTx *pgx.Tx) (uint64, error) {
 	var rows sql.NullInt64
 	err := pgTx.QueryRow("select n_live_tup from pg_stat_all_tables where schemaname = $1 and relname = $2",
 		t.cfg.PgTableName.SchemaName,
@@ -180,7 +180,7 @@ func (t *genericTable) pgStatLiveTuples(pgTx *pgx.Tx) (int64, error) {
 		return 0, err
 	}
 
-	return rows.Int64, nil
+	return uint64(rows.Int64), nil
 }
 
 func convertColumn(colType string, val message.Tuple, colProps config.ColumnProperty) []byte {
@@ -260,9 +260,10 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
 	if err != nil {
 		log.Printf("Could not get approx number of rows in the source table: %v", err)
 	}
+	t.syncTotalRows = tblLiveTuples
 
 	log.Printf("Copy from %q postgres table to %q clickhouse table started. ~%d rows to copy",
-		t.cfg.PgTableName.String(), t.cfg.ChMainTable, tblLiveTuples)
+		t.cfg.PgTableName.String(), t.cfg.ChMainTable, t.syncTotalRows)
 	if !t.cfg.InitSyncSkipTruncate {
 		if err := t.truncateMainTable(); err != nil {
 			return fmt.Errorf("could not truncate main table: %v", err)
@@ -320,7 +321,7 @@ func (t *genericTable) postSync(lsn utils.LSN) error {
 	log.Printf("delta size: %s, skipped: %s", t.deltaSize(lsn), t.oldSize(lsn))
 
 	query := fmt.Sprintf("INSERT INTO %s(%s) SELECT %s FROM %s WHERE %s > %d ORDER BY %s",
-		t.cfg.ChMainTable, chColumns, chColumns, t.cfg.ChSyncAuxTable, lsnColumn, uint64(lsn), t.cfg.BufferTableRowIdColumn)
+		t.cfg.ChMainTable, chColumns, chColumns, t.cfg.ChSyncAuxTable, t.cfg.LsnColumnName, uint64(lsn), t.cfg.BufferTableRowIdColumn)
 
 	if err := t.chLoader.Exec(query); err != nil {
 		return fmt.Errorf("could not merge with sync aux table: %v", err)
@@ -402,8 +403,10 @@ func (t *genericTable) flushBuffer() error {
 
 func (t *genericTable) printSyncProgress() {
 	if t.syncRows%syncProgressBatch == 0 {
-		log.Printf("%s: copied %d from to %q (speed: %.0f rows/s)",
-			t.cfg.PgTableName.String(), t.syncRows, t.cfg.ChMainTable, float64(syncProgressBatch)/time.Since(t.syncLastBatchTime).Seconds())
+		speed := float64(syncProgressBatch) / time.Since(t.syncLastBatchTime).Seconds()
+		eta := time.Second * time.Duration((t.syncTotalRows-t.syncRows)/uint64(speed))
+		log.Printf("%s: copied %d from to %q (ETA: %v speed: %.0f rows/s)",
+			t.cfg.PgTableName.String(), t.syncRows, t.cfg.ChMainTable, eta.Truncate(time.Second), speed)
 
 		t.syncLastBatchTime = time.Now()
 	}
@@ -579,7 +582,7 @@ func appendField(str []byte, fields ...[]byte) []byte {
 }
 
 func (t *genericTable) syncAuxTableColumns() []string {
-	return append(t.chUsedColumns, t.cfg.BufferTableRowIdColumn, lsnColumn)
+	return append(t.chUsedColumns, t.cfg.BufferTableRowIdColumn, t.cfg.LsnColumnName)
 }
 
 func (t *genericTable) bufTableColumns() []string {
@@ -597,7 +600,7 @@ func (t *genericTable) InitSync() error {
 
 func (t *genericTable) deltaSize(lsn utils.LSN) string {
 	res, err := t.chLoader.Query(fmt.Sprintf("SELECT count() FROM %s WHERE %s > %d",
-		t.cfg.ChSyncAuxTable, lsnColumn, uint64(lsn)))
+		t.cfg.ChSyncAuxTable, t.cfg.LsnColumnName, uint64(lsn)))
 	if err != nil {
 		log.Fatalf("query error: %v", err)
 	}
@@ -606,7 +609,7 @@ func (t *genericTable) deltaSize(lsn utils.LSN) string {
 
 func (t *genericTable) oldSize(lsn utils.LSN) string {
 	res, err := t.chLoader.Query(fmt.Sprintf("SELECT count() FROM %s WHERE %s <= %d",
-		t.cfg.ChSyncAuxTable, lsnColumn, uint64(lsn)))
+		t.cfg.ChSyncAuxTable, t.cfg.LsnColumnName, uint64(lsn)))
 	if err != nil {
 		log.Fatalf("query error: %v", err)
 	}

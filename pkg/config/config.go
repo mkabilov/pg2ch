@@ -26,6 +26,7 @@ const (
 	defaultMaxBufferLength        = 10000
 	defaultSignColumn             = "sign"
 	defaultVerColumn              = "ver"
+	defaultLsnColumn              = "lsn"
 	defaultIsDeletedColumn        = "is_deleted"
 )
 
@@ -88,6 +89,7 @@ type Table struct {
 	InitSyncSkipTruncate   bool                      `yaml:"init_sync_skip_truncate"`
 	Columns                map[string]string         `yaml:"columns"`
 	ColumnProperties       map[string]ColumnProperty `yaml:"column_properties"`
+	LsnColumnName          string                    `yaml:"lsn_column_name"`
 
 	PgOID         utils.OID           `yaml:"-"`
 	PgTableName   PgTableName         `yaml:"-"`
@@ -288,6 +290,10 @@ func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 	if val.MaxBufferLength == 0 {
 		val.MaxBufferLength = defaultMaxBufferLength
+	}
+
+	if val.LsnColumnName == "" {
+		val.LsnColumnName = defaultLsnColumn
 	}
 
 	*t = Table(val)

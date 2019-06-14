@@ -126,11 +126,20 @@ func (r *Replicator) GenerateChDDL() error {
 		fmt.Println(tableDDL)
 
 		if tblCfg.ChBufferTable != "" {
-			fmt.Println(fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree()%s;",
+			fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree()%s;",
 				tblCfg.ChBufferTable,
 				strings.Join(
 					append(chColumnDDLs, fmt.Sprintf("    %s UInt64", tblCfg.BufferTableRowIdColumn)), ",\n"),
-				orderBy))
+				orderBy)
+		}
+
+		if tblCfg.ChSyncAuxTable != "" {
+			fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree() ORDER BY (%s, %s);",
+				tblCfg.ChSyncAuxTable,
+				strings.Join(
+					append(chColumnDDLs, fmt.Sprintf("    %s UInt64", tblCfg.BufferTableRowIdColumn), fmt.Sprintf("    %s UInt64", tblCfg.LsnColumnName)), ",\n"),
+				tblCfg.LsnColumnName,
+				tblCfg.BufferTableRowIdColumn)
 		}
 
 	}
