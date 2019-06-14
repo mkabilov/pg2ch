@@ -185,9 +185,9 @@ func (t *genericTable) pgStatLiveTuples(pgTx *pgx.Tx) (uint64, error) {
 
 func convertColumn(colType string, val message.Tuple, colProps config.ColumnProperty) []byte {
 	switch colType {
-	case utils.PgIstore:
+	case utils.PgAdjustIstore:
 		fallthrough
-	case utils.PgBigIstore:
+	case utils.PgAdjustBigIstore:
 		if colProps.FlattenIstore {
 			if val.Kind == message.TupleNull {
 				return []byte(strings.Repeat("\t\\N", colProps.FlattenIstoreMax-colProps.FlattenIstoreMin+1))[1:]
@@ -201,7 +201,7 @@ func convertColumn(colType string, val message.Tuple, colProps config.ColumnProp
 
 			return utils.IstoreToArrays(val.Value)
 		}
-	case utils.PgAjBool:
+	case utils.PgAdjustAjBool:
 		fallthrough
 	case utils.PgBoolean:
 		if val.Kind == message.TupleNull {
@@ -296,7 +296,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
 		return fmt.Errorf("number of rows inserted to clickhouse doesn't match the initial number of rows in pg")
 	}
 
-	log.Printf("copied during sync: %d rows", t.syncRows)
+	log.Printf("%s: copied during sync: %d rows", t.cfg.PgTableName, t.syncRows)
 
 	if err := <-loaderErrCh; err != nil {
 		return fmt.Errorf("could not load to CH: %v", err)
@@ -308,7 +308,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
 
 func (t *genericTable) postSync(lsn utils.LSN) error {
 	// post sync
-	log.Println("starting post sync. waiting for current tx to finish")
+	log.Printf("%s: starting post sync. waiting for current tx to finish", t.cfg.PgTableName)
 	t.Lock()
 	defer t.Unlock()
 
@@ -318,7 +318,7 @@ func (t *genericTable) postSync(lsn utils.LSN) error {
 
 	chColumns := strings.Join(t.chUsedColumns, ",")
 
-	log.Printf("delta size: %s, skipped: %s", t.deltaSize(lsn), t.oldSize(lsn))
+	log.Printf("%s: delta size: %s", t.cfg.PgTableName, t.deltaSize(lsn))
 
 	query := fmt.Sprintf("INSERT INTO %s(%s) SELECT %s FROM %s WHERE %s > %d ORDER BY %s",
 		t.cfg.ChMainTable, chColumns, chColumns, t.cfg.ChSyncAuxTable, t.cfg.LsnColumnName, uint64(lsn), t.cfg.BufferTableRowIdColumn)
@@ -409,7 +409,7 @@ func (t *genericTable) printSyncProgress() {
 			eta = time.Second * time.Duration((t.syncTotalRows-t.syncRows)/uint64(speed))
 		}
 
-		log.Printf("%s: copied %d from to %q (ETA: %v speed: %.0f rows/s)",
+		log.Printf("%s: %d rows copied to %q (ETA: %v speed: %.0f rows/s)",
 			t.cfg.PgTableName.String(), t.syncRows, t.cfg.ChMainTable, eta.Truncate(time.Second), speed)
 
 		t.syncLastBatchTime = time.Now()
@@ -604,15 +604,6 @@ func (t *genericTable) InitSync() error {
 
 func (t *genericTable) deltaSize(lsn utils.LSN) string {
 	res, err := t.chLoader.Query(fmt.Sprintf("SELECT count() FROM %s WHERE %s > %d",
-		t.cfg.ChSyncAuxTable, t.cfg.LsnColumnName, uint64(lsn)))
-	if err != nil {
-		log.Fatalf("query error: %v", err)
-	}
-	return res[0][0]
-}
-
-func (t *genericTable) oldSize(lsn utils.LSN) string {
-	res, err := t.chLoader.Query(fmt.Sprintf("SELECT count() FROM %s WHERE %s <= %d",
 		t.cfg.ChSyncAuxTable, t.cfg.LsnColumnName, uint64(lsn)))
 	if err != nil {
 		log.Fatalf("query error: %v", err)

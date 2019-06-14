@@ -36,10 +36,10 @@ var pgToChMap = map[string]string{
 	utils.PgTimeWithoutTimeZone:      utils.ChUint32,
 	utils.PgTimeWithTimeZone:         utils.ChUint32,
 
-	utils.PgIstore:    utils.ChInt32,    // type for istore values
-	utils.PgBigIstore: utils.ChInt64,    // type for bigistore values
-	utils.PgAjTime:    utils.ChDateTime, // adjust time
-	utils.PgAjBool:    utils.ChUInt8,    // adjust boolean: true, false, unknown
+	utils.PgAdjustIstore:    utils.ChInt32,    // type for istore values
+	utils.PgAdjustBigIstore: utils.ChInt64,    // type for bigistore values
+	utils.PgAdjustAjTime:    utils.ChDateTime, // adjust time
+	utils.PgAdjustAjBool:    utils.ChUInt8,    // adjust boolean: true, false, unknown
 }
 
 // ToClickHouseType converts pg type into clickhouse type
@@ -64,6 +64,12 @@ func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
 			return "", fmt.Errorf("length must be specified for character type")
 		}
 		chType = fmt.Sprintf("%s(%d)", chType, pgColumn.Ext[0])
+	case utils.PgAdjustCountry:
+		fallthrough
+	case utils.PgAdjustOsName:
+		fallthrough
+	case utils.PgAdjustDeviceType:
+		chType = fmt.Sprintf("LowCardinality(%s)", chType)
 	}
 
 	if pgColumn.IsArray {

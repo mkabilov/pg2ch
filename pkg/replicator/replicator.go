@@ -209,13 +209,13 @@ func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
 	}()
 
 	for pgTableName := range r.syncJobs {
-		log.Printf("%d: starting syncing %q pg table", i, pgTableName.String())
+		log.Printf("%d sync job: starting syncing %q pg table", i, pgTableName.String())
 		if err := r.syncTable(pgTableName); err != nil {
 			r.errCh <- err
 			return
 		}
 
-		log.Printf("%d: %q table synced", i, pgTableName.String())
+		log.Printf("%d sync job: %q table synced", i, pgTableName.String())
 	}
 }
 

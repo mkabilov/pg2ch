@@ -60,7 +60,7 @@ func (r *Replicator) GenerateChDDL() error {
 				pkColumnNumb = pgCol.PkCol
 			}
 			columnCfg, hasColumnCfg := tblCfg.ColumnProperties[tupleColumn.Name]
-			if !hasColumnCfg && (pgCol.BaseType == utils.PgIstore || pgCol.BaseType == utils.PgBigIstore) {
+			if !hasColumnCfg && (pgCol.BaseType == utils.PgAdjustIstore || pgCol.BaseType == utils.PgAdjustBigIstore) {
 				hasColumnCfg = true
 				columnCfg = config.ColumnProperty{
 					IstoreKeysSuffix:   "keys",

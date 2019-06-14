@@ -317,5 +317,5 @@ func (c *chConnConfig) ConnectionString() string {
 }
 
 func (c PgColumn) IsIstore() bool {
-	return c.BaseType == utils.PgIstore || c.BaseType == utils.PgBigIstore
+	return c.BaseType == utils.PgAdjustIstore || c.BaseType == utils.PgAdjustBigIstore
 }
