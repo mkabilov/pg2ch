@@ -403,8 +403,12 @@ func (t *genericTable) flushBuffer() error {
 
 func (t *genericTable) printSyncProgress() {
 	if t.syncRows%syncProgressBatch == 0 {
+		var eta time.Duration
 		speed := float64(syncProgressBatch) / time.Since(t.syncLastBatchTime).Seconds()
-		eta := time.Second * time.Duration((t.syncTotalRows-t.syncRows)/uint64(speed))
+		if t.syncRows < t.syncTotalRows {
+			eta = time.Second * time.Duration((t.syncTotalRows-t.syncRows)/uint64(speed))
+		}
+
 		log.Printf("%s: copied %d from to %q (ETA: %v speed: %.0f rows/s)",
 			t.cfg.PgTableName.String(), t.syncRows, t.cfg.ChMainTable, eta.Truncate(time.Second), speed)
 
