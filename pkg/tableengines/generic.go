@@ -449,7 +449,6 @@ func (t *genericTable) FlushToMainTable() error {
 	t.Lock()
 	defer t.Unlock()
 
-	log.Printf("flush to main table")
 	if err := t.flushBuffer(); err != nil {
 		return fmt.Errorf("could not flush buffers: %v", err)
 	}
