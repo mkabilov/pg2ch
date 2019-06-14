@@ -9,16 +9,6 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
-// TODO: merge with getTable
-func (r *Replicator) skipTableMessage(tblName config.PgTableName) bool {
-	lsn, ok := r.tableLSN[tblName]
-	if !ok {
-		return false
-	}
-
-	return r.finalLSN <= lsn
-}
-
 func (r *Replicator) mergeTables() error {
 	for tblName := range r.tablesToMerge {
 		if _, ok := r.inTxTables[tblName]; ok {
@@ -30,10 +20,13 @@ func (r *Replicator) mergeTables() error {
 		}
 
 		delete(r.tablesToMerge, tblName)
+		r.tableLSNMutex.Lock()
 		r.tableLSN[tblName] = r.finalLSN
 		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), r.finalLSN.FormattedBytes()); err != nil {
+			r.tableLSNMutex.Unlock()
 			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
+		r.tableLSNMutex.Unlock()
 	}
 
 	r.advanceLSN()
@@ -58,10 +51,12 @@ func (r *Replicator) getTable(oid utils.OID) (chTbl clickHouseTable, skip bool, 
 		r.tablesToMerge[tblName] = struct{}{}
 	}
 
+	r.tableLSNMutex.RLock()
 	lsn, ok := r.tableLSN[tblName]
 	if !ok {
 		skip = false
 	}
+	r.tableLSNMutex.RUnlock()
 
 	skip = r.finalLSN <= lsn
 	if _, ok := r.inTxTables[tblName]; !ok && !skip { // TODO: skip adding tables with no buffer table

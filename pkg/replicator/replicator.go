@@ -65,7 +65,9 @@ type Replicator struct {
 
 	finalLSN utils.LSN
 	beginMsg message.Begin
-	tableLSN map[config.PgTableName]utils.LSN
+
+	tableLSNMutex *sync.RWMutex
+	tableLSN      map[config.PgTableName]utils.LSN
 
 	inTx               bool // indicates if we're inside tx
 	tablesToMergeMutex *sync.Mutex
@@ -87,6 +89,7 @@ func New(cfg config.Config) *Replicator {
 		oidName:  make(map[utils.OID]config.PgTableName),
 		errCh:    make(chan error),
 
+		tableLSNMutex:      &sync.RWMutex{},
 		tablesToMergeMutex: &sync.Mutex{},
 		tablesToMerge:      make(map[config.PgTableName]struct{}),
 		inTxTables:         make(map[config.PgTableName]clickHouseTable),
@@ -195,7 +198,9 @@ func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 		return fmt.Errorf("could not sync: %v", err)
 	}
 
+	r.tableLSNMutex.Lock()
 	r.tableLSN[pgTableName] = lsn
+	r.tableLSNMutex.Unlock()
 
 	return nil
 }
@@ -218,6 +223,9 @@ func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
 }
 
 func (r *Replicator) readPersStorage() error {
+	r.tableLSNMutex.Lock()
+	defer r.tableLSNMutex.Unlock()
+
 	for key := range r.persStorage.Keys(nil) {
 		if !strings.HasPrefix(key, tableLSNKeyPrefix) {
 			continue
@@ -283,6 +291,8 @@ func (r *Replicator) Run() error {
 	}
 
 	syncNeeded := false
+
+	r.tableLSNMutex.RLock()
 	for tblName := range r.cfg.Tables {
 		if _, ok := r.tableLSN[tblName]; !ok {
 			syncNeeded = true
@@ -311,6 +321,7 @@ func (r *Replicator) Run() error {
 			syncTables = append(syncTables, tblName)
 		}
 	}
+	r.tableLSNMutex.RUnlock()
 
 	if err := r.consumer.Run(r); err != nil {
 		return err

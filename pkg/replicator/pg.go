@@ -187,6 +187,9 @@ func (r *Replicator) pgBegin(pgxConn *pgx.Conn) (*pgx.Tx, error) {
 }
 
 func (r *Replicator) minLSN() utils.LSN {
+	r.tableLSNMutex.RLock()
+	defer r.tableLSNMutex.RUnlock()
+
 	result := utils.InvalidLSN
 	if len(r.tableLSN) == 0 {
 		return result
