@@ -51,7 +51,7 @@ func (r *Replicator) pgDropRepSlot(tx *pgx.Tx) error {
 }
 
 func genTempSlotName(tblName config.PgTableName) string {
-	return fmt.Sprintf("ch_tmp_%s_%s", tblName.SchemaName, tblName.TableName)
+	return fmt.Sprintf("%s_%s_%s", applicationName, tblName.SchemaName, tblName.TableName)
 }
 
 func (r *Replicator) pgCreateTempRepSlot(tx *pgx.Tx, slotName string) (utils.LSN, error) {

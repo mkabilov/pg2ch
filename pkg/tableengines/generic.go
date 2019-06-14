@@ -318,7 +318,7 @@ func (t *genericTable) postSync(lsn utils.LSN) error {
 
 	chColumns := strings.Join(t.chUsedColumns, ",")
 
-	log.Printf("%s: delta size: %s", t.cfg.PgTableName, t.deltaSize(lsn))
+	log.Printf("%s: delta size: %s", t.cfg.PgTableName.String(), t.deltaSize(lsn))
 
 	query := fmt.Sprintf("INSERT INTO %s(%s) SELECT %s FROM %s WHERE %s > %d ORDER BY %s",
 		t.cfg.ChMainTable, chColumns, chColumns, t.cfg.ChSyncAuxTable, t.cfg.LsnColumnName, uint64(lsn), t.cfg.BufferTableRowIdColumn)
