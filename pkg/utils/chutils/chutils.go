@@ -67,7 +67,7 @@ func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
 		chType = fmt.Sprintf("Array(%s)", chType)
 	}
 
-	if pgColumn.IsNullable && !pgColumn.IsArray {
+	if pgColumn.IsNullable && !pgColumn.IsArray && !pgColumn.IsIstore() {
 		chType = fmt.Sprintf("Nullable(%s)", chType)
 	}
 

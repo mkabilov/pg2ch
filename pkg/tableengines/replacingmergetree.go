@@ -66,6 +66,8 @@ func (t *replacingMergeTree) Write(p []byte) (int, error) {
 		return 0, err
 	}
 
+	t.printSyncProgress()
+
 	return len(p), nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -156,54 +157,55 @@ func IstoreValues(str []byte, min, max int) []byte {
 	return res
 }
 
-//func Quote(str string) string {
-//	var runeTmp [utf8.UTFMax]byte
-//
-//	for _, r := range []rune(str) {
-//		if strconv.IsPrint(r) {
-//			n := utf8.EncodeRune(runeTmp[:], r)
-//			colBuf.Write(runeTmp[:n])
-//			continue
-//		}
-//
-//		switch r {
-//		case '\a':
-//			colBuf.WriteString(`\a`)
-//		case '\b':
-//			colBuf.WriteString(`\b`)
-//		case '\f':
-//			colBuf.WriteString(`\f`)
-//		case '\n':
-//			colBuf.WriteString(`\n`)
-//		case '\r':
-//			colBuf.WriteString(`\r`)
-//		case '\t':
-//			colBuf.WriteString(`\t`)
-//		case '\v':
-//			colBuf.WriteString(`\v`)
-//		default:
-//			switch {
-//			case r < ' ':
-//				colBuf.WriteString(`\x`)
-//				colBuf.WriteByte(lowerhex[byte(r)>>4])
-//				colBuf.WriteByte(lowerhex[byte(r)&0xF])
-//			case r > utf8.MaxRune:
-//				r = 0xFFFD
-//				fallthrough
-//			case r < 0x10000:
-//				colBuf.WriteString(`\u`)
-//				for s := 12; s >= 0; s -= 4 {
-//					colBuf.WriteByte(lowerhex[r>>uint(s)&0xF])
-//				}
-//			default:
-//				colBuf.WriteString(`\U`)
-//				for s := 28; s >= 0; s -= 4 {
-//					colBuf.WriteByte(lowerhex[r>>uint(s)&0xF])
-//				}
-//			}
-//		}
-//
-//	}
-//
-//	return colBuf.String()
-//}
+func Quote(str string) string {
+	colBuf := &bytes.Buffer{}
+	var runeTmp [utf8.UTFMax]byte
+
+	for _, r := range []rune(str) {
+		if strconv.IsPrint(r) {
+			n := utf8.EncodeRune(runeTmp[:], r)
+			colBuf.Write(runeTmp[:n])
+			continue
+		}
+
+		switch r {
+		case '\a':
+			colBuf.WriteString(`\a`)
+		case '\b':
+			colBuf.WriteString(`\b`)
+		case '\f':
+			colBuf.WriteString(`\f`)
+		case '\n':
+			colBuf.WriteString(`\n`)
+		case '\r':
+			colBuf.WriteString(`\r`)
+		case '\t':
+			colBuf.WriteString(`\t`)
+		case '\v':
+			colBuf.WriteString(`\v`)
+		default:
+			switch {
+			case r < ' ':
+				colBuf.WriteString(`\x`)
+				colBuf.WriteByte(lowerhex[byte(r)>>4])
+				colBuf.WriteByte(lowerhex[byte(r)&0xF])
+			case r > utf8.MaxRune:
+				r = 0xFFFD
+				fallthrough
+			case r < 0x10000:
+				colBuf.WriteString(`\u`)
+				for s := 12; s >= 0; s -= 4 {
+					colBuf.WriteByte(lowerhex[r>>uint(s)&0xF])
+				}
+			default:
+				colBuf.WriteString(`\U`)
+				for s := 28; s >= 0; s -= 4 {
+					colBuf.WriteByte(lowerhex[r>>uint(s)&0xF])
+				}
+			}
+		}
+
+	}
+
+	return colBuf.String()
+}

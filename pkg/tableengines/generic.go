@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,7 +36,7 @@ const (
 
 	timestampLength = 19 // ->2019-06-08 15:50:01<- clickhouse does not support milliseconds
 
-	syncProgressBatch = 100000
+	syncProgressBatch = 1000000
 	gzipFlushCount    = 1000
 	lsnColumn         = "lsn"
 )
@@ -401,6 +400,15 @@ func (t *genericTable) flushBuffer() error {
 	return err
 }
 
+func (t *genericTable) printSyncProgress() {
+	if t.bufferCmdId%syncProgressBatch == 0 {
+		log.Printf("%s: copied %d from to %q (speed: %.0f rows/s)",
+			t.cfg.PgTableName.String(), t.bufferCmdId, t.cfg.ChMainTable, float64(syncProgressBatch)/time.Since(t.syncLastBatchTime).Seconds())
+
+		t.syncLastBatchTime = time.Now()
+	}
+}
+
 // flush from memory to the buffer/main table
 func (t *genericTable) attemptFlushBuffer() error {
 	if t.bufferCmdId == 0 {
@@ -409,17 +417,12 @@ func (t *genericTable) attemptFlushBuffer() error {
 
 	if t.inSync {
 		if err := t.chLoader.BufferFlush(t.cfg.ChSyncAuxTable, t.syncAuxTableColumns()); err != nil {
-			debug.PrintStack()
-			log.Fatalf("could not flush buffer : %v", err)
-
 			return fmt.Errorf("could not flush buffer for %q table: %v", t.cfg.ChSyncAuxTable, err)
 		}
-		log.Printf("in sync buffer flushed %d commands", t.bufferCmdId)
 	} else {
 		if err := t.chLoader.BufferFlush(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
 			return fmt.Errorf("could not flush buffer for %q table: %v", t.cfg.ChMainTable)
 		}
-		log.Printf("buffer flushed %d commands", t.bufferCmdId)
 	}
 
 	t.bufferCmdId = 0
