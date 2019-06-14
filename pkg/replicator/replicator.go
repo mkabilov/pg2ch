@@ -298,6 +298,7 @@ func (r *Replicator) Run() error {
 	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Postgres.ConnConfig,
 		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.finalLSN)
 
+	syncTables := make([]config.PgTableName, 0)
 	if syncNeeded {
 		for tblName := range r.cfg.Tables {
 			if _, ok := r.tableLSN[tblName]; ok || r.cfg.Tables[tblName].InitSyncSkip {
@@ -307,6 +308,7 @@ func (r *Replicator) Run() error {
 			if err := r.chTables[tblName].InitSync(); err != nil {
 				return fmt.Errorf("could not init sync %q: %v", tblName, err)
 			}
+			syncTables = append(syncTables, tblName)
 		}
 	}
 
@@ -327,13 +329,7 @@ func (r *Replicator) Run() error {
 			go r.syncJob(i, doneCh)
 		}
 
-		for tblName := range r.cfg.Tables {
-			if _, ok := r.tableLSN[tblName]; ok || r.cfg.Tables[tblName].InitSyncSkip {
-				log.Printf("table %q skipped: %t / %t", tblName, ok, r.cfg.Tables[tblName].InitSyncSkip)
-				continue
-			}
-
-			log.Printf("table %q added to the channel", tblName)
+		for _, tblName := range syncTables {
 			r.syncJobs <- tblName
 		}
 		close(r.syncJobs)
