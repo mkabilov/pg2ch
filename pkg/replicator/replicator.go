@@ -329,9 +329,11 @@ func (r *Replicator) Run() error {
 
 		for tblName := range r.cfg.Tables {
 			if _, ok := r.tableLSN[tblName]; ok || r.cfg.Tables[tblName].InitSyncSkip {
+				log.Printf("table %q skipped: %t / %t", tblName, ok, r.cfg.Tables[tblName].InitSyncSkip)
 				continue
 			}
 
+			log.Printf("table %q added to the channel", tblName)
 			r.syncJobs <- tblName
 		}
 		close(r.syncJobs)

@@ -296,7 +296,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
 		return fmt.Errorf("number of rows inserted to clickhouse doesn't match the initial number of rows in pg")
 	}
 
-	log.Printf("%s: copied during sync: %d rows", t.cfg.PgTableName, t.syncRows)
+	log.Printf("%s: copied during sync: %d rows", t.cfg.PgTableName.String(), t.syncRows)
 
 	if err := <-loaderErrCh; err != nil {
 		return fmt.Errorf("could not load to CH: %v", err)
@@ -308,7 +308,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
 
 func (t *genericTable) postSync(lsn utils.LSN) error {
 	// post sync
-	log.Printf("%s: starting post sync. waiting for current tx to finish", t.cfg.PgTableName)
+	log.Printf("%s: starting post sync. waiting for current tx to finish", t.cfg.PgTableName.String())
 	t.Lock()
 	defer t.Unlock()
 
