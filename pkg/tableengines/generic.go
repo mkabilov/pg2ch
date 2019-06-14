@@ -405,12 +405,13 @@ func (t *genericTable) printSyncProgress() {
 	if t.syncRows%syncProgressBatch == 0 {
 		var eta time.Duration
 		speed := float64(syncProgressBatch) / time.Since(t.syncLastBatchTime).Seconds()
+		left := t.syncTotalRows - t.syncRows
 		if t.syncRows < t.syncTotalRows {
-			eta = time.Second * time.Duration((t.syncTotalRows-t.syncRows)/uint64(speed))
+			eta = time.Second * time.Duration(left/uint64(speed))
 		}
 
-		log.Printf("%s: %d rows copied to %q (ETA: %v speed: %.0f rows/s)",
-			t.cfg.PgTableName.String(), t.syncRows, t.cfg.ChMainTable, eta.Truncate(time.Second), speed)
+		log.Printf("%s: %d rows copied to %q (ETA: %v left: %v speed: %.0f rows/s)",
+			t.cfg.PgTableName.String(), t.syncRows, t.cfg.ChMainTable, eta.Truncate(time.Second), left, speed)
 
 		t.syncLastBatchTime = time.Now()
 	}

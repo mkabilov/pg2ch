@@ -26,8 +26,6 @@ const (
 	applicationName   = "pg2ch"
 	tableLSNKeyPrefix = "table_lsn_"
 	generationIDKey   = "generation_id"
-
-	syncJobsNum = 10
 )
 
 type clickHouseTable interface {
@@ -95,7 +93,7 @@ func New(cfg config.Config) *Replicator {
 		tableLSN:           make(map[config.PgTableName]utils.LSN),
 		chDbName:           cfg.ClickHouse.Database,
 		chConnString:       fmt.Sprintf("http://%s:%d", cfg.ClickHouse.Host, cfg.ClickHouse.Port),
-		syncJobs:           make(chan config.PgTableName, syncJobsNum),
+		syncJobs:           make(chan config.PgTableName, cfg.SyncWorkers),
 		pgxConnConfig: cfg.Postgres.Merge(pgx.ConnConfig{
 			RuntimeParams:        map[string]string{"replication": "database", "application_name": applicationName},
 			PreferSimpleProtocol: true}),
@@ -324,8 +322,8 @@ func (r *Replicator) Run() error {
 	}
 
 	if syncNeeded {
-		doneCh := make(chan struct{}, syncJobsNum)
-		for i := 0; i < syncJobsNum; i++ {
+		doneCh := make(chan struct{}, r.cfg.SyncWorkers)
+		for i := 0; i < r.cfg.SyncWorkers; i++ {
 			go r.syncJob(i, doneCh)
 		}
 
@@ -339,7 +337,7 @@ func (r *Replicator) Run() error {
 		close(r.syncJobs)
 
 		go func() {
-			for i := 0; i < syncJobsNum; i++ {
+			for i := 0; i < r.cfg.SyncWorkers; i++ {
 				<-doneCh
 			}
 

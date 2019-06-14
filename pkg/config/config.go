@@ -115,6 +115,7 @@ type Config struct {
 	InactivityFlushTimeout time.Duration         `yaml:"inactivity_flush_timeout"`
 	PersStoragePath        string                `yaml:"db_path"`
 	RedisBind              string                `yaml:"redis_bind"`
+	SyncWorkers            int                   `yaml:"sync_workers"`
 }
 
 type Column struct {
