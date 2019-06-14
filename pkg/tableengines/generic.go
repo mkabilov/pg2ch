@@ -282,8 +282,8 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
 
 	t.syncLastBatchTime = time.Now()
 	ct, err := pgTx.CopyToWriter(w, fmt.Sprintf(
-		"copy %s(%s) to stdout",
-		t.cfg.PgTableName.String(), strings.Join(t.pgUsedColumns, ", ")))
+		"copy (select %s from only %s) to stdout",
+		strings.Join(t.pgUsedColumns, ", "), t.cfg.PgTableName.String()))
 	if err != nil {
 		return fmt.Errorf("could not copy: %v", err)
 	}

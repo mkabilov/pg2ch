@@ -404,7 +404,7 @@ func (r *Replicator) logErrCh() {
 		case <-r.ctx.Done():
 			return
 		case err := <-r.errCh:
-			log.Println(err)
+			log.Fatalln(err)
 		}
 	}
 }
