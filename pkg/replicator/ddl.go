@@ -76,7 +76,11 @@ func (r *Replicator) GenerateChDDL() error {
 					}
 				case columnCfg.IstoreKeysSuffix != "":
 					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%s Array(Int32)", chColName, columnCfg.IstoreKeysSuffix))
-					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%s Array(%s)", chColName, columnCfg.IstoreValuesSuffix, chColType))
+					if pgCol.BaseType == utils.PgAdjustBigIstore {
+						chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%s Array(Int64)", chColName, columnCfg.IstoreValuesSuffix))
+					} else {
+						chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%s Array(Int32)", chColName, columnCfg.IstoreValuesSuffix))
+					}
 				}
 				continue
 			}
