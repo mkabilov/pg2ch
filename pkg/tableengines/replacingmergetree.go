@@ -19,9 +19,9 @@ type replacingMergeTree struct {
 }
 
 // NewReplacingMergeTree instantiates replacingMergeTree
-func NewReplacingMergeTree(ctx context.Context, connUrl, dbName string, tblCfg config.Table, genID *uint64) *replacingMergeTree {
+func NewReplacingMergeTree(ctx context.Context, connUrl string, tblCfg config.Table, genID *uint64) *replacingMergeTree {
 	t := replacingMergeTree{
-		genericTable: newGenericTable(ctx, connUrl, dbName, tblCfg, genID),
+		genericTable: newGenericTable(ctx, connUrl, tblCfg, genID),
 		verColumn:    tblCfg.VerColumn,
 	}
 	if tblCfg.VerColumn != "" {

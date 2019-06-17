@@ -84,11 +84,11 @@ type genericTable struct {
 	minLSN       utils.LSN
 }
 
-func newGenericTable(ctx context.Context, connUrl, dbName string, tblCfg config.Table, genID *uint64) genericTable {
+func newGenericTable(ctx context.Context, connUrl string, tblCfg config.Table, genID *uint64) genericTable {
 	t := genericTable{
 		Mutex:         sync.Mutex{},
 		ctx:           ctx,
-		chLoader:      loader.New(connUrl, dbName),
+		chLoader:      loader.New(connUrl),
 		cfg:           tblCfg,
 		columnMapping: make(map[string]config.ChColumn),
 		chUsedColumns: make([]string, 0),
@@ -96,7 +96,7 @@ func newGenericTable(ctx context.Context, connUrl, dbName string, tblCfg config.
 		flushMutex:    &sync.Mutex{},
 		tupleColumns:  tblCfg.TupleColumns,
 		generationID:  genID,
-		bulkuploader:  bulkupload.New(connUrl, dbName, gzipFlushCount),
+		bulkuploader:  bulkupload.New(connUrl, gzipFlushCount),
 	}
 
 	for _, pgCol := range t.tupleColumns {
@@ -160,7 +160,7 @@ func (t *genericTable) truncateMainTable() error {
 }
 
 func (t *genericTable) truncateBufTable() error {
-	if t.cfg.ChBufferTable == "" {
+	if t.cfg.ChBufferTable.IsEmpty() {
 		return nil
 	}
 
@@ -369,7 +369,7 @@ func (t *genericTable) processChTuples(lsn utils.LSN, set chTuples) (mergeIsNeed
 		}
 	}
 
-	if t.cfg.ChBufferTable == "" {
+	if t.cfg.ChBufferTable.IsEmpty() {
 		return false, nil
 	}
 
@@ -461,7 +461,7 @@ func (t *genericTable) FlushToMainTable() error {
 		return fmt.Errorf("could not flush buffers: %v", err)
 	}
 
-	if t.cfg.ChBufferTable == "" || t.bufferFlushCnt == 0 {
+	if t.cfg.ChBufferTable.IsEmpty() || t.bufferFlushCnt == 0 {
 		return nil
 	}
 

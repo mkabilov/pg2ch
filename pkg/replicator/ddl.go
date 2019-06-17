@@ -129,7 +129,7 @@ func (r *Replicator) GenerateChDDL() error {
 
 		fmt.Println(tableDDL)
 
-		if tblCfg.ChBufferTable != "" {
+		if !tblCfg.ChBufferTable.IsEmpty() {
 			fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree()%s;",
 				tblCfg.ChBufferTable,
 				strings.Join(
@@ -137,7 +137,7 @@ func (r *Replicator) GenerateChDDL() error {
 				orderBy)
 		}
 
-		if tblCfg.ChSyncAuxTable != "" {
+		if !tblCfg.ChSyncAuxTable.IsEmpty() {
 			fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree() ORDER BY (%s, %s);\n",
 				tblCfg.ChSyncAuxTable,
 				strings.Join(

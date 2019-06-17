@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/mkabilov/pg2ch/pkg/config"
 )
 
 type CHLoader struct {
@@ -21,7 +23,7 @@ type CHLoader struct {
 	requestBuffer *bytes.Buffer
 }
 
-func New(baseURL, dbName string) *CHLoader {
+func New(baseURL string) *CHLoader {
 	var err error
 	ch := &CHLoader{
 		client:        &http.Client{},
@@ -33,12 +35,11 @@ func New(baseURL, dbName string) *CHLoader {
 	if err != nil {
 		log.Fatalf("could not create gzip writer: %v", err)
 	}
-	ch.urlValues.Add("database", dbName)
 
 	return ch
 }
 
-func insertQuery(tableName string, columns []string) string {
+func insertQuery(tableName config.ChTableName, columns []string) string {
 	columnsStr := ""
 	queryFormat := "INSERT INTO %s%s FORMAT TabSeparated"
 	if columns != nil && len(columns) > 0 {
@@ -48,20 +49,8 @@ func insertQuery(tableName string, columns []string) string {
 	return fmt.Sprintf(queryFormat, tableName, columnsStr)
 }
 
-func (c *CHLoader) urlParams() url.Values {
-	res := make(url.Values, len(url.Values{}))
-	for k, v := range c.urlValues {
-		res[k] = v
-	}
-
-	return res
-}
-
 func (c *CHLoader) performRequest(query string, reqBody io.Reader) error {
-	vals := c.urlParams()
-	vals.Add("query", query)
-
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+"?"+vals.Encode(), reqBody)
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"?query="+url.QueryEscape(query), reqBody)
 	if err != nil {
 		return fmt.Errorf("could not create request: %v", err)
 	}
@@ -94,7 +83,7 @@ func (c *CHLoader) BufferWrite(p []byte) error {
 	return nil
 }
 
-func (c *CHLoader) BufferFlush(tableName string, columns []string) error {
+func (c *CHLoader) BufferFlush(tableName config.ChTableName, columns []string) error {
 	if err := c.gzipWriter.Close(); err != nil {
 		return fmt.Errorf("could not close gzip writer: %v", err)
 	}
@@ -110,7 +99,7 @@ func (c *CHLoader) BufferFlush(tableName string, columns []string) error {
 }
 
 func (c *CHLoader) Exec(query string) error {
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+"?"+c.urlParams().Encode(), bytes.NewBufferString(query))
+	req, err := http.NewRequest(http.MethodPost, c.baseURL, bytes.NewBufferString(query))
 	if err != nil {
 		return fmt.Errorf("could not create request: %v", err)
 	}
@@ -136,7 +125,7 @@ func (c *CHLoader) Exec(query string) error {
 func (c *CHLoader) Query(query string) ([][]string, error) {
 	res := make([][]string, 0)
 
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+"?"+c.urlParams().Encode(), bytes.NewBufferString(query))
+	req, err := http.NewRequest(http.MethodPost, c.baseURL, bytes.NewBufferString(query))
 	if err != nil {
 		return nil, fmt.Errorf("could not create request: %v", err)
 	}

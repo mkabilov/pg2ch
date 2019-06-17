@@ -83,7 +83,7 @@ func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
 	return chType, nil
 }
 
-func InsertQuery(tableName string, columns []string) string {
+func InsertQuery(tableName config.ChTableName, columns []string) string {
 	columnsStr := ""
 	queryFormat := "INSERT INTO %s%s FORMAT TabSeparated"
 	if columns != nil && len(columns) > 0 {

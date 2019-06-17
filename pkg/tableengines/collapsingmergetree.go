@@ -19,9 +19,9 @@ type collapsingMergeTreeTable struct {
 }
 
 // NewCollapsingMergeTree instantiates collapsingMergeTreeTable
-func NewCollapsingMergeTree(ctx context.Context, connUrl, dbName string, tblCfg config.Table, genID *uint64) *collapsingMergeTreeTable {
+func NewCollapsingMergeTree(ctx context.Context, connUrl string, tblCfg config.Table, genID *uint64) *collapsingMergeTreeTable {
 	t := collapsingMergeTreeTable{
-		genericTable: newGenericTable(ctx, connUrl, dbName, tblCfg, genID),
+		genericTable: newGenericTable(ctx, connUrl, tblCfg, genID),
 		signColumn:   tblCfg.SignColumn,
 	}
 	t.chUsedColumns = append(t.chUsedColumns, tblCfg.SignColumn)

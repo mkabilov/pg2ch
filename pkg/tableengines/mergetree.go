@@ -17,12 +17,12 @@ type mergeTreeTable struct {
 }
 
 // NewMergeTree instantiates mergeTreeTable
-func NewMergeTree(ctx context.Context, connUrl, dbName string, tblCfg config.Table, genID *uint64) *mergeTreeTable {
+func NewMergeTree(ctx context.Context, connUrl string, tblCfg config.Table, genID *uint64) *mergeTreeTable {
 	t := mergeTreeTable{
-		genericTable: newGenericTable(ctx, connUrl, dbName, tblCfg, genID),
+		genericTable: newGenericTable(ctx, connUrl, tblCfg, genID),
 	}
 
-	if t.cfg.ChBufferTable == "" {
+	if t.cfg.ChBufferTable.IsEmpty() {
 		return &t
 	}
 

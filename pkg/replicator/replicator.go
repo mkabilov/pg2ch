@@ -53,7 +53,6 @@ type Replicator struct {
 	errCh    chan error
 
 	chConnString string
-	chDbName     string
 
 	pgDeltaConn *pgx.Conn
 
@@ -94,7 +93,6 @@ func New(cfg config.Config) *Replicator {
 		tablesToMerge:      make(map[config.PgTableName]struct{}),
 		inTxTables:         make(map[config.PgTableName]clickHouseTable),
 		tableLSN:           make(map[config.PgTableName]utils.LSN),
-		chDbName:           cfg.ClickHouse.Database,
 		chConnString:       fmt.Sprintf("http://%s:%d", cfg.ClickHouse.Host, cfg.ClickHouse.Port),
 		syncJobs:           make(chan config.PgTableName, cfg.SyncWorkers),
 		pgxConnConfig: cfg.Postgres.Merge(pgx.ConnConfig{
@@ -113,15 +111,15 @@ func (r *Replicator) newTable(tblName config.PgTableName, tblConfig config.Table
 			return nil, fmt.Errorf("ReplacingMergeTree requires either version or generation column to be set")
 		}
 
-		return tableengines.NewReplacingMergeTree(r.ctx, r.chConnString, r.chDbName, tblConfig, &r.generationID), nil
+		return tableengines.NewReplacingMergeTree(r.ctx, r.chConnString, tblConfig, &r.generationID), nil
 	case config.CollapsingMergeTree:
 		if tblConfig.SignColumn == "" {
 			return nil, fmt.Errorf("CollapsingMergeTree requires sign column to be set")
 		}
 
-		return tableengines.NewCollapsingMergeTree(r.ctx, r.chConnString, r.chDbName, tblConfig, &r.generationID), nil
+		return tableengines.NewCollapsingMergeTree(r.ctx, r.chConnString, tblConfig, &r.generationID), nil
 	case config.MergeTree:
-		return tableengines.NewMergeTree(r.ctx, r.chConnString, r.chDbName, tblConfig, &r.generationID), nil
+		return tableengines.NewMergeTree(r.ctx, r.chConnString, tblConfig, &r.generationID), nil
 	}
 
 	return nil, fmt.Errorf("%s table engine is not implemented", tblConfig.Engine)

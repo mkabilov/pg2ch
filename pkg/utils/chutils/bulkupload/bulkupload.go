@@ -10,13 +10,13 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 )
 
 type BulkUpload struct {
 	client       *http.Client
 	baseURL      string
-	urlValues    url.Values
 	pipeWriter   *io.PipeWriter
 	pipeReader   *io.PipeReader
 	gzipWriter   *gzip.Writer
@@ -26,16 +26,14 @@ type BulkUpload struct {
 	gzipBufSize  int
 }
 
-func New(baseURL, dbName string, gzipBufSize int) *BulkUpload {
+func New(baseURL string, gzipBufSize int) *BulkUpload {
 	var err error
 	ch := &BulkUpload{
 		client:      &http.Client{},
-		urlValues:   url.Values{},
 		baseURL:     strings.TrimRight(baseURL, "/") + "/",
 		gzipBufSize: gzipBufSize,
 	}
 
-	ch.urlValues.Add("database", dbName)
 	ch.pipeReader, ch.pipeWriter = io.Pipe()
 	ch.gzipWriter, err = gzip.NewWriterLevel(ch.pipeWriter, gzip.BestSpeed)
 
@@ -46,20 +44,8 @@ func New(baseURL, dbName string, gzipBufSize int) *BulkUpload {
 	return ch
 }
 
-func (c *BulkUpload) urlParams() url.Values {
-	res := make(url.Values, len(url.Values{}))
-	for k, v := range c.urlValues {
-		res[k] = v
-	}
-
-	return res
-}
-
 func (c *BulkUpload) performRequest(query string, body io.Reader) error {
-	vals := c.urlParams()
-	vals.Add("query", query)
-
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+"?"+vals.Encode(), body)
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"?query="+url.QueryEscape(query), body)
 	if err != nil {
 		return fmt.Errorf("could not create request: %v", err)
 	}
@@ -83,7 +69,7 @@ func (c *BulkUpload) performRequest(query string, body io.Reader) error {
 	return nil
 }
 
-func (c *BulkUpload) BulkUpload(tableName string, columns []string) error {
+func (c *BulkUpload) BulkUpload(tableName config.ChTableName, columns []string) error {
 	if err := c.performRequest(chutils.InsertQuery(tableName, columns), c.pipeReader); err != nil {
 		return err
 	}

@@ -125,7 +125,7 @@ func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (c
 		return cfg, fmt.Errorf("could not get columns for %s postgres table: %v", tblName.String(), err)
 	}
 
-	chColumns, err := tableinfo.TableChColumns(r.chConnString, r.chDbName, cfg.ChMainTable)
+	chColumns, err := tableinfo.TableChColumns(r.chConnString, cfg.ChMainTable)
 	if err != nil {
 		return cfg, fmt.Errorf("could not get columns for %q clickhouse table: %v", cfg.ChMainTable, err)
 	}

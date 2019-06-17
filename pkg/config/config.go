@@ -62,6 +62,11 @@ type PgTableName struct {
 	TableName  string
 }
 
+type ChTableName struct {
+	DatabaseName string
+	TableName    string
+}
+
 // ColumnProperty describes column properties
 type ColumnProperty struct {
 	FlattenIstore      bool   `yaml:"flatten_istore"`
@@ -75,9 +80,9 @@ type ColumnProperty struct {
 // Table contains information about the table
 type Table struct {
 	BufferTableRowIdColumn string                    `yaml:"buffer_table_row_id"`
-	ChSyncAuxTable         string                    `yaml:"sync_aux_table"`
-	ChBufferTable          string                    `yaml:"buffer_table"`
-	ChMainTable            string                    `yaml:"main_table"`
+	ChSyncAuxTable         ChTableName               `yaml:"sync_aux_table"`
+	ChBufferTable          ChTableName               `yaml:"buffer_table"`
+	ChMainTable            ChTableName               `yaml:"main_table"`
 	MaxBufferLength        int                       `yaml:"max_buffer_length"`
 	VerColumn              string                    `yaml:"ver_column"`
 	IsDeletedColumn        string                    `yaml:"is_deleted_column"`
@@ -261,7 +266,54 @@ func New(filepath string) (*Config, error) {
 		return nil, fmt.Errorf("db_filepath is not set")
 	}
 
+	for tblName, tbl := range cfg.Tables {
+		newTbl := cfg.Tables[tblName]
+		if !tbl.ChBufferTable.IsEmpty() && tbl.ChBufferTable.DatabaseName == "" {
+			newTbl.ChBufferTable.DatabaseName = cfg.ClickHouse.Database
+		}
+		if !tbl.ChMainTable.IsEmpty() && tbl.ChMainTable.DatabaseName == "" {
+			newTbl.ChMainTable.DatabaseName = cfg.ClickHouse.Database
+		}
+		if !tbl.ChSyncAuxTable.IsEmpty() && tbl.ChSyncAuxTable.DatabaseName == "" {
+			newTbl.ChSyncAuxTable.DatabaseName = cfg.ClickHouse.Database
+		}
+		cfg.Tables[tblName] = newTbl
+	}
+
 	return &cfg, nil
+}
+
+func (ct ChTableName) String() string {
+	return fmt.Sprintf("%s.%s", ct.DatabaseName, ct.TableName)
+}
+
+func (ct ChTableName) IsEmpty() bool {
+	return ct.DatabaseName == "" && ct.TableName == ""
+}
+
+func (ct *ChTableName) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var val string
+
+	if err := unmarshal(&val); err != nil {
+		return err
+	}
+
+	parts := strings.Split(val, ".")
+	if ln := len(parts); ln == 2 {
+		*ct = ChTableName{
+			DatabaseName: parts[0],
+			TableName:    parts[1],
+		}
+	} else if ln == 1 {
+		*ct = ChTableName{
+			DatabaseName: "",
+			TableName:    parts[0],
+		}
+	} else {
+		return fmt.Errorf("too many parts in the table name")
+	}
+
+	return nil
 }
 
 // UnmarshalYAML ...
