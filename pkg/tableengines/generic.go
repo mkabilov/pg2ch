@@ -403,9 +403,15 @@ func (t *genericTable) flushBuffer() error {
 
 func (t *genericTable) printSyncProgress() {
 	if t.syncRows%syncProgressBatch == 0 {
-		var eta time.Duration
+		var (
+			eta  time.Duration
+			left uint64
+		)
 		speed := float64(syncProgressBatch) / time.Since(t.syncLastBatchTime).Seconds()
-		left := t.syncTotalRows - t.syncRows
+		if t.syncTotalRows >= t.syncRows {
+			left = t.syncTotalRows - t.syncRows
+		}
+
 		if t.syncRows < t.syncTotalRows {
 			eta = time.Second * time.Duration(left/uint64(speed))
 		}
