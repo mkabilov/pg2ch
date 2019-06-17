@@ -21,6 +21,7 @@ func (r *Replicator) GenerateChDDL() error {
 	if err != nil {
 		return fmt.Errorf("could not start transaction on pg side: %v", err)
 	}
+	processedTables := make(map[config.ChTableName]struct{})
 
 	for tblName := range r.cfg.Tables {
 		var (
@@ -127,23 +128,32 @@ func (r *Replicator) GenerateChDDL() error {
 		}
 		tableDDL += orderBy + ";"
 
-		fmt.Println(tableDDL)
+		if _, ok := processedTables[tblCfg.ChMainTable]; !ok {
+			fmt.Println(tableDDL)
+			processedTables[tblCfg.ChMainTable] = struct{}{}
+		}
 
 		if !tblCfg.ChBufferTable.IsEmpty() {
-			fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree()%s;",
-				tblCfg.ChBufferTable,
-				strings.Join(
-					append(chColumnDDLs, fmt.Sprintf("    %s UInt64", tblCfg.BufferTableRowIdColumn)), ",\n"),
-				orderBy)
+			if _, ok := processedTables[tblCfg.ChBufferTable]; !ok {
+				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree()%s;",
+					tblCfg.ChBufferTable,
+					strings.Join(
+						append(chColumnDDLs, fmt.Sprintf("    %s UInt64", tblCfg.BufferTableRowIdColumn)), ",\n"),
+					orderBy)
+				processedTables[tblCfg.ChBufferTable] = struct{}{}
+			}
 		}
 
 		if !tblCfg.ChSyncAuxTable.IsEmpty() {
-			fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree() ORDER BY (%s, %s);\n",
-				tblCfg.ChSyncAuxTable,
-				strings.Join(
-					append(chColumnDDLs, fmt.Sprintf("    %s UInt64", tblCfg.BufferTableRowIdColumn), fmt.Sprintf("    %s UInt64", tblCfg.LsnColumnName)), ",\n"),
-				tblCfg.LsnColumnName,
-				tblCfg.BufferTableRowIdColumn)
+			if _, ok := processedTables[tblCfg.ChSyncAuxTable]; !ok {
+				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree() ORDER BY (%s, %s);\n",
+					tblCfg.ChSyncAuxTable,
+					strings.Join(
+						append(chColumnDDLs, fmt.Sprintf("    %s UInt64", tblCfg.BufferTableRowIdColumn), fmt.Sprintf("    %s UInt64", tblCfg.LsnColumnName)), ",\n"),
+					tblCfg.LsnColumnName,
+					tblCfg.BufferTableRowIdColumn)
+				processedTables[tblCfg.ChSyncAuxTable] = struct{}{}
+			}
 		}
 
 	}
