@@ -90,10 +90,15 @@ func (r *Replicator) GenerateChDDL() error {
 		}
 		pkColumns := make([]string, pkColumnNumb)
 
+		var partitionColumn string
 		for pgColName := range tblCfg.Columns {
 			pgCol := tblCfg.PgColumns[pgColName]
 			if pgCol.PkCol < 1 {
 				continue
+			}
+
+			if pgCol.IsTime() {
+				partitionColumn = pgColName
 			}
 
 			pkColumns[pgCol.PkCol-1] = pgColName
@@ -121,7 +126,11 @@ func (r *Replicator) GenerateChDDL() error {
 		tableDDL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = %s(%s)",
 			tblCfg.ChMainTable,
 			strings.Join(chColumnDDLs, ",\n"),
-			tblCfg.Engine.String(), engineParams)
+			tblCfg.Engine.String(),
+			engineParams)
+		if partitionColumn != "" {
+			tableDDL += fmt.Sprintf(" PARTITION BY toStartOfMonth(%s)", partitionColumn)
+		}
 
 		if len(pkColumns) > 0 {
 			orderBy = fmt.Sprintf(" ORDER BY(%s)", strings.Join(pkColumns, ", "))
