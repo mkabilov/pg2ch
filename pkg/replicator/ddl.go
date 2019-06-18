@@ -97,7 +97,7 @@ func (r *Replicator) GenerateChDDL() error {
 				continue
 			}
 
-			if pgCol.IsTime() {
+			if pgCol.IsTime() && partitionColumn == "" {
 				partitionColumn = pgColName
 			}
 
