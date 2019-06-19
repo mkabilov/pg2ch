@@ -348,7 +348,6 @@ func (t *genericTable) processChTuples(lsn utils.LSN, set chTuples) (mergeIsNeed
 				t.inSyncRowID++
 			} else {
 				if lsn < t.minLSN {
-					log.Printf("skipping tuples: %v < %v", uint64(lsn), uint64(t.minLSN))
 					return false, nil
 				}
 			}
