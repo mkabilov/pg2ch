@@ -48,7 +48,7 @@ func DecodeCopyToTuples(in []byte) (message.Row, error) {
 	result := make(message.Row, 0)
 
 	tupleKind := message.TupleText
-	colBuf := bytesBufPool.Get().(*bytes.Buffer)
+	colBuf := *bytesBufPool.Get().(*bytes.Buffer)
 	defer bytesBufPool.Put(&colBuf)
 
 	for i, n := 0, len(in); i < n; i++ {

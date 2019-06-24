@@ -68,7 +68,7 @@ func ParseIstore(str string) (keys, values []int, err error) {
 }
 
 func IstoreToArrays(str []byte) []byte {
-	tmpStr := bytesBufPool.Get().(*bytes.Buffer)
+	tmpStr := *bytesBufPool.Get().(*bytes.Buffer)
 	defer bytesBufPool.Put(&tmpStr)
 
 	keysBuf := bytes.NewBuffer([]byte{'['})
@@ -118,7 +118,7 @@ func IstoreToArrays(str []byte) []byte {
 
 //TODO check istore key value
 func IstoreValues(str []byte, min, max int) []byte {
-	tmpStr := bytesBufPool.Get().(*bytes.Buffer)
+	tmpStr := *bytesBufPool.Get().(*bytes.Buffer)
 	defer bytesBufPool.Put(&tmpStr)
 
 	values := make([][]byte, max-min+1)
@@ -168,7 +168,7 @@ func IstoreValues(str []byte, min, max int) []byte {
 }
 
 func Quote(str string) string {
-	colBuf := bytesBufPool.Get().(*bytes.Buffer)
+	colBuf := *bytesBufPool.Get().(*bytes.Buffer)
 	defer bytesBufPool.Put(&colBuf)
 
 	var runeTmp [utf8.UTFMax]byte
