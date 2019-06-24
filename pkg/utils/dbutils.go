@@ -18,7 +18,7 @@ const (
 
 var bytesBufPool = sync.Pool{
 	New: func() interface{} {
-		return &bytes.Buffer{}
+		return bytes.NewBuffer([]byte{})
 	}}
 
 //QuoteLiteral quotes string literal

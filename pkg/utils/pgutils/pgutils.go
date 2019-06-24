@@ -12,7 +12,7 @@ const copyNull = 'N'
 
 var bytesBufPool = sync.Pool{
 	New: func() interface{} {
-		return &bytes.Buffer{}
+		return bytes.NewBuffer([]byte{})
 	}}
 
 var decodeMap = map[byte]byte{
