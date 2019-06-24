@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"unicode/utf8"
 )
 
@@ -15,11 +14,6 @@ const (
 
 	lowerhex = "0123456789abcdef"
 )
-
-var bytesBufPool = sync.Pool{
-	New: func() interface{} {
-		return &bytes.Buffer{}
-	}}
 
 //QuoteLiteral quotes string literal
 func QuoteLiteral(str string) string {
@@ -68,9 +62,7 @@ func ParseIstore(str string) (keys, values []int, err error) {
 }
 
 func IstoreToArrays(str []byte) []byte {
-	tmpStr := *bytesBufPool.Get().(*bytes.Buffer)
-	defer bytesBufPool.Put(&tmpStr)
-
+	tmpStr := &bytes.Buffer{}
 	keysBuf := bytes.NewBuffer([]byte{'['})
 	valuesBuf := bytes.NewBuffer([]byte{'['})
 
@@ -118,9 +110,7 @@ func IstoreToArrays(str []byte) []byte {
 
 //TODO check istore key value
 func IstoreValues(str []byte, min, max int) []byte {
-	tmpStr := *bytesBufPool.Get().(*bytes.Buffer)
-	defer bytesBufPool.Put(&tmpStr)
-
+	tmpStr := &bytes.Buffer{}
 	values := make([][]byte, max-min+1)
 
 	isKey := true
@@ -168,9 +158,7 @@ func IstoreValues(str []byte, min, max int) []byte {
 }
 
 func Quote(str string) string {
-	colBuf := *bytesBufPool.Get().(*bytes.Buffer)
-	defer bytesBufPool.Put(&colBuf)
-
+	colBuf := &bytes.Buffer{}
 	var runeTmp [utf8.UTFMax]byte
 
 	for _, r := range []rune(str) {
