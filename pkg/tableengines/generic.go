@@ -80,7 +80,7 @@ type genericTable struct {
 	syncRows      uint64
 	syncTotalRows uint64
 
-	bulkuploader *bulkupload.BulkUpload
+	bulkUploader *bulkupload.BulkUpload
 	minLSN       utils.LSN
 }
 
@@ -96,7 +96,7 @@ func newGenericTable(ctx context.Context, connUrl string, tblCfg config.Table, g
 		flushMutex:    &sync.Mutex{},
 		tupleColumns:  tblCfg.TupleColumns,
 		generationID:  genID,
-		bulkuploader:  bulkupload.New(connUrl, gzipFlushCount),
+		bulkUploader:  bulkupload.New(connUrl, gzipFlushCount),
 	}
 
 	for _, pgCol := range t.tupleColumns {
@@ -245,7 +245,7 @@ func (t *genericTable) genSyncWrite(p []byte) error {
 		return fmt.Errorf("could not parse copy string: %v", err)
 	}
 
-	if err := t.bulkuploader.Write(t.convertRow(row)); err != nil {
+	if err := t.bulkUploader.Write(t.convertRow(row)); err != nil {
 		return err
 	}
 
@@ -273,7 +273,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
 
 	loaderErrCh := make(chan error, 1)
 	go func(errCh chan error) {
-		if err := t.bulkuploader.BulkUpload(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
+		if err := t.bulkUploader.BulkUpload(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
 			errCh <- err
 			log.Fatalf("could not sync upload: %v", err)
 		}
@@ -288,7 +288,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
 		return fmt.Errorf("could not copy: %v", err)
 	}
 
-	if err := t.bulkuploader.PipeFinishWriting(); err != nil {
+	if err := t.bulkUploader.PipeFinishWriting(); err != nil {
 		return fmt.Errorf("could not close gzip: %v", err)
 	}
 

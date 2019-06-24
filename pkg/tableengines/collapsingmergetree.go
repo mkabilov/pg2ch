@@ -44,16 +44,16 @@ func (t *collapsingMergeTreeTable) Write(p []byte) (int, error) {
 	}
 
 	if t.cfg.GenerationColumn != "" {
-		if err := t.bulkuploader.Write([]byte("\t0\t1")); err != nil { // generation id and sign
+		if err := t.bulkUploader.Write([]byte("\t0\t1")); err != nil { // generation id and sign
 			return 0, err
 		}
 	} else {
-		if err := t.bulkuploader.Write([]byte("\t1")); err != nil { // sign
+		if err := t.bulkUploader.Write([]byte("\t1")); err != nil { // sign
 			return 0, err
 		}
 	}
 
-	if err := t.bulkuploader.Write([]byte("\n")); err != nil {
+	if err := t.bulkUploader.Write([]byte("\n")); err != nil {
 		return 0, err
 	}
 

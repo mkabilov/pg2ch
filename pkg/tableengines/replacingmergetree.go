@@ -57,12 +57,12 @@ func (t *replacingMergeTree) Write(p []byte) (int, error) {
 	suffixes = append(suffixes, "0") // is_deleted
 
 	if len(suffixes) > 0 {
-		if err := t.bulkuploader.Write([]byte(strings.Join(suffixes, "\t"))); err != nil {
+		if err := t.bulkUploader.Write([]byte(strings.Join(suffixes, "\t"))); err != nil {
 			return 0, err
 		}
 	}
 
-	if err := t.bulkuploader.Write([]byte("\n")); err != nil {
+	if err := t.bulkUploader.Write([]byte("\n")); err != nil {
 		return 0, err
 	}
 

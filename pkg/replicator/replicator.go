@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -320,6 +321,16 @@ func (r *Replicator) Run() error {
 		}
 	}
 	r.tableLSNMutex.RUnlock()
+
+	sort.SliceStable(syncTables, func(i, j int) bool {
+		if len(syncTables[i].TableName) > 6 && len(syncTables[j].TableName) > 6 {
+			part1 := syncTables[i].TableName[len(syncTables[i].TableName)-7:]
+			part2 := syncTables[j].TableName[len(syncTables[j].TableName)-7:]
+			return part1 > part2
+		}
+
+		return false
+	})
 
 	if err := r.consumer.Run(r); err != nil {
 		return err

@@ -3,11 +3,17 @@ package pgutils
 import (
 	"bytes"
 	"fmt"
+	"sync"
 
 	"github.com/mkabilov/pg2ch/pkg/message"
 )
 
 const copyNull = 'N'
+
+var bytesBufPool = sync.Pool{
+	New: func() interface{} {
+		return &bytes.Buffer{}
+	}}
 
 var decodeMap = map[byte]byte{
 	'b':  '\b',
@@ -42,7 +48,9 @@ func DecodeCopyToTuples(in []byte) (message.Row, error) {
 	result := make(message.Row, 0)
 
 	tupleKind := message.TupleText
-	colBuf := &bytes.Buffer{}
+	colBuf := bytesBufPool.Get().(*bytes.Buffer)
+	defer bytesBufPool.Put(&colBuf)
+
 	for i, n := 0, len(in); i < n; i++ {
 		if in[i] == '\t' {
 			t := make([]byte, colBuf.Len())
