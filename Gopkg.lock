@@ -48,7 +48,7 @@
   branch = "master"
   name = "golang.org/x/crypto"
   packages = ["pbkdf2"]
-  revision = "f99c8df09eb5bff426315721bfa5f16a99cad32c"
+  revision = "cc06ce4a13d484c0101a9e92913248488a75786d"
 
 [[projects]]
   name = "golang.org/x/text"
