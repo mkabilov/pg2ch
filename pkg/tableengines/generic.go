@@ -316,6 +316,10 @@ func (t *genericTable) postSync(lsn utils.LSN) error {
 		return fmt.Errorf("could not flush buffer: %v", err)
 	}
 
+	if t.cfg.ChSyncAuxTable.IsEmpty() {
+		return nil
+	}
+
 	chColumns := strings.Join(t.chUsedColumns, ",")
 
 	log.Printf("%s: delta size: %s", t.cfg.PgTableName.String(), t.deltaSize(lsn))
@@ -328,7 +332,7 @@ func (t *genericTable) postSync(lsn utils.LSN) error {
 	}
 
 	if err := t.chLoader.Exec(fmt.Sprintf("TRUNCATE TABLE %s", t.cfg.ChSyncAuxTable)); err != nil {
-		return fmt.Errorf("could not truncat table: %v", err)
+		return fmt.Errorf("could not truncate table: %v", err)
 	}
 
 	t.inSync = false
