@@ -37,7 +37,7 @@ const (
 	timestampLength = 19 // ->2019-06-08 15:50:01<- clickhouse does not support milliseconds
 
 	syncProgressBatch = 1000000
-	gzipFlushCount    = 1000
+	gzipFlushCount    = 10000
 )
 
 var (
@@ -604,8 +604,10 @@ func (t *genericTable) bufTableColumns() []string {
 }
 
 func (t *genericTable) InitSync() error {
-	if err := t.chLoader.Exec(fmt.Sprintf("TRUNCATE TABLE %s", t.cfg.ChSyncAuxTable)); err != nil {
-		return fmt.Errorf("could not truncat table: %v", err)
+	if !t.cfg.ChSyncAuxTable.IsEmpty() {
+		if err := t.chLoader.Exec(fmt.Sprintf("TRUNCATE TABLE %s", t.cfg.ChSyncAuxTable)); err != nil {
+			return fmt.Errorf("could not truncat table: %v", err)
+		}
 	}
 	t.inSync = true
 
