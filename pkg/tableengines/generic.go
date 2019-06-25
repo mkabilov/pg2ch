@@ -604,11 +604,15 @@ func (t *genericTable) bufTableColumns() []string {
 }
 
 func (t *genericTable) InitSync() error {
-	if !t.cfg.ChSyncAuxTable.IsEmpty() {
-		if err := t.chLoader.Exec(fmt.Sprintf("TRUNCATE TABLE %s", t.cfg.ChSyncAuxTable)); err != nil {
-			return fmt.Errorf("could not truncat table: %v", err)
-		}
+	if t.cfg.ChSyncAuxTable.IsEmpty() {
+		return nil
+
 	}
+
+	if err := t.chLoader.Exec(fmt.Sprintf("TRUNCATE TABLE %s", t.cfg.ChSyncAuxTable)); err != nil {
+		return fmt.Errorf("could not truncat table: %v", err)
+	}
+
 	t.inSync = true
 
 	return nil
