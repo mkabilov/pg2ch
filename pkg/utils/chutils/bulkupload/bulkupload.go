@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/djherbis/buffer"
 	"github.com/djherbis/nio"
@@ -17,12 +18,18 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 )
 
+var bufPool = sync.Pool{
+	New: func() interface{} {
+		return buffer.New(100 * 1024 * 1024 * 1024)
+	}}
+
 type BulkUpload struct {
 	client       *http.Client
 	baseURL      string
 	pipeWriter   *nio.PipeWriter
 	pipeReader   *nio.PipeReader
 	gzipWriter   *gzip.Writer
+	buf          buffer.Buffer
 	tableName    string
 	columns      []string
 	gzipBufBytes int
@@ -35,10 +42,9 @@ func New(baseURL string, gzipBufSize int) *BulkUpload {
 		client:      &http.Client{},
 		baseURL:     strings.TrimRight(baseURL, "/") + "/",
 		gzipBufSize: gzipBufSize,
+		buf:         bufPool.Get().(buffer.Buffer),
 	}
-
-	buf := buffer.New(100 * 1024 * 1024 * 1024)
-	ch.pipeReader, ch.pipeWriter = nio.Pipe(buf)
+	ch.pipeReader, ch.pipeWriter = nio.Pipe(ch.buf)
 	ch.gzipWriter, err = gzip.NewWriterLevel(ch.pipeWriter, gzip.BestSpeed)
 
 	if err != nil {
@@ -101,5 +107,9 @@ func (c *BulkUpload) PipeFinishWriting() error {
 		return err
 	}
 
-	return c.pipeWriter.Close()
+	err := c.pipeWriter.Close()
+
+	bufPool.Put(c.buf)
+
+	return err
 }
