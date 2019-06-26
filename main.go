@@ -13,6 +13,7 @@ import (
 var (
 	configFile    = flag.String("config", "config.yaml", "path to the config file")
 	generateChDDL = flag.Bool("generate-ch-ddl", false, "generates clickhouse's tables ddl")
+	onlySync      = flag.Bool("sync", false, "sync tables and exit")
 	Version       = "devel"
 	Revision      = "devel"
 
@@ -46,9 +47,25 @@ func main() {
 	}
 
 	repl := replicator.New(*cfg)
+
 	if *generateChDDL {
 		if err := repl.GenerateChDDL(); err != nil {
 			fmt.Fprintf(os.Stderr, "could not create tables on the clickhouse side: %v\n", err)
+			os.Exit(1)
+		}
+	} else if *onlySync {
+		var err error
+
+		if err = repl.Init(); err == nil {
+			var syncTables []config.PgTableName
+
+			if syncTables, err = repl.GetSyncTables(); err == nil {
+				err = repl.Sync(syncTables)
+			}
+		}
+
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "could not sync tables: %v\n", err)
 			os.Exit(1)
 		}
 	} else {
