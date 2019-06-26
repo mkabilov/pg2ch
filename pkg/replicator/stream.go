@@ -14,15 +14,16 @@ func (r *Replicator) mergeTables() error {
 		if _, ok := r.inTxTables[tblName]; ok {
 			continue
 		}
+		tbl := r.chTables[tblName]
 
-		if err := r.chTables[tblName].FlushToMainTable(); err != nil {
+		if err := tbl.FlushToMainTable(); err != nil {
 			return fmt.Errorf("could not commit %s table: %v", tblName.String(), err)
 		}
 
 		delete(r.tablesToMerge, tblName)
 
-		if err := r.persStorage.Write(tblName.KeyName(), r.finalLSN.FormattedBytes()); err != nil {
-			return fmt.Errorf("could not store lsn for table %q", tblName.String())
+		if err := tbl.SaveLSN(r.finalLSN); err != nil {
+			return fmt.Errorf("could not store lsn for table %q: %v", tblName.String(), err)
 		}
 	}
 

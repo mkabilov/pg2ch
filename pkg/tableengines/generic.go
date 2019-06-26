@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx"
+	"github.com/peterbourgon/diskv"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
@@ -82,9 +83,10 @@ type genericTable struct {
 
 	bulkUploader *bulkupload.BulkUpload
 	minLSN       utils.LSN
+	persStorage  *diskv.Diskv
 }
 
-func newGenericTable(ctx context.Context, connUrl string, tblCfg config.Table, genID *uint64) genericTable {
+func newGenericTable(ctx context.Context, persStorage *diskv.Diskv, connUrl string, tblCfg config.Table, genID *uint64) genericTable {
 	t := genericTable{
 		Mutex:         sync.Mutex{},
 		ctx:           ctx,
@@ -97,6 +99,7 @@ func newGenericTable(ctx context.Context, connUrl string, tblCfg config.Table, g
 		tupleColumns:  tblCfg.TupleColumns,
 		generationID:  genID,
 		bulkUploader:  bulkupload.New(connUrl, gzipFlushCount),
+		persStorage:   persStorage,
 	}
 
 	for _, pgCol := range t.tupleColumns {
@@ -626,4 +629,12 @@ func (t *genericTable) Begin() error {
 func (t *genericTable) Commit() error {
 	t.Unlock()
 	return nil
+}
+
+func (t *genericTable) SaveLSN(lsn utils.LSN) error {
+	if t.inSync {
+		return nil
+	}
+
+	return t.persStorage.Write(t.cfg.PgTableName.KeyName(), lsn.FormattedBytes())
 }

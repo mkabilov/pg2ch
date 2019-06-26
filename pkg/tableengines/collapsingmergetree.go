@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx"
+	"github.com/peterbourgon/diskv"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
@@ -19,9 +20,9 @@ type collapsingMergeTreeTable struct {
 }
 
 // NewCollapsingMergeTree instantiates collapsingMergeTreeTable
-func NewCollapsingMergeTree(ctx context.Context, connUrl string, tblCfg config.Table, genID *uint64) *collapsingMergeTreeTable {
+func NewCollapsingMergeTree(ctx context.Context, persStorage *diskv.Diskv, connUrl string, tblCfg config.Table, genID *uint64) *collapsingMergeTreeTable {
 	t := collapsingMergeTreeTable{
-		genericTable: newGenericTable(ctx, connUrl, tblCfg, genID),
+		genericTable: newGenericTable(ctx, persStorage, connUrl, tblCfg, genID),
 		signColumn:   tblCfg.SignColumn,
 	}
 	t.chUsedColumns = append(t.chUsedColumns, tblCfg.SignColumn)

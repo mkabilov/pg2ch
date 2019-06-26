@@ -24,7 +24,6 @@
 #   go-tests = true
 #   unused-packages = true
 
-
 [[constraint]]
   name = "github.com/jackc/pgx"
   branch = "master"
@@ -36,6 +35,14 @@
 [[constraint]]
   name = "github.com/tidwall/redcon"
   version = "1.0.0"
+
+[[constraint]]
+  name = "gopkg.in/djherbis/buffer.v1"
+  version = "1.0.0"
+
+[[constraint]]
+  name = "gopkg.in/djherbis/nio.v2"
+  version = "2.0.3"
 
 [[constraint]]
   name = "gopkg.in/yaml.v2"

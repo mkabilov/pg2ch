@@ -44,12 +44,6 @@ func (r *Replicator) pgDisconnect() {
 	}
 }
 
-func (r *Replicator) pgDropRepSlot(tx *pgx.Tx) error {
-	_, err := tx.Exec(fmt.Sprintf("DROP_REPLICATION_SLOT %s", r.tempSlotName))
-
-	return err
-}
-
 func genTempSlotName(tblName config.PgTableName) string {
 	return fmt.Sprintf("%s_%s_%s", applicationName, tblName.SchemaName, tblName.TableName)
 }

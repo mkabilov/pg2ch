@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx"
+	"github.com/peterbourgon/diskv"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
@@ -19,9 +20,9 @@ type replacingMergeTree struct {
 }
 
 // NewReplacingMergeTree instantiates replacingMergeTree
-func NewReplacingMergeTree(ctx context.Context, connUrl string, tblCfg config.Table, genID *uint64) *replacingMergeTree {
+func NewReplacingMergeTree(ctx context.Context, persStorage *diskv.Diskv, connUrl string, tblCfg config.Table, genID *uint64) *replacingMergeTree {
 	t := replacingMergeTree{
-		genericTable: newGenericTable(ctx, connUrl, tblCfg, genID),
+		genericTable: newGenericTable(ctx, persStorage, connUrl, tblCfg, genID),
 		verColumn:    tblCfg.VerColumn,
 	}
 	if tblCfg.VerColumn != "" {

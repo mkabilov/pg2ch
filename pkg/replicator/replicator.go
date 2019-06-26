@@ -42,6 +42,7 @@ type clickHouseTable interface {
 
 	SetTupleColumns([]message.Column)
 	FlushToMainTable() error
+	SaveLSN(utils.LSN) error
 }
 
 type Replicator struct {
@@ -105,15 +106,15 @@ func (r *Replicator) newTable(tblName config.PgTableName, tblConfig config.Table
 			return nil, fmt.Errorf("ReplacingMergeTree requires either version or generation column to be set")
 		}
 
-		return tableengines.NewReplacingMergeTree(r.ctx, r.chConnString, tblConfig, &r.generationID), nil
+		return tableengines.NewReplacingMergeTree(r.ctx, r.persStorage, r.chConnString, tblConfig, &r.generationID), nil
 	case config.CollapsingMergeTree:
 		if tblConfig.SignColumn == "" {
 			return nil, fmt.Errorf("CollapsingMergeTree requires sign column to be set")
 		}
 
-		return tableengines.NewCollapsingMergeTree(r.ctx, r.chConnString, tblConfig, &r.generationID), nil
+		return tableengines.NewCollapsingMergeTree(r.ctx, r.persStorage, r.chConnString, tblConfig, &r.generationID), nil
 	case config.MergeTree:
-		return tableengines.NewMergeTree(r.ctx, r.chConnString, tblConfig, &r.generationID), nil
+		return tableengines.NewMergeTree(r.ctx, r.persStorage, r.chConnString, tblConfig, &r.generationID), nil
 	}
 
 	return nil, fmt.Errorf("%s table engine is not implemented", tblConfig.Engine)
@@ -153,6 +154,31 @@ func (r *Replicator) initTables() error {
 	return nil
 }
 
+func (r *Replicator) getTxAndLSN(conn *pgx.Conn, pgTableName config.PgTableName) (*pgx.Tx, utils.LSN, error) {
+	for attempt := 0; attempt < 10; attempt++ {
+		tx, err := r.pgBegin(conn)
+		if err != nil {
+			log.Printf("could not begin transaction: %v", err)
+			r.pgRollback(tx)
+			continue
+		}
+
+		tmpSlotName := genTempSlotName(pgTableName)
+		log.Printf("creating %q temporary logical replication slot for %q pg table (attempt: %d)",
+			tmpSlotName, pgTableName.String(), attempt)
+
+		lsn, err := r.pgCreateTempRepSlot(tx, tmpSlotName)
+		if err == nil {
+			return tx, lsn, nil
+		}
+
+		r.pgRollback(tx)
+		log.Printf("could not create logical replication slot: %v", err)
+	}
+
+	return nil, utils.InvalidLSN, fmt.Errorf("attempts exceeded")
+}
+
 func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 	conn, err := pgx.Connect(r.pgxConnConfig)
 	if err != nil {
@@ -169,20 +195,10 @@ func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 	}
 	conn.ConnInfo = connInfo
 
-	tx, err := r.pgBegin(conn)
+	tx, lsn, err := r.getTxAndLSN(conn, pgTableName)
 	if err != nil {
 		return err
 	}
-	defer r.pgRollback(tx)
-
-	tmpSlotName := genTempSlotName(pgTableName)
-	log.Printf("creating %q temporary logical replication slot for %q pg table",
-		tmpSlotName, pgTableName.String())
-	lsn, err := r.pgCreateTempRepSlot(tx, tmpSlotName)
-	if err != nil {
-		return err
-	}
-
 	log.Printf("lsn %v for table %q", uint64(lsn), pgTableName.String())
 
 	tbl := r.chTables[pgTableName]
@@ -190,7 +206,7 @@ func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 		return fmt.Errorf("could not sync: %v", err)
 	}
 
-	if err := r.persStorage.Write(pgTableName.KeyName(), lsn.FormattedBytes()); err != nil {
+	if err := tbl.SaveLSN(lsn); err != nil {
 		return fmt.Errorf("could not store lsn for table %s", pgTableName.String())
 	}
 
@@ -366,7 +382,7 @@ func (r *Replicator) Run() error {
 			continue
 		}
 
-		if err = r.persStorage.Write(tblName.KeyName(), r.finalLSN.FormattedBytes()); err != nil {
+		if err = tbl.SaveLSN(r.finalLSN); err != nil {
 			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 	}

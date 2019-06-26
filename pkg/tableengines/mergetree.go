@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx"
+	"github.com/peterbourgon/diskv"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
@@ -17,9 +18,9 @@ type mergeTreeTable struct {
 }
 
 // NewMergeTree instantiates mergeTreeTable
-func NewMergeTree(ctx context.Context, connUrl string, tblCfg config.Table, genID *uint64) *mergeTreeTable {
+func NewMergeTree(ctx context.Context, persStorage *diskv.Diskv, connUrl string, tblCfg config.Table, genID *uint64) *mergeTreeTable {
 	t := mergeTreeTable{
-		genericTable: newGenericTable(ctx, connUrl, tblCfg, genID),
+		genericTable: newGenericTable(ctx, persStorage, connUrl, tblCfg, genID),
 	}
 
 	if t.cfg.ChBufferTable.IsEmpty() {
