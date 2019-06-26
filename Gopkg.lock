@@ -4,18 +4,11 @@
 [[projects]]
   name = "github.com/djherbis/buffer"
   packages = [
-    ".",
     "limio",
     "wrapio"
   ]
   revision = "4972e2bf4a27dbd7c43140c959b85e8c1d2f5536"
   version = "v1.0"
-
-[[projects]]
-  name = "github.com/djherbis/nio"
-  packages = ["."]
-  revision = "824ca9017eeb2a422fdda7ae9dba05d3ab019dfa"
-  version = "v2.0.3"
 
 [[projects]]
   name = "github.com/google/btree"
@@ -95,6 +88,18 @@
   version = "v0.3.2"
 
 [[projects]]
+  name = "gopkg.in/djherbis/buffer.v1"
+  packages = ["."]
+  revision = "4972e2bf4a27dbd7c43140c959b85e8c1d2f5536"
+  version = "v1.0"
+
+[[projects]]
+  name = "gopkg.in/djherbis/nio.v2"
+  packages = ["."]
+  revision = "824ca9017eeb2a422fdda7ae9dba05d3ab019dfa"
+  version = "v2.0.3"
+
+[[projects]]
   name = "gopkg.in/yaml.v2"
   packages = ["."]
   revision = "51d6538a90f86fe93ac480b35f37b2be17fef232"
@@ -103,6 +108,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "f180152d769f996d9b1f3ee7e00b9111d2515074f79da0cd960e251219825f33"
+  inputs-digest = "cec1647adabd0e74fe14a943e8348c9b11a40560195a1a21500cae6d3937e77a"
   solver-name = "gps-cdcl"
   solver-version = 1
