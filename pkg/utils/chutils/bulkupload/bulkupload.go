@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -37,18 +36,10 @@ type BulkUpload struct {
 }
 
 func New(baseURL string, gzipBufSize int) *BulkUpload {
-	var err error
 	ch := &BulkUpload{
 		client:      &http.Client{},
 		baseURL:     strings.TrimRight(baseURL, "/") + "/",
 		gzipBufSize: gzipBufSize,
-		buf:         bufPool.Get().(buffer.Buffer),
-	}
-	ch.pipeReader, ch.pipeWriter = nio.Pipe(ch.buf)
-	ch.gzipWriter, err = gzip.NewWriterLevel(ch.pipeWriter, gzip.BestSpeed)
-
-	if err != nil {
-		log.Fatalf("could not init gzip: %v", err)
 	}
 
 	return ch
@@ -80,6 +71,15 @@ func (c *BulkUpload) performRequest(query string, body io.Reader) error {
 }
 
 func (c *BulkUpload) BulkUpload(tableName config.ChTableName, columns []string) error {
+	var err error
+	c.buf = bufPool.Get().(buffer.Buffer)
+	c.pipeReader, c.pipeWriter = nio.Pipe(c.buf)
+	c.gzipWriter, err = gzip.NewWriterLevel(c.pipeWriter, gzip.BestSpeed)
+
+	if err != nil {
+		return err
+	}
+
 	if err := c.performRequest(chutils.InsertQuery(tableName, columns), c.pipeReader); err != nil {
 		return err
 	}
