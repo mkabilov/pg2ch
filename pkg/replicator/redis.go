@@ -6,9 +6,11 @@ import (
 	"strings"
 
 	"github.com/tidwall/redcon"
+
+	"github.com/mkabilov/pg2ch/pkg/config"
 )
 
-const forbiddenError = "cannot modify '" + tableLSNKeyPrefix + "*' keys"
+const forbiddenError = "cannot modify '" + config.TableLSNKeyPrefix + "*' keys"
 
 func (r *Replicator) redisServer() {
 	err := redcon.ListenAndServe(r.cfg.RedisBind,
@@ -29,7 +31,7 @@ func (r *Replicator) redisServer() {
 				key := string(cmd.Args[1])
 				value := cmd.Args[2]
 
-				if strings.HasPrefix(key, tableLSNKeyPrefix) {
+				if strings.HasPrefix(key, config.TableLSNKeyPrefix) {
 					conn.WriteString(fmt.Sprintf("ERR: %s", forbiddenError))
 					return
 				}

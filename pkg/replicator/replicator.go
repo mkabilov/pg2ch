@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -24,9 +23,8 @@ import (
 )
 
 const (
-	applicationName   = "pg2ch"
-	tableLSNKeyPrefix = "table_lsn_"
-	generationIDKey   = "generation_id"
+	applicationName = "pg2ch"
+	generationIDKey = "generation_id"
 )
 
 type clickHouseTable interface {
@@ -66,9 +64,6 @@ type Replicator struct {
 	finalLSN utils.LSN
 	beginMsg message.Begin
 
-	tableLSNMutex *sync.RWMutex
-	tableLSN      map[config.PgTableName]utils.LSN
-
 	inTx               bool // indicates if we're inside tx
 	tablesToMergeMutex *sync.Mutex
 	tablesToMerge      map[config.PgTableName]struct{}        // tables to be merged
@@ -89,11 +84,9 @@ func New(cfg config.Config) *Replicator {
 		oidName:  make(map[utils.OID]config.PgTableName),
 		errCh:    make(chan error),
 
-		tableLSNMutex:      &sync.RWMutex{},
 		tablesToMergeMutex: &sync.Mutex{},
 		tablesToMerge:      make(map[config.PgTableName]struct{}),
 		inTxTables:         make(map[config.PgTableName]clickHouseTable),
-		tableLSN:           make(map[config.PgTableName]utils.LSN),
 		chConnString:       fmt.Sprintf("http://%s:%d", cfg.ClickHouse.Host, cfg.ClickHouse.Port),
 		syncJobs:           make(chan config.PgTableName, cfg.SyncWorkers),
 		pgxConnConfig: cfg.Postgres.Merge(pgx.ConnConfig{
@@ -197,9 +190,9 @@ func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 		return fmt.Errorf("could not sync: %v", err)
 	}
 
-	r.tableLSNMutex.Lock()
-	r.tableLSN[pgTableName] = lsn
-	r.tableLSNMutex.Unlock()
+	if err := r.persStorage.Write(pgTableName.KeyName(), lsn.FormattedBytes()); err != nil {
+		return fmt.Errorf("could not store lsn for table %s", pgTableName.String())
+	}
 
 	return nil
 }
@@ -222,35 +215,6 @@ func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
 }
 
 func (r *Replicator) readPersStorage() error {
-	r.tableLSNMutex.Lock()
-	defer r.tableLSNMutex.Unlock()
-
-	for key := range r.persStorage.Keys(nil) {
-		if !strings.HasPrefix(key, tableLSNKeyPrefix) {
-			continue
-		}
-		if !r.persStorage.Has(key) {
-			continue
-		}
-		val, err := r.persStorage.Read(key)
-		if err != nil {
-			return fmt.Errorf("could not read %v key: %v", err)
-		}
-
-		tblName := &config.PgTableName{}
-		if err := tblName.Parse(key[len(tableLSNKeyPrefix):]); err != nil {
-			return err
-		}
-
-		lsn := utils.InvalidLSN
-		if err := lsn.Parse(string(val)); err != nil {
-			return fmt.Errorf("could not parse lsn %q: %v", string(val), err)
-		}
-
-		r.tableLSN[*tblName] = lsn
-		log.Printf("consuming changes for table %s starting from %v lsn position", tblName.String(), lsn)
-	}
-
 	if !r.persStorage.Has(generationIDKey) {
 		return nil
 	}
@@ -265,7 +229,7 @@ func (r *Replicator) readPersStorage() error {
 		log.Printf("incorrect value for generation_id in the pers storage: %v", err)
 	}
 
-	r.generationID = uint64(genID)
+	r.generationID = genID
 	log.Printf("generation_id: %v", r.generationID)
 
 	return nil
@@ -291,9 +255,8 @@ func (r *Replicator) Run() error {
 
 	syncNeeded := false
 
-	r.tableLSNMutex.RLock()
 	for tblName := range r.cfg.Tables {
-		if _, ok := r.tableLSN[tblName]; !ok {
+		if !r.persStorage.Has(tblName.KeyName()) {
 			syncNeeded = true
 			break
 		}
@@ -310,7 +273,7 @@ func (r *Replicator) Run() error {
 	syncTables := make([]config.PgTableName, 0)
 	if syncNeeded {
 		for tblName := range r.cfg.Tables {
-			if _, ok := r.tableLSN[tblName]; ok || r.cfg.Tables[tblName].InitSyncSkip {
+			if !r.persStorage.Has(tblName.KeyName()) || r.cfg.Tables[tblName].InitSyncSkip {
 				continue
 			}
 
@@ -320,7 +283,6 @@ func (r *Replicator) Run() error {
 			syncTables = append(syncTables, tblName)
 		}
 	}
-	r.tableLSNMutex.RUnlock()
 
 	sort.SliceStable(syncTables, func(i, j int) bool {
 		if len(syncTables[i].TableName) > 6 && len(syncTables[j].TableName) > 6 {
@@ -376,7 +338,7 @@ func (r *Replicator) Run() error {
 			continue
 		}
 
-		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), r.finalLSN.FormattedBytes()); err != nil {
+		if err := r.persStorage.Write(tblName.KeyName(), r.finalLSN.FormattedBytes()); err != nil {
 			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 	}

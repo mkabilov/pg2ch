@@ -20,13 +20,10 @@ func (r *Replicator) mergeTables() error {
 		}
 
 		delete(r.tablesToMerge, tblName)
-		r.tableLSNMutex.Lock()
-		r.tableLSN[tblName] = r.finalLSN
-		if err := r.persStorage.Write(tableLSNKeyPrefix+tblName.String(), r.finalLSN.FormattedBytes()); err != nil {
-			r.tableLSNMutex.Unlock()
-			return fmt.Errorf("could not store lsn for table %s", tblName.String())
+
+		if err := r.persStorage.Write(tblName.KeyName(), r.finalLSN.FormattedBytes()); err != nil {
+			return fmt.Errorf("could not store lsn for table %q", tblName.String())
 		}
-		r.tableLSNMutex.Unlock()
 	}
 
 	r.advanceLSN()
@@ -35,6 +32,8 @@ func (r *Replicator) mergeTables() error {
 }
 
 func (r *Replicator) getTable(oid utils.OID) (chTbl clickHouseTable, skip bool, startTx bool) {
+	var lsn utils.LSN
+
 	tblName, ok := r.oidName[oid]
 	if !ok {
 		skip = true
@@ -51,12 +50,11 @@ func (r *Replicator) getTable(oid utils.OID) (chTbl clickHouseTable, skip bool, 
 		r.tablesToMerge[tblName] = struct{}{}
 	}
 
-	r.tableLSNMutex.RLock()
-	lsn, ok := r.tableLSN[tblName]
-	if !ok {
+	if tblKey := tblName.KeyName(); !r.persStorage.Has(tblKey) {
 		skip = false
+	} else if err := lsn.Parse(r.persStorage.ReadString(tblKey)); err != nil {
+		log.Fatalf("incorrect lsn stored for %q table: %v", tblName.String(), err)
 	}
-	r.tableLSNMutex.RUnlock()
 
 	skip = r.finalLSN <= lsn
 	if _, ok := r.inTxTables[tblName]; !ok && !skip { // TODO: skip adding tables with no buffer table

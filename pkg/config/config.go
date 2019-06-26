@@ -28,6 +28,8 @@ const (
 	defaultVerColumn              = "ver"
 	defaultLsnColumn              = "lsn"
 	defaultIsDeletedColumn        = "is_deleted"
+
+	TableLSNKeyPrefix = "table_lsn_"
 )
 
 type tableEngine int
@@ -207,6 +209,21 @@ func (tn *PgTableName) String() string {
 	}
 
 	return fmt.Sprintf(`%s.%s`, tn.SchemaName, tn.TableName)
+}
+
+func (tn PgTableName) KeyName() string {
+	return TableLSNKeyPrefix + tn.String()
+}
+
+func (tn *PgTableName) ParseKey(key string) error {
+	if len(key) < len(TableLSNKeyPrefix) {
+		return fmt.Errorf("too short key name")
+	}
+	if !strings.HasPrefix(key, TableLSNKeyPrefix) {
+		return fmt.Errorf("wrong key: %v", key)
+	}
+
+	return tn.Parse(key[len(TableLSNKeyPrefix):])
 }
 
 // New instantiates config

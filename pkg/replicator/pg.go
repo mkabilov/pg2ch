@@ -187,15 +187,23 @@ func (r *Replicator) pgBegin(pgxConn *pgx.Conn) (*pgx.Tx, error) {
 }
 
 func (r *Replicator) minLSN() utils.LSN {
-	r.tableLSNMutex.RLock()
-	defer r.tableLSNMutex.RUnlock()
-
 	result := utils.InvalidLSN
-	if len(r.tableLSN) == 0 {
-		return result
-	}
 
-	for _, lsn := range r.tableLSN {
+	for key := range r.persStorage.Keys(nil) {
+		var (
+			tblName config.PgTableName
+			lsn     utils.LSN
+		)
+
+		if err := tblName.ParseKey(key); err != nil {
+			continue
+		}
+
+		if err := lsn.Parse(r.persStorage.ReadString(key)); err != nil {
+			log.Printf("could not parse lsn for %q key: %v", key, err)
+			continue
+		}
+
 		if !result.IsValid() || lsn < result {
 			result = lsn
 		}
