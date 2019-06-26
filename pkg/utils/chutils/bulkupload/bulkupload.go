@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,13 +18,19 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 )
 
-var bufPool = sync.Pool{
-	New: func() interface{} {
-		return buffer.New(100 * 1024 * 1024 * 1024)
-	}}
+var (
+	bufPool = sync.Pool{
+		New: func() interface{} {
+			return buffer.New(10 * 1024 * 1024 * 1024)
+		}}
+
+	clientsPool = sync.Pool{
+		New: func() interface{} {
+			return &http.Client{}
+		}}
+)
 
 type BulkUpload struct {
-	client       *http.Client
 	baseURL      string
 	pipeWriter   *nio.PipeWriter
 	pipeReader   *nio.PipeReader
@@ -37,7 +44,6 @@ type BulkUpload struct {
 
 func New(baseURL string, gzipBufSize int) *BulkUpload {
 	ch := &BulkUpload{
-		client:      &http.Client{},
 		baseURL:     strings.TrimRight(baseURL, "/") + "/",
 		gzipBufSize: gzipBufSize,
 	}
@@ -52,11 +58,16 @@ func (c *BulkUpload) performRequest(query string, body io.Reader) error {
 	}
 	req.Header.Add("Content-Encoding", "gzip")
 
-	resp, err := c.client.Do(req)
+	client := *clientsPool.Get().(*http.Client)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("could not perform request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("could not close body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, err := ioutil.ReadAll(resp.Body)
@@ -66,6 +77,7 @@ func (c *BulkUpload) performRequest(query string, body io.Reader) error {
 
 		return fmt.Errorf("got %d status code from clickhouse: %s", resp.StatusCode, string(body))
 	}
+	clientsPool.Put(&client)
 
 	return nil
 }
