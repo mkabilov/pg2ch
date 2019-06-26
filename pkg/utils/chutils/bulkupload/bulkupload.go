@@ -21,7 +21,7 @@ import (
 var (
 	bufPool = sync.Pool{
 		New: func() interface{} {
-			return buffer.New(10 * 1024 * 1024 * 1024)
+			return buffer.New(1 * 1024 * 1024)
 		}}
 
 	clientsPool = sync.Pool{
