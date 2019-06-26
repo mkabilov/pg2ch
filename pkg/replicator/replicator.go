@@ -214,17 +214,12 @@ func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
 	}
 }
 
-func (r *Replicator) readPersStorage() error {
+func (r *Replicator) readGenerationID() error {
 	if !r.persStorage.Has(generationIDKey) {
 		return nil
 	}
 
-	val, err := r.persStorage.Read(generationIDKey)
-	if err != nil {
-		return fmt.Errorf("could not read generation id: %v", err)
-	}
-
-	genID, err := strconv.ParseUint(string(val), 10, 32)
+	genID, err := strconv.ParseUint(r.persStorage.ReadString(generationIDKey), 10, 32)
 	if err != nil {
 		log.Printf("incorrect value for generation_id in the pers storage: %v", err)
 	}
@@ -249,7 +244,7 @@ func (r *Replicator) Run() error {
 		return err
 	}
 
-	if err := r.readPersStorage(); err != nil {
+	if err := r.readGenerationID(); err != nil {
 		return fmt.Errorf("could not get start lsn positions: %v", err)
 	}
 
@@ -273,7 +268,7 @@ func (r *Replicator) Run() error {
 	syncTables := make([]config.PgTableName, 0)
 	if syncNeeded {
 		for tblName := range r.cfg.Tables {
-			if !r.persStorage.Has(tblName.KeyName()) || r.cfg.Tables[tblName].InitSyncSkip {
+			if r.persStorage.Has(tblName.KeyName()) || r.cfg.Tables[tblName].InitSyncSkip {
 				continue
 			}
 
