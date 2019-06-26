@@ -295,7 +295,7 @@ func (r *Replicator) GetSyncTables() ([]config.PgTableName, error) {
 	return nil, nil
 }
 
-func (r *Replicator) Sync(syncTables []config.PgTableName) error {
+func (r *Replicator) Sync(syncTables []config.PgTableName, async bool) error {
 	if len(syncTables) == 0 {
 		return nil
 	}
@@ -310,13 +310,20 @@ func (r *Replicator) Sync(syncTables []config.PgTableName) error {
 	}
 	close(r.syncJobs)
 
-	go func() {
+	if async {
+		go func() {
+			for i := 0; i < r.cfg.SyncWorkers; i++ {
+				<-doneCh
+			}
+
+			log.Printf("all synced!")
+		}()
+	} else {
 		for i := 0; i < r.cfg.SyncWorkers; i++ {
 			<-doneCh
 		}
-
 		log.Printf("all synced!")
-	}()
+	}
 
 	return nil
 }
@@ -349,7 +356,7 @@ func (r *Replicator) Run() error {
 		go r.redisServer()
 	}
 
-	if err = r.Sync(syncTables); err != nil {
+	if err = r.Sync(syncTables, true); err != nil {
 		return err
 	}
 
