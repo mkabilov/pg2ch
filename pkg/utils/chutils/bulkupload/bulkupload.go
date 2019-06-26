@@ -1,7 +1,6 @@
 package bulkupload
 
 import (
-	"compress/gzip"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -23,11 +22,11 @@ var bufPool = sync.Pool{
 	}}
 
 type BulkUpload struct {
-	client       *http.Client
-	baseURL      string
-	pipeWriter   *nio.PipeWriter
-	pipeReader   *nio.PipeReader
-	gzipWriter   *gzip.Writer
+	client     *http.Client
+	baseURL    string
+	pipeWriter *nio.PipeWriter
+	pipeReader *nio.PipeReader
+	//gzipWriter   *gzip.Writer
 	buf          buffer.Buffer
 	tableName    string
 	columns      []string
@@ -50,7 +49,7 @@ func (c *BulkUpload) performRequest(query string, body io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("could not create request: %v", err)
 	}
-	req.Header.Add("Content-Encoding", "gzip")
+	//req.Header.Add("Content-Encoding", "gzip")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -71,14 +70,14 @@ func (c *BulkUpload) performRequest(query string, body io.Reader) error {
 }
 
 func (c *BulkUpload) BulkUpload(tableName config.ChTableName, columns []string) error {
-	var err error
+	//var err error
 	c.buf = bufPool.Get().(buffer.Buffer)
 	c.pipeReader, c.pipeWriter = nio.Pipe(c.buf)
-	c.gzipWriter, err = gzip.NewWriterLevel(c.pipeWriter, gzip.BestSpeed)
+	//c.gzipWriter, err = gzip.NewWriterLevel(c.pipeWriter, gzip.BestSpeed)
 
-	if err != nil {
-		return err
-	}
+	//if err != nil {
+	//	return err
+	//}
 
 	if err := c.performRequest(chutils.InsertQuery(tableName, columns), c.pipeReader); err != nil {
 		return err
@@ -88,27 +87,30 @@ func (c *BulkUpload) BulkUpload(tableName config.ChTableName, columns []string) 
 }
 
 func (c *BulkUpload) Write(p []byte) error {
-	c.gzipBufBytes += len(p)
+	//c.gzipBufBytes += len(p)
+	//
+	//_, err := c.gzipWriter.Write(p)
+	//
+	//if c.gzipBufBytes >= c.gzipBufSize {
+	//	if err := c.gzipWriter.Flush(); err != nil {
+	//		return fmt.Errorf("could not flush gzip: %v", err)
+	//	}
+	//	c.gzipBufBytes = 0
+	//}
 
-	_, err := c.gzipWriter.Write(p)
-
-	if c.gzipBufBytes >= c.gzipBufSize {
-		if err := c.gzipWriter.Flush(); err != nil {
-			return fmt.Errorf("could not flush gzip: %v", err)
-		}
-		c.gzipBufBytes = 0
-	}
+	_, err := c.pipeWriter.Write(p)
 
 	return err
 }
 
 func (c *BulkUpload) PipeFinishWriting() error {
-	if err := c.gzipWriter.Close(); err != nil {
-		return err
-	}
+	//if err := c.gzipWriter.Close(); err != nil {
+	//	return err
+	//}
 
 	err := c.pipeWriter.Close()
 
+	c.buf.Reset()
 	bufPool.Put(c.buf)
 
 	return err
