@@ -60,22 +60,27 @@ func (r *Replicator) pgCreateTempRepSlot(tx *pgx.Tx, slotName string) (utils.LSN
 		lsn                               utils.LSN
 	)
 
-	row := tx.QueryRow(fmt.Sprintf("CREATE_REPLICATION_SLOT %s TEMPORARY LOGICAL %s USE_SNAPSHOT",
-		slotName, utils.OutputPlugin))
+	for attempt := 0; attempt < 10; attempt++ {
+		row := tx.QueryRow(fmt.Sprintf("CREATE_REPLICATION_SLOT %s TEMPORARY LOGICAL %s USE_SNAPSHOT",
+			slotName, utils.OutputPlugin))
 
-	if err := row.Scan(&r.tempSlotName, &snapshotLSN, &snapshotName, &plugin); err != nil {
-		return utils.InvalidLSN, fmt.Errorf("could not scan: %v", err)
+		if err := row.Scan(&r.tempSlotName, &snapshotLSN, &snapshotName, &plugin); err == nil {
+			if err := lsn.Parse(snapshotLSN.String); err != nil {
+				log.Printf("could not parse LSN: %v", err)
+			}
+		} else {
+			log.Printf("could not query: %v", err)
+		}
+		if _, err := tx.Exec(fmt.Sprintf("DROP_REPLICATION_SLOT %s", slotName)); err != nil {
+			log.Printf("could not drop replication slot %s: %v", slotName, err)
+		}
+
+		if lsn != utils.InvalidLSN {
+			return lsn, nil
+		}
 	}
 
-	if err := lsn.Parse(snapshotLSN.String); err != nil {
-		return utils.InvalidLSN, fmt.Errorf("could not parse LSN: %v", err)
-	}
-
-	if _, err := tx.Exec(fmt.Sprintf("DROP_REPLICATION_SLOT %s", slotName)); err != nil {
-		return utils.InvalidLSN, fmt.Errorf("could not drop replication slot: %v", err)
-	}
-
-	return lsn, nil
+	return utils.InvalidLSN, fmt.Errorf("could not create repl slot: attempts exceeded")
 }
 
 func (r *Replicator) checkPgSlotAndPub(tx *pgx.Tx) error {
