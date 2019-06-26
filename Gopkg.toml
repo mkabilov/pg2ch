@@ -26,6 +26,14 @@
 
 
 [[constraint]]
+  name = "github.com/djherbis/buffer"
+  version = "1.0.0"
+
+[[constraint]]
+  name = "github.com/djherbis/nio"
+  version = "2.0.3"
+
+[[constraint]]
   name = "github.com/jackc/pgx"
   branch = "master"
 

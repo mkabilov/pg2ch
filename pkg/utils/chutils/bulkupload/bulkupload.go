@@ -10,6 +10,9 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/djherbis/buffer"
+	"github.com/djherbis/nio"
+
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 )
@@ -17,8 +20,8 @@ import (
 type BulkUpload struct {
 	client       *http.Client
 	baseURL      string
-	pipeWriter   *io.PipeWriter
-	pipeReader   *io.PipeReader
+	pipeWriter   *nio.PipeWriter
+	pipeReader   *nio.PipeReader
 	gzipWriter   *gzip.Writer
 	tableName    string
 	columns      []string
@@ -34,7 +37,8 @@ func New(baseURL string, gzipBufSize int) *BulkUpload {
 		gzipBufSize: gzipBufSize,
 	}
 
-	ch.pipeReader, ch.pipeWriter = io.Pipe()
+	buf := buffer.New(100 * 1024 * 1024 * 1024)
+	ch.pipeReader, ch.pipeWriter = nio.Pipe(buf)
 	ch.gzipWriter, err = gzip.NewWriterLevel(ch.pipeWriter, gzip.BestSpeed)
 
 	if err != nil {
