@@ -52,6 +52,7 @@ type Replicator struct {
 	errCh    chan error
 
 	chConnString string
+	onlySync     bool
 
 	pgDeltaConn *pgx.Conn
 
@@ -230,7 +231,7 @@ func (r *Replicator) readGenerationID() error {
 	return nil
 }
 
-func (r *Replicator) Run() error {
+func (r *Replicator) Init() error {
 	r.persStorage = diskv.New(diskv.Options{
 		BasePath:     r.cfg.PersStoragePath,
 		CacheSizeMax: 1024 * 1024, // 1MB
@@ -239,7 +240,7 @@ func (r *Replicator) Run() error {
 	if err := r.pgConnect(); err != nil {
 		return fmt.Errorf("could not connect to postgresql: %v", err)
 	}
-	defer r.pgDisconnect()
+
 	if err := r.pgCheck(); err != nil {
 		return err
 	}
@@ -248,6 +249,13 @@ func (r *Replicator) Run() error {
 		return fmt.Errorf("could not get start lsn positions: %v", err)
 	}
 
+	if err := r.initTables(); err != nil {
+		return fmt.Errorf("could not init tables: %v", err)
+	}
+}
+
+func (r *Replicator) getSyncTables() (*[]config.PgTableName, error)
+{
 	syncNeeded := false
 
 	for tblName := range r.cfg.Tables {
@@ -256,9 +264,32 @@ func (r *Replicator) Run() error {
 			break
 		}
 	}
+}
 
-	if err := r.initTables(); err != nil {
-		return fmt.Errorf("could not init tables: %v", err)
+func (r *Replicator) Sync() error {
+}
+
+func (r *Replicator) Finalize() error {
+	r.pgDisconnect()
+}
+
+func (r *Replicator) Run() error {
+	if err := r.Init(); err != nil {
+		return err
+	}
+
+	if err := r.Sync(); err != nil {
+		return err
+	}
+
+	syncNeeded := false
+
+	r.tableLSNMutex.RLock()
+	for tblName := range r.cfg.Tables {
+		if _, ok := r.tableLSN[tblName]; !ok {
+			syncNeeded = true
+			break
+		}
 	}
 
 	r.finalLSN = r.minLSN()
@@ -317,6 +348,10 @@ func (r *Replicator) Run() error {
 			}
 
 			log.Printf("all synced!")
+
+			if r.onlySync {
+				os.Exit(0)
+			}
 		}()
 	}
 
