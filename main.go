@@ -54,20 +54,24 @@ func main() {
 			os.Exit(1)
 		}
 	} else if *onlySync {
-		if err := repl.Init(); err != nil {
-			fmt.Fprintf(os.Stderr, "could not init: %v\n", err)
-			os.Exit(1)
+		var err error
+
+		if err = repl.Init(); err == nil {
+			var syncTables []config.PgTableName
+
+			if syncTables, err = repl.GetSyncTables(); err == nil {
+				err = repl.Sync(syncTables)
+			}
 		}
-		if err := repl.Sync(); err != nil {
+
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "could not sync tables: %v\n", err)
 			os.Exit(1)
 		}
-		repl.Finalize()
 	} else {
 		if err := repl.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "could not start: %v\n", err)
 			os.Exit(1)
 		}
-		repl.Finalize()
 	}
 }

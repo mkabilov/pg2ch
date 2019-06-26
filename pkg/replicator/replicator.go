@@ -52,7 +52,6 @@ type Replicator struct {
 	errCh    chan error
 
 	chConnString string
-	onlySync     bool
 
 	pgDeltaConn *pgx.Conn
 
@@ -252,10 +251,11 @@ func (r *Replicator) Init() error {
 	if err := r.initTables(); err != nil {
 		return fmt.Errorf("could not init tables: %v", err)
 	}
+
+	return nil
 }
 
-func (r *Replicator) getSyncTables() (*[]config.PgTableName, error)
-{
+func (r *Replicator) GetSyncTables() ([]config.PgTableName, error) {
 	syncNeeded := false
 
 	for tblName := range r.cfg.Tables {
@@ -264,63 +264,81 @@ func (r *Replicator) getSyncTables() (*[]config.PgTableName, error)
 			break
 		}
 	}
-}
 
-func (r *Replicator) Sync() error {
-}
-
-func (r *Replicator) Finalize() error {
-	r.pgDisconnect()
-}
-
-func (r *Replicator) Run() error {
-	if err := r.Init(); err != nil {
-		return err
-	}
-
-	if err := r.Sync(); err != nil {
-		return err
-	}
-
-	syncNeeded := false
-
-	r.tableLSNMutex.RLock()
-	for tblName := range r.cfg.Tables {
-		if _, ok := r.tableLSN[tblName]; !ok {
-			syncNeeded = true
-			break
-		}
-	}
-
-	r.finalLSN = r.minLSN()
-	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Postgres.ConnConfig,
-		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.finalLSN)
-
-	syncTables := make([]config.PgTableName, 0)
 	if syncNeeded {
+		syncTables := make([]config.PgTableName, 0)
+
 		for tblName := range r.cfg.Tables {
 			if r.persStorage.Has(tblName.KeyName()) || r.cfg.Tables[tblName].InitSyncSkip {
 				continue
 			}
 
 			if err := r.chTables[tblName].InitSync(); err != nil {
-				return fmt.Errorf("could not init sync %q: %v", tblName, err)
+				return nil, fmt.Errorf("could not init sync %q: %v", tblName, err)
 			}
 			syncTables = append(syncTables, tblName)
 		}
+
+		sort.SliceStable(syncTables, func(i, j int) bool {
+			if len(syncTables[i].TableName) > 6 && len(syncTables[j].TableName) > 6 {
+				part1 := syncTables[i].TableName[len(syncTables[i].TableName)-7:]
+				part2 := syncTables[j].TableName[len(syncTables[j].TableName)-7:]
+				return part1 > part2
+			}
+
+			return false
+		})
+
+		return syncTables, nil
 	}
 
-	sort.SliceStable(syncTables, func(i, j int) bool {
-		if len(syncTables[i].TableName) > 6 && len(syncTables[j].TableName) > 6 {
-			part1 := syncTables[i].TableName[len(syncTables[i].TableName)-7:]
-			part2 := syncTables[j].TableName[len(syncTables[j].TableName)-7:]
-			return part1 > part2
+	return nil, nil
+}
+
+func (r *Replicator) Sync(syncTables []config.PgTableName) error {
+	if len(syncTables) == 0 {
+		return nil
+	}
+
+	doneCh := make(chan struct{}, r.cfg.SyncWorkers)
+	for i := 0; i < r.cfg.SyncWorkers; i++ {
+		go r.syncJob(i, doneCh)
+	}
+
+	for _, tblName := range syncTables {
+		r.syncJobs <- tblName
+	}
+	close(r.syncJobs)
+
+	go func() {
+		for i := 0; i < r.cfg.SyncWorkers; i++ {
+			<-doneCh
 		}
 
-		return false
-	})
+		log.Printf("all synced!")
+	}()
 
-	if err := r.consumer.Run(r); err != nil {
+	return nil
+}
+
+func (r *Replicator) Run() error {
+	var syncTables []config.PgTableName = nil
+	var err error
+
+	if err = r.Init(); err != nil {
+		return err
+	}
+	defer r.pgDisconnect()
+
+	r.finalLSN = r.minLSN()
+	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Postgres.ConnConfig,
+		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.finalLSN)
+
+	if syncTables, err = r.GetSyncTables(); err != nil {
+		return err
+	}
+
+	if err = r.consumer.Run(r); err != nil {
 		return err
 	}
 
@@ -331,28 +349,8 @@ func (r *Replicator) Run() error {
 		go r.redisServer()
 	}
 
-	if syncNeeded {
-		doneCh := make(chan struct{}, r.cfg.SyncWorkers)
-		for i := 0; i < r.cfg.SyncWorkers; i++ {
-			go r.syncJob(i, doneCh)
-		}
-
-		for _, tblName := range syncTables {
-			r.syncJobs <- tblName
-		}
-		close(r.syncJobs)
-
-		go func() {
-			for i := 0; i < r.cfg.SyncWorkers; i++ {
-				<-doneCh
-			}
-
-			log.Printf("all synced!")
-
-			if r.onlySync {
-				os.Exit(0)
-			}
-		}()
+	if err = r.Sync(syncTables); err != nil {
+		return err
 	}
 
 	r.waitForShutdown()
@@ -360,7 +358,7 @@ func (r *Replicator) Run() error {
 	r.consumer.Wait()
 
 	for tblName, tbl := range r.chTables {
-		if err := tbl.FlushToMainTable(); err != nil {
+		if err = tbl.FlushToMainTable(); err != nil {
 			log.Printf("could not flush %s table: %v", tblName.String(), err)
 		}
 
@@ -368,7 +366,7 @@ func (r *Replicator) Run() error {
 			continue
 		}
 
-		if err := r.persStorage.Write(tblName.KeyName(), r.finalLSN.FormattedBytes()); err != nil {
+		if err = r.persStorage.Write(tblName.KeyName(), r.finalLSN.FormattedBytes()); err != nil {
 			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 	}
