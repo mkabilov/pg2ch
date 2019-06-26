@@ -83,6 +83,8 @@ func (c *BulkUpload) BulkUpload(tableName config.ChTableName, columns []string) 
 	if err := c.performRequest(chutils.InsertQuery(tableName, columns), c.pipeReader); err != nil {
 		return err
 	}
+	c.buf.Reset()
+	bufPool.Put(c.buf)
 
 	return nil
 }
@@ -107,10 +109,5 @@ func (c *BulkUpload) PipeFinishWriting() error {
 		return err
 	}
 
-	err := c.pipeWriter.Close()
-
-	c.buf.Reset()
-	bufPool.Put(c.buf)
-
-	return err
+	return c.pipeWriter.Close()
 }
