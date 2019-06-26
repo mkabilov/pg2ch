@@ -87,16 +87,17 @@ func (c *BulkUpload) BulkUpload(tableName config.ChTableName, columns []string) 
 	c.buf = bufPool.Get().(buffer.Buffer)
 	c.pipeReader, c.pipeWriter = nio.Pipe(c.buf)
 	c.gzipWriter, err = gzip.NewWriterLevel(c.pipeWriter, gzip.BestSpeed)
-
 	if err != nil {
 		return err
 	}
+	defer func() {
+		c.buf.Reset()
+		bufPool.Put(c.buf)
+	}()
 
 	if err := c.performRequest(chutils.InsertQuery(tableName, columns), c.pipeReader); err != nil {
 		return err
 	}
-	c.buf.Reset()
-	bufPool.Put(c.buf)
 
 	return nil
 }
