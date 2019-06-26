@@ -42,6 +42,7 @@ type clickHouseTable interface {
 
 	SetTupleColumns([]message.Column)
 	FlushToMainTable() error
+	SaveLSN(utils.LSN) error
 }
 
 type Replicator struct {
@@ -105,15 +106,15 @@ func (r *Replicator) newTable(tblName config.PgTableName, tblConfig config.Table
 			return nil, fmt.Errorf("ReplacingMergeTree requires either version or generation column to be set")
 		}
 
-		return tableengines.NewReplacingMergeTree(r.ctx, r.chConnString, tblConfig, &r.generationID), nil
+		return tableengines.NewReplacingMergeTree(r.ctx, r.persStorage, r.chConnString, tblConfig, &r.generationID), nil
 	case config.CollapsingMergeTree:
 		if tblConfig.SignColumn == "" {
 			return nil, fmt.Errorf("CollapsingMergeTree requires sign column to be set")
 		}
 
-		return tableengines.NewCollapsingMergeTree(r.ctx, r.chConnString, tblConfig, &r.generationID), nil
+		return tableengines.NewCollapsingMergeTree(r.ctx, r.persStorage, r.chConnString, tblConfig, &r.generationID), nil
 	case config.MergeTree:
-		return tableengines.NewMergeTree(r.ctx, r.chConnString, tblConfig, &r.generationID), nil
+		return tableengines.NewMergeTree(r.ctx, r.persStorage, r.chConnString, tblConfig, &r.generationID), nil
 	}
 
 	return nil, fmt.Errorf("%s table engine is not implemented", tblConfig.Engine)
@@ -190,7 +191,7 @@ func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 		return fmt.Errorf("could not sync: %v", err)
 	}
 
-	if err := r.persStorage.Write(pgTableName.KeyName(), lsn.FormattedBytes()); err != nil {
+	if err := tbl.SaveLSN(lsn); err != nil {
 		return fmt.Errorf("could not store lsn for table %s", pgTableName.String())
 	}
 
@@ -366,7 +367,7 @@ func (r *Replicator) Run() error {
 			continue
 		}
 
-		if err = r.persStorage.Write(tblName.KeyName(), r.finalLSN.FormattedBytes()); err != nil {
+		if err = tbl.SaveLSN(r.finalLSN); err != nil {
 			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 	}
