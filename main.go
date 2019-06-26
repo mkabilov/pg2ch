@@ -60,7 +60,7 @@ func main() {
 			var syncTables []config.PgTableName
 
 			if syncTables, err = repl.GetSyncTables(); err == nil {
-				err = repl.Sync(syncTables)
+				err = repl.Sync(syncTables, false)
 			}
 		}
 

@@ -198,10 +198,8 @@ func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 }
 
 // go routine
-func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
-	defer func() {
-		doneCh <- struct{}{}
-	}()
+func (r *Replicator) syncJob(i int, wg *sync.WaitGroup) {
+	defer wg.Done()
 
 	for pgTableName := range r.syncJobs {
 		log.Printf("sync job %d: starting syncing %q pg table", i, pgTableName.String())
@@ -295,14 +293,16 @@ func (r *Replicator) GetSyncTables() ([]config.PgTableName, error) {
 	return nil, nil
 }
 
-func (r *Replicator) Sync(syncTables []config.PgTableName) error {
+func (r *Replicator) Sync(syncTables []config.PgTableName, async bool) error {
+	var wg sync.WaitGroup
+
 	if len(syncTables) == 0 {
 		return nil
 	}
 
-	doneCh := make(chan struct{}, r.cfg.SyncWorkers)
+	wg.Add(r.cfg.SyncWorkers)
 	for i := 0; i < r.cfg.SyncWorkers; i++ {
-		go r.syncJob(i, doneCh)
+		go r.syncJob(i, &wg)
 	}
 
 	for _, tblName := range syncTables {
@@ -310,13 +310,15 @@ func (r *Replicator) Sync(syncTables []config.PgTableName) error {
 	}
 	close(r.syncJobs)
 
-	go func() {
-		for i := 0; i < r.cfg.SyncWorkers; i++ {
-			<-doneCh
-		}
-
+	if async {
+		go func() {
+			wg.Wait()
+			log.Printf("all synced!")
+		}()
+	} else {
+		wg.Wait()
 		log.Printf("all synced!")
-	}()
+	}
 
 	return nil
 }
@@ -349,7 +351,7 @@ func (r *Replicator) Run() error {
 		go r.redisServer()
 	}
 
-	if err = r.Sync(syncTables); err != nil {
+	if err = r.Sync(syncTables, true); err != nil {
 		return err
 	}
 
