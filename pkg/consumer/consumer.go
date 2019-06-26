@@ -102,11 +102,27 @@ func (c *consumer) startDecoding() error {
 
 	err := c.conn.StartReplication(c.slotName, uint64(c.currentLSN), -1,
 		`"proto_version" '1'`, fmt.Sprintf(`"publication_names" '%s'`, c.publicationName))
-
 	if err != nil {
 		c.closeDbConnection()
 		return fmt.Errorf("failed to start decoding logical replication messages: %v", err)
 	}
+
+	go func() {
+		tick := time.NewTicker(statusTimeout)
+		defer tick.Stop()
+
+		for {
+			select {
+			case <-tick.C:
+				if err = c.SendStatus(); err != nil {
+					return
+				}
+
+			case <-c.ctx.Done():
+				return
+			}
+		}
+	}()
 
 	return nil
 }
@@ -120,18 +136,11 @@ func (c *consumer) closeDbConnection() {
 func (c *consumer) processReplicationMessage(handler Handler) {
 	defer c.waitGr.Done()
 
-	statusTicker := time.NewTicker(statusTimeout)
 	for {
 		select {
 		case <-c.ctx.Done():
-			statusTicker.Stop()
 			c.closeDbConnection()
 			return
-		case <-statusTicker.C:
-			if err := c.SendStatus(); err != nil {
-				c.close(fmt.Errorf("could not send replay progress: %v", err))
-				return
-			}
 		default:
 			wctx, cancel := context.WithTimeout(c.ctx, replWaitTimeout)
 			repMsg, err := c.conn.WaitForReplicationMessage(wctx)
