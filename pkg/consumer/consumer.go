@@ -33,6 +33,8 @@ type Interface interface {
 }
 
 type consumer struct {
+	sync.Mutex
+
 	waitGr          *sync.WaitGroup
 	ctx             context.Context
 	conn            *pgx.ReplicationConn
@@ -143,7 +145,9 @@ func (c *consumer) processReplicationMessage(handler Handler) {
 			return
 		default:
 			wctx, cancel := context.WithTimeout(c.ctx, replWaitTimeout)
+			c.Lock()
 			repMsg, err := c.conn.WaitForReplicationMessage(wctx)
+			c.Unlock()
 			cancel()
 
 			if err == context.DeadlineExceeded {
@@ -188,6 +192,9 @@ func (c *consumer) processReplicationMessage(handler Handler) {
 
 // SendStatus sends the status
 func (c *consumer) SendStatus() error {
+	c.Lock()
+	defer c.Unlock()
+
 	// log.Printf("sending status: %v", c.currentLSN) //TODO: move to debug log level
 	status, err := pgx.NewStandbyStatus(uint64(c.currentLSN))
 
