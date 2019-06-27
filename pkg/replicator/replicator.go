@@ -167,7 +167,8 @@ func (r *Replicator) getTxAndLSN(conn *pgx.Conn, pgTableName config.PgTableName)
 		log.Printf("creating %q temporary logical replication slot for %q pg table (attempt: %d)",
 			tmpSlotName, pgTableName.String(), attempt)
 
-		if lsn, err := r.pgCreateTempRepSlot(tx, tmpSlotName); err == nil {
+		lsn, err := r.pgCreateTempRepSlot(tx, tmpSlotName)
+		if err == nil {
 			return tx, lsn, nil
 		}
 
