@@ -154,6 +154,30 @@ func (r *Replicator) initTables() error {
 	return nil
 }
 
+func (r *Replicator) getTxAndLSN(conn *pgx.Conn, pgTableName config.PgTableName) (*pgx.Tx, utils.LSN, error) {
+	for attempt := 0; attempt < 10; attempt++ {
+		tx, err := r.pgBegin(conn)
+		if err != nil {
+			log.Printf("could not begin transaction: %v", err)
+			r.pgRollback(tx)
+			continue
+		}
+
+		tmpSlotName := genTempSlotName(pgTableName)
+		log.Printf("creating %q temporary logical replication slot for %q pg table (attempt: %d)",
+			tmpSlotName, pgTableName.String(), attempt)
+
+		if lsn, err := r.pgCreateTempRepSlot(tx, tmpSlotName); err == nil {
+			return tx, lsn, nil
+		}
+
+		r.pgRollback(tx)
+		log.Printf("could not create logical replication slot: %v", err)
+	}
+
+	return nil, utils.InvalidLSN, fmt.Errorf("attempts exceeded")
+}
+
 func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 	conn, err := pgx.Connect(r.pgxConnConfig)
 	if err != nil {
@@ -170,20 +194,10 @@ func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 	}
 	conn.ConnInfo = connInfo
 
-	tx, err := r.pgBegin(conn)
+	tx, lsn, err := r.getTxAndLSN(conn, pgTableName)
 	if err != nil {
 		return err
 	}
-	defer r.pgRollback(tx)
-
-	tmpSlotName := genTempSlotName(pgTableName)
-	log.Printf("creating %q temporary logical replication slot for %q pg table",
-		tmpSlotName, pgTableName.String())
-	lsn, err := r.pgCreateTempRepSlot(tx, tmpSlotName)
-	if err != nil {
-		return err
-	}
-
 	log.Printf("lsn %v for table %q", uint64(lsn), pgTableName.String())
 
 	tbl := r.chTables[pgTableName]
