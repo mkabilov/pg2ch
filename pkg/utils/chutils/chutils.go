@@ -39,6 +39,7 @@ var pgToChMap = map[string]string{
 	utils.PgAdjustIstore:    utils.ChInt32,    // type for istore values
 	utils.PgAdjustBigIstore: utils.ChInt64,    // type for bigistore values
 	utils.PgAdjustAjTime:    utils.ChDateTime, // adjust time
+	utils.PgAdjustAjDate:    utils.ChDate,     // adjust date
 	utils.PgAdjustAjBool:    utils.ChUInt8,    // adjust boolean: true, false, unknown
 }
 

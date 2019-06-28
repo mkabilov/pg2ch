@@ -51,6 +51,7 @@ const (
 	PgAdjustBigIstore  = "bigistore"
 	PgAdjustAjBool     = "ajbool"
 	PgAdjustAjTime     = "ajtime"
+	PgAdjustAjDate     = "ajdate"
 	PgAdjustCountry    = "country"
 	PgAdjustDeviceType = "device_type"
 	PgAdjustOsName     = "os_name"

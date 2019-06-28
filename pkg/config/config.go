@@ -394,5 +394,6 @@ func (c PgColumn) IsTime() bool {
 	return c.BaseType == utils.PgAdjustAjTime ||
 		c.BaseType == utils.PgTimestampWithoutTimeZone ||
 		c.BaseType == utils.PgTimestampWithTimeZone ||
-		c.BaseType == utils.PgDate
+		c.BaseType == utils.PgDate ||
+		c.BaseType == utils.PgAdjustAjDate
 }
