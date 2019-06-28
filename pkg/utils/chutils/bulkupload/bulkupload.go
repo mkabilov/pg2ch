@@ -118,6 +118,10 @@ func (c *BulkUpload) Write(p []byte) error {
 }
 
 func (c *BulkUpload) PipeFinishWriting() error {
+	if c.gzipWriter == nil {
+		return fmt.Errorf("trap: nil gzip writter")
+	}
+
 	if err := c.gzipWriter.Close(); err != nil {
 		return err
 	}
