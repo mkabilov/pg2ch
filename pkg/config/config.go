@@ -74,7 +74,6 @@ type ColumnProperty struct {
 	FlattenIstore      bool   `yaml:"flatten_istore"`
 	FlattenIstoreMin   int    `yaml:"flatten_istore_min"` // needed for building ch table ddl
 	FlattenIstoreMax   int    `yaml:"flatten_istore_max"` // needed for building ch table ddl
-	FillIstoreGaps     bool   `yaml:"fill_gaps"`
 	IstoreKeysSuffix   string `yaml:"istore_keys_suffix"`
 	IstoreValuesSuffix string `yaml:"istore_values_suffix"`
 }

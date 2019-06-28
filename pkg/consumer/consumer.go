@@ -62,6 +62,7 @@ func New(ctx context.Context, errCh chan error, dbCfg pgx.ConnConfig, slotName, 
 func (c *consumer) AdvanceLSN(lsn utils.LSN) {
 	c.Lock()
 	defer c.Unlock()
+	log.Printf("advance LSN to %v", lsn)
 
 	c.currentLSN = lsn
 }

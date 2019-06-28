@@ -27,7 +27,7 @@ func (r *Replicator) mergeTables() error {
 		}
 	}
 
-	r.advanceLSN()
+	r.consumer.AdvanceLSN(r.finalLSN)
 
 	return nil
 }
@@ -73,10 +73,6 @@ func (r *Replicator) incrementGeneration() {
 	}
 }
 
-func (r *Replicator) advanceLSN() {
-	r.consumer.AdvanceLSN(r.finalLSN)
-}
-
 // HandleMessage processes the incoming wal message
 func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 	r.tablesToMergeMutex.Lock()
@@ -100,7 +96,7 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 				return fmt.Errorf("could not merge tables: %v", err)
 			}
 		} else {
-			r.advanceLSN()
+			r.consumer.AdvanceLSN(r.finalLSN)
 		}
 		if !r.isEmptyTx {
 			r.incrementGeneration()
