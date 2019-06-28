@@ -83,19 +83,25 @@ func (c *BulkUpload) performRequest(query string, body io.Reader) error {
 }
 
 func (c *BulkUpload) BulkUpload(tableName config.ChTableName, columns []string) error {
-	var err error
-	c.buf = bufPool.Get().(buffer.Buffer)
-	c.pipeReader, c.pipeWriter = nio.Pipe(c.buf)
-	c.gzipWriter, err = gzip.NewWriterLevel(c.pipeWriter, gzip.BestSpeed)
-	if err != nil {
-		return err
-	}
 	defer func() {
 		c.buf.Reset()
 		bufPool.Put(c.buf)
 	}()
 
-	if err := c.performRequest(chutils.InsertQuery(tableName, columns), c.pipeReader); err != nil {
+	if err := c.performRequest(chutils.GenInsertQuery(tableName, columns), c.pipeReader); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *BulkUpload) Init() error {
+	var err error
+
+	c.buf = bufPool.Get().(buffer.Buffer)
+	c.pipeReader, c.pipeWriter = nio.Pipe(c.buf)
+	c.gzipWriter, err = gzip.NewWriterLevel(c.pipeWriter, gzip.BestSpeed)
+	if err != nil {
 		return err
 	}
 
@@ -118,10 +124,6 @@ func (c *BulkUpload) Write(p []byte) error {
 }
 
 func (c *BulkUpload) PipeFinishWriting() error {
-	if c.gzipWriter == nil {
-		return fmt.Errorf("trap: nil gzip writter")
-	}
-
 	if err := c.gzipWriter.Close(); err != nil {
 		return err
 	}

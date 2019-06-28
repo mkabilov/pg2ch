@@ -275,17 +275,16 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
 	t.syncRows = 0
 
 	loaderErrCh := make(chan error, 1)
+	if err := t.bulkUploader.Init(); err != nil {
+		return fmt.Errorf("could not init bulkuploader")
+	}
+
 	go func(errCh chan error) {
-		if err := t.bulkUploader.BulkUpload(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
-			errCh <- err
-			log.Fatalf("could not sync upload: %v", err)
-		}
-		errCh <- nil
+		errCh <- t.bulkUploader.BulkUpload(t.cfg.ChMainTable, t.chUsedColumns)
 	}(loaderErrCh)
 
 	t.syncLastBatchTime = time.Now()
-	ct, err := pgTx.CopyToWriter(w, fmt.Sprintf(
-		"copy (select %s from only %s) to stdout",
+	ct, err := pgTx.CopyToWriter(w, fmt.Sprintf("copy (select %s from only %s) to stdout",
 		strings.Join(t.pgUsedColumns, ", "), t.cfg.PgTableName.String()))
 	if err != nil {
 		return fmt.Errorf("could not copy: %v", err)
