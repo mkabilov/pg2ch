@@ -5,10 +5,12 @@ import (
 	"strings"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
-	"github.com/mkabilov/pg2ch/pkg/utils"
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
+	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 	"github.com/mkabilov/pg2ch/pkg/utils/tableinfo"
 )
+
+var orderByCols = map[string]string{}
 
 //GenerateChDDL generates clickhouse table DDLs
 //TODO: refactor me
@@ -61,7 +63,7 @@ func (r *Replicator) GenerateChDDL() error {
 				pkColumnNumb = pgCol.PkCol
 			}
 			columnCfg, hasColumnCfg := tblCfg.ColumnProperties[tupleColumn.Name]
-			if !hasColumnCfg && (pgCol.BaseType == utils.PgAdjustIstore || pgCol.BaseType == utils.PgAdjustBigIstore) {
+			if !hasColumnCfg && (pgCol.BaseType == dbtypes.PgAdjustIstore || pgCol.BaseType == dbtypes.PgAdjustBigIstore) {
 				hasColumnCfg = true
 				columnCfg = config.ColumnProperty{
 					IstoreKeysSuffix:   "keys",
@@ -77,11 +79,13 @@ func (r *Replicator) GenerateChDDL() error {
 					}
 				case columnCfg.IstoreKeysSuffix != "":
 					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%s Array(Int32)", chColName, columnCfg.IstoreKeysSuffix))
-					if pgCol.BaseType == utils.PgAdjustBigIstore {
+					if pgCol.BaseType == dbtypes.PgAdjustBigIstore {
 						chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%s Array(Int64)", chColName, columnCfg.IstoreValuesSuffix))
 					} else {
 						chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%s Array(Int32)", chColName, columnCfg.IstoreValuesSuffix))
 					}
+				default:
+					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s %s", chColName, chColType))
 				}
 				continue
 			}
@@ -132,7 +136,9 @@ func (r *Replicator) GenerateChDDL() error {
 			tableDDL += fmt.Sprintf(" PARTITION BY toStartOfMonth(%s)", partitionColumn)
 		}
 
-		if len(pkColumns) > 0 {
+		if ob, ok := orderByCols[tblCfg.ChMainTable.String()]; ok {
+			orderBy = ob
+		} else if len(pkColumns) > 0 {
 			orderBy = fmt.Sprintf(" ORDER BY(%s)", strings.Join(pkColumns, ", "))
 		}
 		tableDDL += orderBy + ";"
@@ -144,7 +150,7 @@ func (r *Replicator) GenerateChDDL() error {
 
 		if !tblCfg.ChBufferTable.IsEmpty() {
 			if _, ok := processedTables[tblCfg.ChBufferTable]; !ok {
-				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree()%s;",
+				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree()%s;\n",
 					tblCfg.ChBufferTable,
 					strings.Join(
 						append(chColumnDDLs, fmt.Sprintf("    %s UInt64", tblCfg.BufferTableRowIdColumn)), ",\n"),
@@ -155,12 +161,14 @@ func (r *Replicator) GenerateChDDL() error {
 
 		if !tblCfg.ChSyncAuxTable.IsEmpty() {
 			if _, ok := processedTables[tblCfg.ChSyncAuxTable]; !ok {
-				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree() ORDER BY (%s, %s);\n",
+				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree()%s;\n",
 					tblCfg.ChSyncAuxTable,
 					strings.Join(
-						append(chColumnDDLs, fmt.Sprintf("    %s UInt64", tblCfg.BufferTableRowIdColumn), fmt.Sprintf("    %s UInt64", tblCfg.LsnColumnName)), ",\n"),
-					tblCfg.LsnColumnName,
-					tblCfg.BufferTableRowIdColumn)
+						append(chColumnDDLs,
+							fmt.Sprintf("    %s UInt64", tblCfg.BufferTableRowIdColumn),
+							fmt.Sprintf("    %s UInt64", tblCfg.LsnColumnName),
+						), ",\n"),
+					orderBy)
 				processedTables[tblCfg.ChSyncAuxTable] = struct{}{}
 			}
 		}

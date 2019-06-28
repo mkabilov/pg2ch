@@ -2,7 +2,6 @@ package replicator
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/tidwall/redcon"
@@ -12,8 +11,10 @@ import (
 
 const forbiddenError = "cannot modify '" + config.TableLSNKeyPrefix + "*' keys"
 
-func (r *Replicator) redisServer() {
-	err := redcon.ListenAndServe(r.cfg.RedisBind,
+func (r *Replicator) startRedisServer() {
+	defer r.logger.Sync()
+	r.logger.Infof("starting redis-like server: %v", r.cfg.RedisBind)
+	redisServer := redcon.NewServer(r.cfg.RedisBind,
 		func(conn redcon.Conn, cmd redcon.Command) {
 			switch strings.ToLower(string(cmd.Args[0])) {
 			case "ping":
@@ -21,8 +22,10 @@ func (r *Replicator) redisServer() {
 			case "quit":
 				conn.WriteString("OK")
 				if err := conn.Close(); err != nil {
-					log.Printf("could not close redis connection: %v", err)
+					r.logger.Warnf("could not close redis connection: %v", err)
 				}
+			case "lsn":
+				conn.WriteString(fmt.Sprintf("last final LSN: %v", r.consumer.CurrentLSN().String()))
 			case "set":
 				if len(cmd.Args) != 3 {
 					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
@@ -46,7 +49,7 @@ func (r *Replicator) redisServer() {
 					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 					return
 				}
-				key := string(cmd.Args[1])
+				key := config.TableLSNKeyPrefix + string(cmd.Args[1])
 				value, err := r.persStorage.Read(key)
 				if err != nil {
 					conn.WriteNull()
@@ -54,8 +57,14 @@ func (r *Replicator) redisServer() {
 					conn.WriteBulk(value)
 				}
 			case "keys":
+				for key := range r.persStorage.Keys(nil) {
+					if !strings.HasPrefix(key, config.TableLSNKeyPrefix) {
+						continue
+					}
+
+					conn.WriteString(key[len(config.TableLSNKeyPrefix):])
+				}
 				conn.WriteString("OK")
-				//TODO
 			case "exists":
 				if len(cmd.Args) != 2 {
 					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
@@ -81,11 +90,11 @@ func (r *Replicator) redisServer() {
 					conn.WriteInt(1)
 				}
 			case "pause":
-				//TODO
-				conn.WriteString("OK")
+				conn.WriteString(r.pause())
 			case "resume":
-				//TODO
-				conn.WriteString("OK")
+				conn.WriteString(r.resume())
+			case "status":
+				conn.WriteString(r.curState.String())
 			default:
 				conn.WriteError("ERR unknown command '" + string(cmd.Args[0]) + "'")
 			}
@@ -95,7 +104,7 @@ func (r *Replicator) redisServer() {
 		func(conn redcon.Conn, err error) {},
 	)
 
-	if err != nil {
+	if err := redisServer.ListenAndServe(); err != nil {
 		select {
 		case r.errCh <- err:
 		default:

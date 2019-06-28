@@ -37,6 +37,10 @@
   version = "1.0.0"
 
 [[constraint]]
+  name = "go.uber.org/zap"
+  version = "1.10.0"
+
+[[constraint]]
   name = "gopkg.in/djherbis/buffer.v1"
   version = "1.0.0"
 
@@ -50,4 +54,3 @@
 
 [prune]
   go-tests = true
-  unused-packages = true

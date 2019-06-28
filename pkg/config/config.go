@@ -12,18 +12,21 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/mkabilov/pg2ch/pkg/message"
-	"github.com/mkabilov/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 )
 
 const (
+	ApplicationName = "pg2ch"
+
 	defaultInactivityMergeTimeout = time.Minute
 	publicSchema                  = "public"
-	defaultClickHousePort         = 9000
+	defaultClickHousePort         = 8123
 	defaultClickHouseHost         = "127.0.0.1"
 	defaultPostgresPort           = 5432
 	defaultPostgresHost           = "127.0.0.1"
 	defaultRowIdColumn            = "row_id"
 	defaultMaxBufferLength        = 10000
+	defaultFlushThreshold         = 100
 	defaultSignColumn             = "sign"
 	defaultVerColumn              = "ver"
 	defaultLsnColumn              = "lsn"
@@ -56,6 +59,7 @@ type pgConnConfig struct {
 
 	ReplicationSlotName string `yaml:"replication_slot_name"`
 	PublicationName     string `yaml:"publication_name"`
+	Debug               bool   `yaml:"debug"`
 }
 
 // PgTableName represents namespaced name
@@ -69,14 +73,16 @@ type ChTableName struct {
 	TableName    string
 }
 
+type coalesceValue []byte
+
 // ColumnProperty describes column properties
 type ColumnProperty struct {
-	FlattenIstore      bool   `yaml:"flatten_istore"`
-	FlattenIstoreMin   int    `yaml:"flatten_istore_min"` // needed for building ch table ddl
-	FlattenIstoreMax   int    `yaml:"flatten_istore_max"` // needed for building ch table ddl
-	FillIstoreGaps     bool   `yaml:"fill_gaps"`
-	IstoreKeysSuffix   string `yaml:"istore_keys_suffix"`
-	IstoreValuesSuffix string `yaml:"istore_values_suffix"`
+	FlattenIstore      bool          `yaml:"flatten_istore"`
+	FlattenIstoreMin   int           `yaml:"flatten_istore_min"`
+	FlattenIstoreMax   int           `yaml:"flatten_istore_max"`
+	IstoreKeysSuffix   string        `yaml:"istore_keys_suffix"`
+	IstoreValuesSuffix string        `yaml:"istore_values_suffix"`
+	Coalesce           coalesceValue `yaml:"coalesce"`
 }
 
 // Table contains information about the table
@@ -85,7 +91,7 @@ type Table struct {
 	ChSyncAuxTable         ChTableName               `yaml:"sync_aux_table"`
 	ChBufferTable          ChTableName               `yaml:"buffer_table"`
 	ChMainTable            ChTableName               `yaml:"main_table"`
-	MaxBufferLength        int                       `yaml:"max_buffer_length"`
+	MaxBufferPgDMLs        int                       `yaml:"max_buffer_length"`
 	VerColumn              string                    `yaml:"ver_column"`
 	IsDeletedColumn        string                    `yaml:"is_deleted_column"`
 	SignColumn             string                    `yaml:"sign_column"`
@@ -98,7 +104,7 @@ type Table struct {
 	ColumnProperties       map[string]ColumnProperty `yaml:"column_properties"`
 	LsnColumnName          string                    `yaml:"lsn_column_name"`
 
-	PgOID         utils.OID           `yaml:"-"`
+	PgOID         dbtypes.OID         `yaml:"-"`
 	PgTableName   PgTableName         `yaml:"-"`
 	TupleColumns  []message.Column    `yaml:"-"` // columns in the order they are in the table
 	PgColumns     map[string]PgColumn `yaml:"-"`
@@ -123,6 +129,7 @@ type Config struct {
 	PersStoragePath        string                `yaml:"db_path"`
 	RedisBind              string                `yaml:"redis_bind"`
 	SyncWorkers            int                   `yaml:"sync_workers"`
+	Debug                  bool                  `yaml:"debug"`
 }
 
 type Column struct {
@@ -188,6 +195,18 @@ func (tn *PgTableName) Parse(val string) error {
 	return nil
 }
 
+func (cv *coalesceValue) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var val string
+
+	if err := unmarshal(&val); err != nil {
+		return err
+	}
+
+	*cv = []byte(val)
+
+	return nil
+}
+
 func (tn *PgTableName) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	//TODO: improve parser, use regexp
 	var val string
@@ -203,7 +222,11 @@ func (tn PgTableName) MarshalYAML() (interface{}, error) {
 	return tn.String(), nil
 }
 
-func (tn *PgTableName) String() string {
+func (tn PgTableName) String() string {
+	return tn.NamespacedName()
+}
+
+func (tn PgTableName) NamespacedName() string {
 	if tn.SchemaName == publicSchema {
 		return fmt.Sprintf("%s", tn.TableName)
 	}
@@ -252,16 +275,9 @@ func New(filepath string) (*Config, error) {
 		return nil, fmt.Errorf("replication slot name is not specified")
 	}
 
-	connCfg, err := pgx.ParseEnvLibpq()
-	if err != nil {
-		return nil, fmt.Errorf("could not parse lib pq env variabels: %v", err)
-	}
-
 	if cfg.InactivityFlushTimeout.Seconds() == 0 {
 		cfg.InactivityFlushTimeout = defaultInactivityMergeTimeout
 	}
-
-	cfg.Postgres.ConnConfig = cfg.Postgres.ConnConfig.Merge(connCfg)
 
 	if cfg.Postgres.Port == 0 {
 		cfg.Postgres.Port = defaultPostgresPort
@@ -294,6 +310,10 @@ func New(filepath string) (*Config, error) {
 		if !tbl.ChSyncAuxTable.IsEmpty() && tbl.ChSyncAuxTable.DatabaseName == "" {
 			newTbl.ChSyncAuxTable.DatabaseName = cfg.ClickHouse.Database
 		}
+		if tbl.FlushThreshold == 0 {
+			newTbl.FlushThreshold = defaultFlushThreshold
+		}
+
 		cfg.Tables[tblName] = newTbl
 	}
 
@@ -358,8 +378,8 @@ func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		val.VerColumn = defaultVerColumn
 	}
 
-	if val.MaxBufferLength == 0 {
-		val.MaxBufferLength = defaultMaxBufferLength
+	if val.MaxBufferPgDMLs == 0 {
+		val.MaxBufferPgDMLs = defaultMaxBufferLength
 	}
 
 	if val.LsnColumnName == "" {
@@ -387,12 +407,23 @@ func (c *chConnConfig) ConnectionString() string {
 }
 
 func (c PgColumn) IsIstore() bool {
-	return c.BaseType == utils.PgAdjustIstore || c.BaseType == utils.PgAdjustBigIstore
+	return c.BaseType == dbtypes.PgAdjustIstore || c.BaseType == dbtypes.PgAdjustBigIstore
 }
 
 func (c PgColumn) IsTime() bool {
-	return c.BaseType == utils.PgAdjustAjTime ||
-		c.BaseType == utils.PgTimestampWithoutTimeZone ||
-		c.BaseType == utils.PgTimestampWithTimeZone ||
-		c.BaseType == utils.PgDate
+	return c.BaseType == dbtypes.PgAdjustAjTime ||
+		c.BaseType == dbtypes.PgTimestampWithoutTimeZone ||
+		c.BaseType == dbtypes.PgTimestampWithTimeZone ||
+		c.BaseType == dbtypes.PgDate ||
+		c.BaseType == dbtypes.PgAdjustAjDate
+}
+
+func (c Config) Print() {
+	fmt.Printf("inactivity flush timeout: %v\n", c.InactivityFlushTimeout)
+	fmt.Printf("debug: %t\n", c.Debug)
+
+	for tbl, tblCfg := range c.Tables {
+		fmt.Printf("%s: flush threshold: %v buffer threshold: %v\n",
+			tbl, tblCfg.FlushThreshold, tblCfg.MaxBufferPgDMLs)
+	}
 }

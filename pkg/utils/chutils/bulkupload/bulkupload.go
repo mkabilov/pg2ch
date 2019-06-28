@@ -24,11 +24,15 @@ var (
 			return buffer.New(1 * 1024 * 1024)
 		}}
 
-	clientsPool = sync.Pool{
-		New: func() interface{} {
-			return &http.Client{}
-		}}
+	client = &http.Client{}
 )
+
+type BulkUploader interface {
+	Start() error
+	Finish() error
+	Write(p []byte) error
+	BulkUpload(name config.ChTableName, columns []string) error
+}
 
 type BulkUpload struct {
 	baseURL      string
@@ -57,8 +61,8 @@ func (c *BulkUpload) performRequest(query string, body io.Reader) error {
 		return fmt.Errorf("could not create request: %v", err)
 	}
 	req.Header.Add("Content-Encoding", "gzip")
+	req.Header.Set("User-Agent", config.ApplicationName)
 
-	client := *clientsPool.Get().(*http.Client)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("could not perform request: %v", err)
@@ -77,25 +81,30 @@ func (c *BulkUpload) performRequest(query string, body io.Reader) error {
 
 		return fmt.Errorf("got %d status code from clickhouse: %s", resp.StatusCode, string(body))
 	}
-	clientsPool.Put(&client)
 
 	return nil
 }
 
 func (c *BulkUpload) BulkUpload(tableName config.ChTableName, columns []string) error {
-	var err error
-	c.buf = bufPool.Get().(buffer.Buffer)
-	c.pipeReader, c.pipeWriter = nio.Pipe(c.buf)
-	c.gzipWriter, err = gzip.NewWriterLevel(c.pipeWriter, gzip.BestSpeed)
-	if err != nil {
-		return err
-	}
 	defer func() {
 		c.buf.Reset()
 		bufPool.Put(c.buf)
 	}()
 
-	if err := c.performRequest(chutils.InsertQuery(tableName, columns), c.pipeReader); err != nil {
+	if err := c.performRequest(chutils.GenInsertQuery(tableName, columns), c.pipeReader); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *BulkUpload) Start() error {
+	var err error
+
+	c.buf = bufPool.Get().(buffer.Buffer)
+	c.pipeReader, c.pipeWriter = nio.Pipe(c.buf)
+	c.gzipWriter, err = gzip.NewWriterLevel(c.pipeWriter, gzip.BestSpeed) // TODO: move gzip level to config
+	if err != nil {
 		return err
 	}
 
@@ -117,11 +126,7 @@ func (c *BulkUpload) Write(p []byte) error {
 	return err
 }
 
-func (c *BulkUpload) PipeFinishWriting() error {
-	if c.gzipWriter == nil {
-		return fmt.Errorf("trap: nil gzip writter")
-	}
-
+func (c *BulkUpload) Finish() error {
 	if err := c.gzipWriter.Close(); err != nil {
 		return err
 	}

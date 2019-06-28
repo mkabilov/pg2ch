@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx"
 	"github.com/jackc/pgx/pgtype"
 
-	"github.com/mkabilov/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 )
 
 type (
@@ -72,10 +72,10 @@ type NamespacedName struct {
 }
 
 type Column struct {
-	IsKey   bool      `yaml:"IsKey"` // column as part of the key.
-	Name    string    `yaml:"Name"`  // Name of the column.
-	TypeOID utils.OID `yaml:"OID"`   // OID of the column's data type.
-	Mode    int32     `yaml:"Mode"`  // OID modifier of the column (atttypmod).
+	IsKey   bool        `yaml:"IsKey"` // column as part of the key.
+	Name    string      `yaml:"Name"`  // Name of the column.
+	TypeOID dbtypes.OID `yaml:"OID"`   // OID of the column's data type.
+	Mode    int32       `yaml:"Mode"`  // OID modifier of the column (atttypmod).
 }
 
 type Tuple struct {
@@ -85,22 +85,22 @@ type Tuple struct {
 
 type Begin struct {
 	Raw       []byte
-	FinalLSN  utils.LSN // LSN of the record that lead to this xact to be committed
-	Timestamp time.Time // Commit timestamp of the transaction
-	XID       int32     // Xid of the transaction.
+	FinalLSN  dbtypes.LSN // LSN of the record that lead to this xact to be committed
+	Timestamp time.Time   // Commit timestamp of the transaction
+	XID       int32       // Xid of the transaction.
 }
 
 type Commit struct {
 	Raw            []byte
-	Flags          uint8     // Flags; currently unused (must be 0)
-	LSN            utils.LSN // The LastLSN of the commit.
-	TransactionLSN utils.LSN // LSN pointing to the end of the commit record + 1
-	Timestamp      time.Time // Commit timestamp of the transaction
+	Flags          uint8       // Flags; currently unused (must be 0)
+	LSN            dbtypes.LSN // The LastLSN of the commit.
+	TransactionLSN dbtypes.LSN // LSN pointing to the end of the commit record + 1
+	Timestamp      time.Time   // Commit timestamp of the transaction
 }
 
 type Origin struct {
 	Raw  []byte
-	LSN  utils.LSN // The last LSN of the commit on the origin server.
+	LSN  dbtypes.LSN // The last LSN of the commit on the origin server.
 	Name string
 }
 
@@ -108,25 +108,25 @@ type Relation struct {
 	NamespacedName `yaml:"NamespacedName"`
 
 	Raw             []byte          `yaml:"-"`
-	OID             utils.OID       `yaml:"OID"`             // OID of the relation.
+	OID             dbtypes.OID     `yaml:"OID"`             // OID of the relation.
 	ReplicaIdentity ReplicaIdentity `yaml:"ReplicaIdentity"` // Replica identity
 	Columns         []Column        `yaml:"Columns"`         // Columns
 }
 
 type Insert struct {
 	Raw         []byte
-	RelationOID utils.OID // OID of the relation corresponding to the OID in the relation message.
-	IsNew       bool      // Identifies tuple as a new tuple.
+	RelationOID dbtypes.OID // OID of the relation corresponding to the OID in the relation message.
+	IsNew       bool        // Identifies tuple as a new tuple.
 
 	NewRow Row
 }
 
 type Update struct {
 	Raw         []byte
-	RelationOID utils.OID // OID of the relation corresponding to the OID in the relation message.
-	IsKey       bool      // OldRow contains columns which are part of REPLICA IDENTITY index.
-	IsOld       bool      // OldRow contains old tuple in case of REPLICA IDENTITY set to FULL
-	IsNew       bool      // Identifies tuple as a new tuple.
+	RelationOID dbtypes.OID // OID of the relation corresponding to the OID in the relation message.
+	IsKey       bool        // OldRow contains columns which are part of REPLICA IDENTITY index.
+	IsOld       bool        // OldRow contains old tuple in case of REPLICA IDENTITY set to FULL
+	IsNew       bool        // Identifies tuple as a new tuple.
 
 	OldRow Row
 	NewRow Row
@@ -134,9 +134,9 @@ type Update struct {
 
 type Delete struct {
 	Raw         []byte
-	RelationOID utils.OID // OID of the relation corresponding to the OID in the relation message.
-	IsKey       bool      // OldRow contains columns which are part of REPLICA IDENTITY index.
-	IsOld       bool      // OldRow contains old tuple in case of REPLICA IDENTITY set to FULL
+	RelationOID dbtypes.OID // OID of the relation corresponding to the OID in the relation message.
+	IsKey       bool        // OldRow contains columns which are part of REPLICA IDENTITY index.
+	IsOld       bool        // OldRow contains old tuple in case of REPLICA IDENTITY set to FULL
 
 	OldRow Row
 }
@@ -145,14 +145,14 @@ type Truncate struct {
 	Raw             []byte
 	Cascade         bool
 	RestartIdentity bool
-	RelationOIDs    []utils.OID
+	RelationOIDs    []dbtypes.OID
 }
 
 type Type struct {
 	NamespacedName
 
 	Raw []byte
-	OID utils.OID // OID of the data type
+	OID dbtypes.OID // OID of the data type
 }
 
 func (t MType) String() string {
@@ -167,7 +167,7 @@ func (t MType) String() string {
 func (t Tuple) String() string {
 	switch t.Kind {
 	case TupleText:
-		return utils.QuoteLiteral(string(t.Value))
+		return string(t.Value)
 	case TupleNull:
 		return "null"
 	case TupleUnchanged:
@@ -381,7 +381,7 @@ func (r *ReplicaIdentity) DecodeText(ci *pgtype.ConnInfo, src []byte) error {
 		return nil
 	}
 
-	*r = ReplicaIdentity(uint8(src[0]))
+	*r = ReplicaIdentity(src[0])
 
 	return nil
 }

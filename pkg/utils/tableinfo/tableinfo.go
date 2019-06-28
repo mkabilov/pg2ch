@@ -9,7 +9,7 @@ import (
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
-	"github.com/mkabilov/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 )
 
 // TablePgColumns returns postgresql table's columns structure
@@ -48,7 +48,7 @@ order by
 			pgColumn          config.PgColumn
 			extStr            []string
 			attTypMod         int32
-			attOID            utils.OID
+			attOID            dbtypes.OID
 		)
 
 		if err := rows.Scan(&colName, &pgColumn.IsNullable, &baseType, &extStr, &pgColumn.PkCol, &attTypMod, &attOID); err != nil {

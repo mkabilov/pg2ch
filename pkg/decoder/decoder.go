@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/mkabilov/pg2ch/pkg/message"
-	"github.com/mkabilov/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 )
 
 type decoder struct {
@@ -34,12 +34,12 @@ const (
 
 func (d *decoder) bool() bool { return d.buf.Next(1)[0] != 0 }
 
-func (d *decoder) uint8() uint8   { return d.buf.Next(1)[0] }
-func (d *decoder) uint16() uint16 { return d.order.Uint16(d.buf.Next(2)) }
-func (d *decoder) uint32() uint32 { return d.order.Uint32(d.buf.Next(4)) }
-func (d *decoder) uint64() uint64 { return d.order.Uint64(d.buf.Next(8)) }
-func (d *decoder) oid() utils.OID { return utils.OID(d.uint32()) }
-func (d *decoder) lsn() utils.LSN { return utils.LSN(d.uint64()) }
+func (d *decoder) uint8() uint8     { return d.buf.Next(1)[0] }
+func (d *decoder) uint16() uint16   { return d.order.Uint16(d.buf.Next(2)) }
+func (d *decoder) uint32() uint32   { return d.order.Uint32(d.buf.Next(4)) }
+func (d *decoder) uint64() uint64   { return d.order.Uint64(d.buf.Next(8)) }
+func (d *decoder) oid() dbtypes.OID { return dbtypes.OID(d.uint32()) }
+func (d *decoder) lsn() dbtypes.LSN { return dbtypes.LSN(d.uint64()) }
 
 func (d *decoder) int8() int8   { return int8(d.uint8()) }
 func (d *decoder) int16() int16 { return int16(d.uint16()) }
@@ -216,7 +216,7 @@ func Parse(src []byte) (message.Message, error) {
 		m.Cascade = options&truncateCascadeBit == 1
 		m.RestartIdentity = options&truncateRestartIdentityBit == 1
 
-		m.RelationOIDs = make([]utils.OID, relationsCnt)
+		m.RelationOIDs = make([]dbtypes.OID, relationsCnt)
 		for i := 0; i < relationsCnt; i++ {
 			m.RelationOIDs[i] = d.oid()
 		}

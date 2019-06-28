@@ -57,10 +57,10 @@ func main() {
 		var err error
 
 		if err = repl.Init(); err == nil {
-			var syncTables []config.PgTableName
+			var tablesToSync []config.PgTableName
 
-			if syncTables, err = repl.GetSyncTables(); err == nil {
-				err = repl.Sync(syncTables, false)
+			if tablesToSync, err = repl.GetTablesToSync(); err == nil {
+				err = repl.SyncTables(tablesToSync, false)
 			}
 		}
 
@@ -69,6 +69,7 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
+		cfg.Print()
 		if err := repl.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "could not start: %v\n", err)
 			os.Exit(1)

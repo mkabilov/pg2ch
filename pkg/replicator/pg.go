@@ -3,17 +3,18 @@ package replicator
 import (
 	"database/sql"
 	"fmt"
-	"log"
 
 	"github.com/jackc/pgx"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
-	"github.com/mkabilov/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/message"
+	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
+	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
 	"github.com/mkabilov/pg2ch/pkg/utils/tableinfo"
 )
 
-func (r *Replicator) fetchTableOID(tblName config.PgTableName, tx *pgx.Tx) (utils.OID, error) {
-	var oid utils.OID
+func (r *Replicator) fetchTableOID(tblName config.PgTableName, tx *pgx.Tx) (dbtypes.OID, error) {
+	var oid dbtypes.OID
 	if err := tx.QueryRow("select $1::regclass::oid", tblName.String()).Scan(&oid); err != nil {
 		return 0, err
 	}
@@ -39,34 +40,36 @@ func (r *Replicator) pgConnect() error {
 }
 
 func (r *Replicator) pgDisconnect() {
+	defer r.logger.Sync()
 	if err := r.pgDeltaConn.Close(); err != nil {
-		log.Printf("could not close connection to postgresql: %v", err)
+		r.logger.Warnf("could not close connection to postgresql: %v", err)
 	}
 }
 
-func genTempSlotName(tblName config.PgTableName) string {
-	return fmt.Sprintf("%s_%s_%s", applicationName, tblName.SchemaName, tblName.TableName)
+func tempSlotName(tblName config.PgTableName) string {
+	return fmt.Sprintf("%s_%s_%s", config.ApplicationName, tblName.SchemaName, tblName.TableName)
 }
 
-func (r *Replicator) pgCreateTempRepSlot(tx *pgx.Tx, slotName string) (utils.LSN, error) {
+func (r *Replicator) pgCreateTempRepSlot(tx *pgx.Tx, slotName string) (dbtypes.LSN, error) {
 	var (
 		snapshotLSN, snapshotName, plugin sql.NullString
-		lsn                               utils.LSN
+		lsn                               dbtypes.LSN
+		tmpSlotName                       sql.NullString
 	)
 
 	row := tx.QueryRow(fmt.Sprintf("CREATE_REPLICATION_SLOT %s TEMPORARY LOGICAL %s USE_SNAPSHOT",
-		slotName, utils.OutputPlugin))
+		slotName, pgutils.OutputPlugin))
 
-	if err := row.Scan(&r.tempSlotName, &snapshotLSN, &snapshotName, &plugin); err != nil {
-		return utils.InvalidLSN, fmt.Errorf("could not scan: %v", err)
+	if err := row.Scan(&tmpSlotName, &snapshotLSN, &snapshotName, &plugin); err != nil {
+		return dbtypes.InvalidLSN, fmt.Errorf("could not scan: %v", err)
 	}
 
 	if err := lsn.Parse(snapshotLSN.String); err != nil {
-		return utils.InvalidLSN, fmt.Errorf("could not parse LSN: %v", err)
+		return dbtypes.InvalidLSN, fmt.Errorf("could not parse LSN: %v", err)
 	}
 
 	if _, err := tx.Exec(fmt.Sprintf("DROP_REPLICATION_SLOT %s", slotName)); err != nil {
-		return utils.InvalidLSN, fmt.Errorf("could not drop replication slot: %v", err)
+		return dbtypes.InvalidLSN, fmt.Errorf("could not drop replication slot: %v", err)
 	}
 
 	return lsn, nil
@@ -85,7 +88,6 @@ func (r *Replicator) checkPgSlotAndPub(tx *pgx.Tx) error {
 	}
 
 	errMsg := ""
-
 	if !slotExists {
 		errMsg += fmt.Sprintf("slot %q does not exist", r.cfg.Postgres.ReplicationSlotName)
 	}
@@ -104,9 +106,17 @@ func (r *Replicator) checkPgSlotAndPub(tx *pgx.Tx) error {
 	return nil
 }
 
+func (r *Replicator) pgCommit(tx *pgx.Tx) {
+	defer r.logger.Sync()
+	if err := tx.Commit(); err != nil {
+		r.logger.Warnf("could not commit: %v", err)
+	}
+}
+
 func (r *Replicator) pgRollback(tx *pgx.Tx) {
+	defer r.logger.Sync()
 	if err := tx.Rollback(); err != nil {
-		log.Printf("could not rollback: %v", err)
+		r.logger.Warnf("could not rollback: %v", err)
 	}
 }
 
@@ -180,13 +190,14 @@ func (r *Replicator) pgBegin(pgxConn *pgx.Conn) (*pgx.Tx, error) {
 	return tx, nil
 }
 
-func (r *Replicator) minLSN() utils.LSN {
-	result := utils.InvalidLSN
+func (r *Replicator) minLSN() dbtypes.LSN {
+	defer r.logger.Sync()
+	result := dbtypes.InvalidLSN
 
 	for key := range r.persStorage.Keys(nil) {
 		var (
 			tblName config.PgTableName
-			lsn     utils.LSN
+			lsn     dbtypes.LSN
 		)
 
 		if err := tblName.ParseKey(key); err != nil {
@@ -194,9 +205,11 @@ func (r *Replicator) minLSN() utils.LSN {
 		}
 
 		if err := lsn.Parse(r.persStorage.ReadString(key)); err != nil {
-			log.Printf("could not parse lsn for %q key: %v", key, err)
+			r.logger.Warnf("could not parse lsn for %q key: %v", key, err)
 			continue
 		}
+
+		r.logger.Debugf("consuming changes for table %q starting from %s", tblName, lsn)
 
 		if !result.IsValid() || lsn < result {
 			result = lsn
@@ -214,6 +227,18 @@ func (r *Replicator) pgCheck() error {
 
 	if err := r.checkPgSlotAndPub(tx); err != nil {
 		return err
+	}
+
+	for pgTbl := range r.cfg.Tables {
+		var repIdentity message.ReplicaIdentity
+		row := tx.QueryRow("select relreplident from pg_class where oid = $1::regclass;", pgTbl.NamespacedName())
+		if err := row.Scan(&repIdentity); err != nil {
+			return fmt.Errorf("could not fetch replica identity for table %q: %v", pgTbl, err)
+		}
+
+		if repIdentity != message.ReplicaIdentityFull {
+			return fmt.Errorf("table %q must have 'full' replica identity (currently is %s)", pgTbl.String(), repIdentity)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
