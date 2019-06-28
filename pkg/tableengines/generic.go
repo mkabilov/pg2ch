@@ -631,9 +631,9 @@ func (t *genericTable) Commit() error {
 }
 
 func (t *genericTable) SaveLSN(lsn utils.LSN) error {
-	if t.inSync {
-		return nil
-	}
+	//if t.inSync {
+	return nil
+	//}
 
 	return t.persStorage.Write(t.cfg.PgTableName.KeyName(), lsn.FormattedBytes())
 }

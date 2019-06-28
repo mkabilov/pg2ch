@@ -65,6 +65,7 @@ type Replicator struct {
 	finalLSN utils.LSN
 	beginMsg message.Begin
 
+	inTxMutex          *sync.RWMutex
 	inTx               bool // indicates if we're inside tx
 	tablesToMergeMutex *sync.Mutex
 	tablesToMerge      map[config.PgTableName]struct{}        // tables to be merged
@@ -85,6 +86,7 @@ func New(cfg config.Config) *Replicator {
 		oidName:  make(map[utils.OID]config.PgTableName),
 		errCh:    make(chan error),
 
+		inTxMutex:          &sync.RWMutex{},
 		tablesToMergeMutex: &sync.Mutex{},
 		tablesToMerge:      make(map[config.PgTableName]struct{}),
 		inTxTables:         make(map[config.PgTableName]clickHouseTable),
@@ -403,6 +405,9 @@ func (r *Replicator) inactivityMerge() {
 	ticker := time.NewTicker(r.cfg.InactivityFlushTimeout)
 
 	mergeFn := func() {
+		r.inTxMutex.RLock()
+		defer r.inTxMutex.RUnlock()
+
 		if r.inTx {
 			return
 		}

@@ -84,11 +84,17 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 
 	switch v := msg.(type) {
 	case message.Begin:
+		r.inTxMutex.Lock()
+		defer r.inTxMutex.Unlock()
+
 		r.inTx = true
 		r.finalLSN = v.FinalLSN
 		r.curTxMergeIsNeeded = false
 		r.isEmptyTx = true
 	case message.Commit:
+		r.inTxMutex.Lock()
+		defer r.inTxMutex.Unlock()
+
 		if r.curTxMergeIsNeeded {
 			if err := r.mergeTables(); err != nil {
 				return fmt.Errorf("could not merge tables: %v", err)

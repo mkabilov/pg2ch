@@ -60,6 +60,9 @@ func New(ctx context.Context, errCh chan error, dbCfg pgx.ConnConfig, slotName, 
 
 // AdvanceLSN advances lsn position
 func (c *consumer) AdvanceLSN(lsn utils.LSN) {
+	c.Lock()
+	defer c.Unlock()
+
 	c.currentLSN = lsn
 }
 
