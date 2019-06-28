@@ -257,6 +257,7 @@ func (r *Replicator) Init() error {
 	if err := r.pgConnect(); err != nil {
 		return fmt.Errorf("could not connect to postgresql: %v", err)
 	}
+	defer r.pgDisconnect()
 
 	if err := r.pgCheck(); err != nil {
 		return err
@@ -353,10 +354,11 @@ func (r *Replicator) Run() error {
 	if err = r.Init(); err != nil {
 		return err
 	}
-	defer r.pgDisconnect()
 
 	r.finalLSN = r.minLSN()
-	r.consumer = consumer.New(r.ctx, r.errCh, r.cfg.Postgres.ConnConfig,
+	pgConf := r.cfg.Postgres.ConnConfig
+	pgConf.RuntimeParams["application_name"] = applicationName
+	r.consumer = consumer.New(r.ctx, r.errCh, pgConf,
 		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.finalLSN)
 
 	if syncTables, err = r.GetSyncTables(); err != nil {
