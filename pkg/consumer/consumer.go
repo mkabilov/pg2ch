@@ -62,7 +62,6 @@ func New(ctx context.Context, errCh chan error, dbCfg pgx.ConnConfig, slotName, 
 func (c *consumer) AdvanceLSN(lsn utils.LSN) {
 	c.Lock()
 	defer c.Unlock()
-	log.Printf("advance LSN to %v", lsn)
 
 	c.currentLSN = lsn
 }
@@ -199,7 +198,7 @@ func (c *consumer) SendStatus() error {
 	c.Lock()
 	defer c.Unlock()
 
-	// log.Printf("sending status: %v", c.currentLSN) //TODO: move to debug log level
+	log.Printf("sending status: %v", c.currentLSN) //TODO: move to debug log level
 	status, err := pgx.NewStandbyStatus(uint64(c.currentLSN))
 
 	if err != nil {
