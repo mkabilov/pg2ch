@@ -266,8 +266,8 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN utils.LSN, w io.Writer)
 		t.rowsToSync = tblLiveTuples
 	}
 
-	log.Printf("Copy from %q postgres table to %q clickhouse table started. ~%d rows to copy",
-		t.cfg.PgTableName.String(), t.cfg.ChMainTable, t.rowsToSync)
+	log.Printf("Copy from %q postgres table to %q clickhouse table started. ~%d rows to copy, snapshotLSN: %v",
+		t.cfg.PgTableName.String(), t.cfg.ChMainTable, t.rowsToSync, snapshotLSN.String())
 	if !t.cfg.InitSyncSkipTruncate {
 		if err := t.truncateTable(t.cfg.ChMainTable); err != nil {
 			return fmt.Errorf("could not truncate main table: %v", err)
