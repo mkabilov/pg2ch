@@ -449,6 +449,7 @@ loop:
 			case syscall.SIGQUIT:
 				fallthrough
 			case syscall.SIGTERM:
+				log.Printf("got %s signal", sig)
 				break loop
 			default:
 				log.Printf("unhandled signal: %v", sig)
