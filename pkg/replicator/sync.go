@@ -16,10 +16,6 @@ func (r *Replicator) Sync(syncTables []config.PgTableName, async bool) error {
 		return nil
 	}
 
-	for _, pgTableName := range syncTables {
-		r.chTables[pgTableName].StartSync()
-	}
-
 	doneCh := make(chan struct{}, r.cfg.SyncWorkers)
 	for i := 0; i < r.cfg.SyncWorkers; i++ {
 		go r.syncJob(i, doneCh)
@@ -120,6 +116,12 @@ func (r *Replicator) GetSyncTables() ([]config.PgTableName, error) {
 
 func (r *Replicator) getTxAndLSN(conn *pgx.Conn, pgTableName config.PgTableName) (*pgx.Tx, utils.LSN, error) {
 	for attempt := 0; attempt < 10; attempt++ {
+		select {
+		case <-r.ctx.Done():
+			return nil, utils.InvalidLSN, fmt.Errorf("context done")
+		default:
+		}
+
 		tx, err := r.pgBegin(conn)
 		if err != nil {
 			log.Printf("could not begin transaction: %v", err)

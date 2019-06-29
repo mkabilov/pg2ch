@@ -134,14 +134,23 @@ func (r *Replicator) Run() error {
 		go r.redisServer()
 	}
 
-	if syncTables, err := r.GetSyncTables(); err != nil {
+	syncTables, err := r.GetSyncTables()
+	if err != nil {
 		return fmt.Errorf("could not get tables to sync: %v", err)
-	} else if err := r.Sync(syncTables, true); err != nil {
-		return fmt.Errorf("could not sync tables: %v", err)
+	}
+
+	if len(syncTables) > 0 {
+		for _, pgTableName := range syncTables {
+			r.chTables[pgTableName].StartSync()
+		}
 	}
 
 	if err := r.consumer.Run(r); err != nil {
 		return err
+	}
+
+	if err := r.Sync(syncTables, true); err != nil {
+		return fmt.Errorf("could not sync tables: %v", err)
 	}
 
 	r.waitForShutdown()
