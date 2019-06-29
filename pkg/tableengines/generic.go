@@ -18,6 +18,7 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
 	"github.com/mkabilov/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils/bulkupload"
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils/loader"
 	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
@@ -28,14 +29,7 @@ const (
 	attemptInterval = time.Second
 	maxAttempts     = 100
 
-	pgTrue  = 't'
-	pgFalse = 'f'
-
-	//ajBool specific value
-	ajBoolUnknown   = 'u'
 	columnDelimiter = '\t'
-
-	timestampLength = 19 // ->2019-06-08 15:50:01<- clickhouse does not support milliseconds
 
 	syncProgressBatch = 1000000
 	gzipFlushCount    = 10000
@@ -45,11 +39,7 @@ var (
 	zeroStr            = []byte("0")
 	oneStr             = []byte("1")
 	minusOneStr        = []byte("-1")
-	ajBoolUnkownValue  = []byte("2")
-	nullStr            = []byte(`\N`)
 	columnDelimiterStr = []byte("\t")
-
-	istoreNull = []byte("[]\t[]")
 )
 
 type chTuple []byte
@@ -173,62 +163,6 @@ func (t *genericTable) pgStatLiveTuples(pgTx *pgx.Tx) (uint64, error) {
 	return uint64(rows.Int64), nil
 }
 
-func convertColumn(colType string, val message.Tuple, colProps config.ColumnProperty) []byte {
-	switch colType {
-	case utils.PgAdjustIstore:
-		fallthrough
-	case utils.PgAdjustBigIstore:
-		if colProps.FlattenIstore {
-			if val.Kind == message.TupleNull {
-				return []byte(strings.Repeat("\t\\N", colProps.FlattenIstoreMax-colProps.FlattenIstoreMin+1))[1:]
-			}
-
-			return utils.IstoreValues(val.Value, colProps.FlattenIstoreMin, colProps.FlattenIstoreMax)
-		} else {
-			if val.Kind == message.TupleNull {
-				return istoreNull
-			}
-
-			return utils.IstoreToArrays(val.Value)
-		}
-	case utils.PgAdjustAjBool:
-		fallthrough
-	case utils.PgBoolean:
-		if val.Kind == message.TupleNull {
-			return nullStr
-		}
-
-		switch val.Value[0] {
-		case pgTrue:
-			return oneStr
-		case pgFalse:
-			return zeroStr
-		case ajBoolUnknown:
-			return ajBoolUnkownValue
-		}
-	case utils.PgTimestampWithTimeZone:
-		fallthrough
-	case utils.PgTimestamp:
-		if val.Kind == message.TupleNull {
-			return nullStr
-		}
-
-		return val.Value[:timestampLength]
-
-	case utils.PgTime:
-		fallthrough
-	case utils.PgTimeWithoutTimeZone:
-		//TODO
-	case utils.PgTimeWithTimeZone:
-		//TODO
-	}
-	if val.Kind == message.TupleNull {
-		return nullStr
-	}
-
-	return val.Value
-}
-
 func (t *genericTable) genSyncWrite(p []byte) error {
 	row, err := pgutils.DecodeCopyToTuples(p)
 	if err != nil {
@@ -335,8 +269,12 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN utils.LSN, w io.Writer)
 			return fmt.Errorf("could not truncate table: %v", err)
 		}
 	}
-	t.inSync = false
 
+	if err := t.persStorage.Write(t.cfg.PgTableName.KeyName(), snapshotLSN.FormattedBytes()); err != nil {
+		return fmt.Errorf("could not save lsn for table %q: %v", t.cfg.PgTableName, err)
+	}
+
+	t.inSync = false
 	return nil
 }
 
@@ -350,10 +288,8 @@ func (t *genericTable) processChTuples(lsn utils.LSN, set chTuples) (mergeIsNeed
 				row = append(row, lsn.StrBytes()...)
 
 				t.auxTblRowID++
-			} else {
-				if lsn < t.syncSnapshotLSN {
-					return false, nil
-				}
+			} else if lsn < t.syncSnapshotLSN {
+				return false, nil
 			}
 
 			if err := t.writeLine(row); err != nil {
@@ -462,7 +398,7 @@ func (t *genericTable) tryFlushToMainTable() error { //TODO: consider better nam
 }
 
 //FlushToMainTable flushes data from buffer table to the main one
-func (t *genericTable) FlushToMainTable() error {
+func (t *genericTable) FlushToMainTable(lsn utils.LSN) error {
 	t.Lock()
 	defer t.Unlock()
 
@@ -502,6 +438,12 @@ func (t *genericTable) FlushToMainTable() error {
 		}
 	}
 
+	if !t.inSync {
+		if err := t.persStorage.Write(t.cfg.PgTableName.KeyName(), lsn.FormattedBytes()); err != nil {
+			return fmt.Errorf("could not save lsn for table %q: %v", t.cfg.PgTableName, err)
+		}
+	}
+
 	return nil
 }
 
@@ -513,7 +455,7 @@ func (t *genericTable) convertRow(row message.Row) chTuple {
 			continue
 		}
 
-		values := convertColumn(t.cfg.PgColumns[col.Name].BaseType, row[colId], t.cfg.ColumnProperties[col.Name])
+		values := chutils.ConvertColumn(t.cfg.PgColumns[col.Name].BaseType, row[colId], t.cfg.ColumnProperties[col.Name])
 		if colId > 0 {
 			res = append(res, columnDelimiter)
 		}
@@ -624,12 +566,4 @@ func (t *genericTable) Begin() error {
 func (t *genericTable) Commit() error {
 	t.Unlock()
 	return nil
-}
-
-func (t *genericTable) SaveLSN(lsn utils.LSN) error {
-	if t.inSync {
-		return nil
-	}
-
-	return t.persStorage.Write(t.cfg.PgTableName.KeyName(), lsn.FormattedBytes())
 }

@@ -39,8 +39,7 @@ type clickHouseTable interface {
 	Truncate(lsn utils.LSN) error
 	Commit() error
 
-	FlushToMainTable() error
-	SaveLSN(utils.LSN) error
+	FlushToMainTable(utils.LSN) error
 }
 
 type Replicator struct {
@@ -59,7 +58,6 @@ type Replicator struct {
 	oidName  map[utils.OID]config.PgTableName
 
 	finalLSN utils.LSN
-	beginMsg message.Begin
 
 	inTxMutex          *sync.RWMutex
 	inTx               bool // indicates if we're inside tx
@@ -69,7 +67,6 @@ type Replicator struct {
 	curTxMergeIsNeeded bool                                   // if tables in the current transaction are needed to be merged
 	generationID       uint64                                 // wrap with lock
 	isEmptyTx          bool
-	syncJobTableName   config.PgTableName
 	syncJobs           chan config.PgTableName
 	tblRelMsgs         map[config.PgTableName]message.Relation
 }
@@ -206,10 +203,6 @@ func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 	tbl := r.chTables[pgTableName]
 	if err := tbl.Sync(tx, snapshotLSN); err != nil {
 		return fmt.Errorf("could not sync: %v", err)
-	}
-
-	if err := tbl.SaveLSN(snapshotLSN); err != nil {
-		return fmt.Errorf("could not store snapshot LSN for table %s", pgTableName.String())
 	}
 
 	return nil
@@ -379,16 +372,12 @@ func (r *Replicator) Run() error {
 
 	for tblName, tbl := range r.chTables {
 		log.Printf("flushing buffer data for %s table", tblName.String()) // debug
-		if err := tbl.FlushToMainTable(); err != nil {
+		if err := tbl.FlushToMainTable(r.finalLSN); err != nil {
 			log.Printf("could not flush %s table: %v", tblName.String(), err)
 		}
 
 		if !r.finalLSN.IsValid() {
 			continue
-		}
-
-		if err := tbl.SaveLSN(r.finalLSN); err != nil {
-			return fmt.Errorf("could not store lsn for table %s", tblName.String())
 		}
 	}
 
@@ -413,12 +402,13 @@ func (r *Replicator) inactivityMerge() {
 		}
 
 		r.tablesToMergeMutex.Lock()
-		if err := r.mergeTables(); err != nil {
+		if err := r.flushTables(); err != nil {
 			select {
 			case r.errCh <- fmt.Errorf("could not backgound merge tables: %v", err):
 			default:
 			}
 		}
+		r.consumer.AdvanceLSN(r.finalLSN)
 		r.tablesToMergeMutex.Unlock()
 	}
 

@@ -10,27 +10,18 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
-func (r *Replicator) mergeTables() error {
+func (r *Replicator) flushTables() error {
 	for tblName := range r.tablesToMerge {
 		if _, ok := r.inTxTables[tblName]; ok {
 			continue
 		}
 		tbl := r.chTables[tblName]
 
-		if err := tbl.FlushToMainTable(); err != nil {
+		if err := tbl.FlushToMainTable(r.finalLSN); err != nil {
 			return fmt.Errorf("could not commit %s table: %v", tblName.String(), err)
 		}
 
 		delete(r.tablesToMerge, tblName)
-
-		if err := tbl.SaveLSN(r.finalLSN); err != nil {
-			return fmt.Errorf("could not store lsn for table %q: %v", tblName.String(), err)
-		}
-	}
-
-	r.consumer.AdvanceLSN(r.finalLSN)
-	if err := r.consumer.SendStatus(); err != nil {
-		log.Printf("could not send status: %v", err)
 	}
 
 	return nil
@@ -100,12 +91,12 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 		defer r.inTxMutex.Unlock()
 
 		if r.curTxMergeIsNeeded {
-			if err := r.mergeTables(); err != nil {
+			if err := r.flushTables(); err != nil {
 				return fmt.Errorf("could not merge tables: %v", err)
 			}
-		} else {
-			r.consumer.AdvanceLSN(r.finalLSN)
 		}
+		r.consumer.AdvanceLSN(r.finalLSN)
+
 		if !r.isEmptyTx {
 			r.incrementGeneration()
 
