@@ -29,6 +29,7 @@ func (r *Replicator) mergeTables() error {
 	}
 
 	r.consumer.AdvanceLSN(r.finalLSN)
+	r.consumer.SendStatus()
 
 	return nil
 }
@@ -58,7 +59,7 @@ func (r *Replicator) getTable(oid utils.OID) (chTbl clickHouseTable, skip bool, 
 		log.Fatalf("incorrect lsn stored for %q table: %v", tblName.String(), err)
 	}
 
-	skip = r.finalLSN <= lsn
+	skip = r.consumer.CurrentLSN() <= lsn
 	if _, ok := r.inTxTables[tblName]; !ok && !skip { // TODO: skip adding tables with no buffer table
 		r.inTxTables[tblName] = chTbl
 		startTx = true

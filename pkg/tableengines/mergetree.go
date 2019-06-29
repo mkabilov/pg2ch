@@ -34,8 +34,8 @@ func NewMergeTree(ctx context.Context, persStorage *diskv.Diskv, connUrl string,
 }
 
 // Sync performs initial sync of the data; pgTx is a transaction in which temporary replication slot is created
-func (t *mergeTreeTable) Sync(pgTx *pgx.Tx, lsn utils.LSN) error {
-	return t.genSync(pgTx, lsn, t)
+func (t *mergeTreeTable) Sync(pgTx *pgx.Tx, snapshotLSN utils.LSN) error {
+	return t.genSync(pgTx, snapshotLSN, t)
 }
 
 // Write implements io.Writer which is used during the Sync process, see genSync method

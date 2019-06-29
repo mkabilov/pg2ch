@@ -13,6 +13,8 @@ import (
 const forbiddenError = "cannot modify '" + config.TableLSNKeyPrefix + "*' keys"
 
 func (r *Replicator) redisServer() {
+	log.Printf("listening on %s", r.cfg.RedisBind)
+
 	err := redcon.ListenAndServe(r.cfg.RedisBind,
 		func(conn redcon.Conn, cmd redcon.Command) {
 			switch strings.ToLower(string(cmd.Args[0])) {
@@ -23,6 +25,8 @@ func (r *Replicator) redisServer() {
 				if err := conn.Close(); err != nil {
 					log.Printf("could not close redis connection: %v", err)
 				}
+			case "lsn":
+				conn.WriteString(fmt.Sprintf("last final LSN: %v", r.consumer.CurrentLSN().String()))
 			case "set":
 				if len(cmd.Args) != 3 {
 					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")

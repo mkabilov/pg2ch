@@ -74,16 +74,15 @@ type genericTable struct {
 	tupleColumns   []message.Column // Columns description taken from RELATION rep message
 	generationID   *uint64
 
+	inSync            bool // protected via table mutex
+	syncedRows        uint64
+	rowsToSync        uint64
 	syncLastBatchTime time.Time //to calculate rate
+	auxTblRowID       uint64
 
-	inSync        bool
-	inSyncRowID   uint64
-	syncRows      uint64
-	syncTotalRows uint64
-
-	bulkUploader *bulkupload.BulkUpload
-	minLSN       utils.LSN
-	persStorage  *diskv.Diskv
+	bulkUploader    *bulkupload.BulkUpload
+	syncSnapshotLSN utils.LSN // LSN of the initial copy snapshot
+	persStorage     *diskv.Diskv
 }
 
 func newGenericTable(ctx context.Context, persStorage *diskv.Diskv, connUrl string, tblCfg config.Table, genID *uint64) genericTable {
@@ -154,20 +153,8 @@ func (t *genericTable) writeLine(val []byte) error {
 	return nil
 }
 
-func (t *genericTable) truncateMainTable() error {
-	if err := t.chLoader.Exec(fmt.Sprintf("truncate table %s", t.cfg.ChMainTable)); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (t *genericTable) truncateBufTable() error {
-	if t.cfg.ChBufferTable.IsEmpty() {
-		return nil
-	}
-
-	if err := t.chLoader.Exec(fmt.Sprintf("truncate table %s", t.cfg.ChBufferTable)); err != nil {
+func (t *genericTable) truncateTable(tableName config.ChTableName) error {
+	if err := t.chLoader.Exec(fmt.Sprintf("truncate table %s.%s", tableName.DatabaseName, tableName.TableName)); err != nil {
 		return err
 	}
 
@@ -252,33 +239,47 @@ func (t *genericTable) genSyncWrite(p []byte) error {
 		return err
 	}
 
-	t.syncRows++
+	t.syncedRows++
 
 	return nil
 }
 
-func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
-	t.minLSN = lsn
-	tblLiveTuples, err := t.pgStatLiveTuples(pgTx)
-	if err != nil {
-		log.Printf("Could not get approx number of rows in the source table: %v", err)
+func (t *genericTable) StartSync() {
+	t.Lock()
+	defer t.Unlock()
+
+	t.inSync = true
+}
+
+func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN utils.LSN, w io.Writer) error {
+	if !t.cfg.ChSyncAuxTable.IsEmpty() {
+		if err := t.truncateTable(t.cfg.ChSyncAuxTable); err != nil {
+			return fmt.Errorf("could not truncate aux table: %v", err)
+		}
 	}
-	t.syncTotalRows = tblLiveTuples
+
+	t.syncSnapshotLSN = snapshotLSN
+
+	if tblLiveTuples, err := t.pgStatLiveTuples(pgTx); err != nil {
+		log.Printf("Could not get approx number of rows in the source table: %v", err)
+	} else {
+		t.rowsToSync = tblLiveTuples
+	}
 
 	log.Printf("Copy from %q postgres table to %q clickhouse table started. ~%d rows to copy",
-		t.cfg.PgTableName.String(), t.cfg.ChMainTable, t.syncTotalRows)
+		t.cfg.PgTableName.String(), t.cfg.ChMainTable, t.rowsToSync)
 	if !t.cfg.InitSyncSkipTruncate {
-		if err := t.truncateMainTable(); err != nil {
+		if err := t.truncateTable(t.cfg.ChMainTable); err != nil {
 			return fmt.Errorf("could not truncate main table: %v", err)
 		}
 	}
-	t.syncRows = 0
+	t.syncedRows = 0
 
-	loaderErrCh := make(chan error, 1)
-	if err := t.bulkUploader.Init(); err != nil {
-		return fmt.Errorf("could not init bulkuploader")
+	if err := t.bulkUploader.Start(); err != nil {
+		return fmt.Errorf("could not init bulkuploader: %v", err)
 	}
 
+	loaderErrCh := make(chan error, 1)
 	go func(errCh chan error) {
 		errCh <- t.bulkUploader.BulkUpload(t.cfg.ChMainTable, t.chUsedColumns)
 	}(loaderErrCh)
@@ -290,25 +291,23 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, lsn utils.LSN, w io.Writer) error {
 		return fmt.Errorf("could not copy: %v", err)
 	}
 
-	if err := t.bulkUploader.PipeFinishWriting(); err != nil {
-		return fmt.Errorf("could not close gzip: %v", err)
+	if err := t.bulkUploader.Finish(); err != nil {
+		return fmt.Errorf("could not finalize bulkuploader: %v", err)
 	}
 
-	if ct.RowsAffected() != int64(t.syncRows) {
-		return fmt.Errorf("number of rows inserted to clickhouse doesn't match the initial number of rows in pg")
+	if pgRows := ct.RowsAffected(); pgRows != int64(t.syncedRows) {
+		return fmt.Errorf(
+			"number of rows inserted to clickhouse(%v) doesn't match the initial number of rows in pg(%v)",
+			t.syncedRows, pgRows)
 	}
 
-	log.Printf("%s: copied during sync: %d rows", t.cfg.PgTableName.String(), t.syncRows)
+	log.Printf("%s: copied during sync: %d rows", t.cfg.PgTableName.String(), t.syncedRows)
 
 	if err := <-loaderErrCh; err != nil {
 		return fmt.Errorf("could not load to CH: %v", err)
 	}
 	close(loaderErrCh)
 
-	return t.postSync(lsn)
-}
-
-func (t *genericTable) postSync(lsn utils.LSN) error {
 	// post sync
 	log.Printf("%s: starting post sync. waiting for current tx to finish", t.cfg.PgTableName.String())
 	t.Lock()
@@ -318,21 +317,24 @@ func (t *genericTable) postSync(lsn utils.LSN) error {
 		return fmt.Errorf("could not flush buffer: %v", err)
 	}
 
-	chColumns := strings.Join(t.chUsedColumns, ",")
+	log.Printf("%s: delta size: %s", t.cfg.PgTableName.String(), t.deltaSize(snapshotLSN))
 
-	log.Printf("%s: delta size: %s", t.cfg.PgTableName.String(), t.deltaSize(lsn))
-
-	query := fmt.Sprintf("INSERT INTO %s(%s) SELECT %s FROM %s WHERE %s > %d ORDER BY %s",
-		t.cfg.ChMainTable, chColumns, chColumns, t.cfg.ChSyncAuxTable, t.cfg.LsnColumnName, uint64(lsn), t.cfg.BufferTableRowIdColumn)
-
-	if err := t.chLoader.Exec(query); err != nil {
+	if err := t.chLoader.Exec(
+		fmt.Sprintf("INSERT INTO %[1]s(%[2]s) SELECT %[2]s FROM %[3]s WHERE %[4]s > %[5]d ORDER BY %[6]s",
+			t.cfg.ChMainTable,
+			strings.Join(t.chUsedColumns, ","),
+			t.cfg.ChSyncAuxTable,
+			t.cfg.LsnColumnName,
+			uint64(snapshotLSN),
+			t.cfg.BufferTableRowIdColumn)); err != nil {
 		return fmt.Errorf("could not merge with sync aux table: %v", err)
 	}
 
-	if err := t.chLoader.Exec(fmt.Sprintf("TRUNCATE TABLE %s", t.cfg.ChSyncAuxTable)); err != nil {
-		return fmt.Errorf("could not truncate table: %v", err)
+	if !t.cfg.ChSyncAuxTable.IsEmpty() {
+		if err := t.truncateTable(t.cfg.ChSyncAuxTable); err != nil {
+			return fmt.Errorf("could not truncate table: %v", err)
+		}
 	}
-
 	t.inSync = false
 
 	return nil
@@ -343,13 +345,13 @@ func (t *genericTable) processChTuples(lsn utils.LSN, set chTuples) (mergeIsNeed
 		for _, row := range set {
 			if t.inSync {
 				row = append(row, '\t')
-				row = append(row, strconv.FormatUint(t.inSyncRowID, 10)...)
+				row = append(row, strconv.FormatUint(t.auxTblRowID, 10)...)
 				row = append(row, '\t')
 				row = append(row, lsn.StrBytes()...)
 
-				t.inSyncRowID++
+				t.auxTblRowID++
 			} else {
-				if lsn < t.minLSN {
+				if lsn < t.syncSnapshotLSN {
 					return false, nil
 				}
 			}
@@ -403,22 +405,22 @@ func (t *genericTable) flushBuffer() error {
 }
 
 func (t *genericTable) printSyncProgress() {
-	if t.syncRows%syncProgressBatch == 0 {
+	if t.syncedRows%syncProgressBatch == 0 {
 		var (
 			eta  time.Duration
 			left uint64
 		)
 		speed := float64(syncProgressBatch) / time.Since(t.syncLastBatchTime).Seconds()
-		if t.syncTotalRows >= t.syncRows {
-			left = t.syncTotalRows - t.syncRows
+		if t.rowsToSync >= t.syncedRows {
+			left = t.rowsToSync - t.syncedRows
 		}
 
-		if t.syncRows < t.syncTotalRows {
+		if t.syncedRows < t.rowsToSync {
 			eta = time.Second * time.Duration(left/uint64(speed))
 		}
 
 		log.Printf("%s: %d rows copied to %q (ETA: %v left: %v speed: %.0f rows/s)",
-			t.cfg.PgTableName.String(), t.syncRows, t.cfg.ChMainTable, eta.Truncate(time.Second), left, speed)
+			t.cfg.PgTableName.String(), t.syncedRows, t.cfg.ChMainTable, eta.Truncate(time.Second), left, speed)
 
 		t.syncLastBatchTime = time.Now()
 	}
@@ -436,7 +438,7 @@ func (t *genericTable) attemptFlushBuffer() error {
 		}
 	} else {
 		if err := t.chLoader.BufferFlush(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
-			return fmt.Errorf("could not flush buffer for %q table: %v", t.cfg.ChMainTable)
+			return fmt.Errorf("could not flush buffer for %q table: %v", t.cfg.ChMainTable, err)
 		}
 	}
 
@@ -494,8 +496,10 @@ func (t *genericTable) FlushToMainTable() error {
 		}
 	}
 
-	if err := t.truncateBufTable(); err != nil {
-		return fmt.Errorf("could not truncate buffer table: %v", err)
+	if !t.cfg.ChBufferTable.IsEmpty() {
+		if err := t.truncateTable(t.cfg.ChBufferTable); err != nil {
+			return fmt.Errorf("could not truncate buffer table: %v", err)
+		}
 	}
 
 	return nil
@@ -530,16 +534,24 @@ func (t *genericTable) convertRow(row message.Row) chTuple {
 func (t *genericTable) Truncate(lsn utils.LSN) error {
 	t.bufferCmdId = 0
 
-	if err := t.truncateMainTable(); err != nil {
+	if err := t.truncateTable(t.cfg.ChMainTable); err != nil {
 		return err
 	}
 
-	return t.truncateBufTable()
+	if t.cfg.ChBufferTable.IsEmpty() {
+		return nil
+	}
+
+	return t.truncateTable(t.cfg.ChBufferTable)
 }
 
-// Init performs initialization
+// Start performs initialization
 func (t *genericTable) Init() error {
-	return t.truncateBufTable()
+	if t.cfg.ChBufferTable.IsEmpty() {
+		return nil
+	}
+
+	return t.truncateTable(t.cfg.ChBufferTable)
 }
 
 func (t *genericTable) compareRows(a, b message.Row) (bool, bool) {
@@ -593,16 +605,6 @@ func (t *genericTable) syncAuxTableColumns() []string {
 
 func (t *genericTable) bufTableColumns() []string {
 	return append(t.chUsedColumns, t.cfg.BufferTableRowIdColumn)
-}
-
-func (t *genericTable) InitSync() error {
-	if err := t.chLoader.Exec(fmt.Sprintf("TRUNCATE TABLE %s", t.cfg.ChSyncAuxTable)); err != nil {
-		return fmt.Errorf("could not truncat table: %v", err)
-	}
-
-	t.inSync = true
-
-	return nil
 }
 
 func (t *genericTable) deltaSize(lsn utils.LSN) string {

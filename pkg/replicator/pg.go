@@ -215,6 +215,7 @@ func (r *Replicator) pgCheck() error {
 	if err := r.checkPgSlotAndPub(tx); err != nil {
 		return err
 	}
+	//TODO: check tables' replica identity
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("could not commit: %v", err)

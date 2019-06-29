@@ -95,12 +95,12 @@ func (c *BulkUpload) BulkUpload(tableName config.ChTableName, columns []string) 
 	return nil
 }
 
-func (c *BulkUpload) Init() error {
+func (c *BulkUpload) Start() error {
 	var err error
 
 	c.buf = bufPool.Get().(buffer.Buffer)
 	c.pipeReader, c.pipeWriter = nio.Pipe(c.buf)
-	c.gzipWriter, err = gzip.NewWriterLevel(c.pipeWriter, gzip.BestSpeed)
+	c.gzipWriter, err = gzip.NewWriterLevel(c.pipeWriter, gzip.BestSpeed) // TODO: move gzip level to config
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func (c *BulkUpload) Write(p []byte) error {
 	return err
 }
 
-func (c *BulkUpload) PipeFinishWriting() error {
+func (c *BulkUpload) Finish() error {
 	if err := c.gzipWriter.Close(); err != nil {
 		return err
 	}

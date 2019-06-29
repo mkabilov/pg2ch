@@ -29,11 +29,12 @@ type Interface interface {
 	SendStatus() error
 	Run(Handler) error
 	AdvanceLSN(utils.LSN)
+	CurrentLSN() utils.LSN
 	Wait()
 }
 
 type consumer struct {
-	sync.Mutex
+	sync.RWMutex
 
 	waitGr          *sync.WaitGroup
 	ctx             context.Context
@@ -56,6 +57,13 @@ func New(ctx context.Context, errCh chan error, dbCfg pgx.ConnConfig, slotName, 
 		currentLSN:      startLSN,
 		errCh:           errCh,
 	}
+}
+
+func (c *consumer) CurrentLSN() utils.LSN {
+	c.RLock()
+	defer c.RUnlock()
+
+	return c.currentLSN
 }
 
 // AdvanceLSN advances lsn position
