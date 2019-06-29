@@ -40,7 +40,6 @@ type clickHouseTable interface {
 	Truncate(lsn utils.LSN) error
 	Commit() error
 
-	SetTupleColumns([]message.Column)
 	FlushToMainTable() error
 	SaveLSN(utils.LSN) error
 }
@@ -52,11 +51,10 @@ type Replicator struct {
 	cfg      config.Config
 	errCh    chan error
 
-	chConnString string
-
-	pgDeltaConn *pgx.Conn
-
-	persStorage *diskv.Diskv
+	chConnString  string
+	pgDeltaConn   *pgx.Conn
+	pgxConnConfig pgx.ConnConfig
+	persStorage   *diskv.Diskv
 
 	chTables     map[config.PgTableName]clickHouseTable
 	oidName      map[utils.OID]config.PgTableName
@@ -75,8 +73,7 @@ type Replicator struct {
 	isEmptyTx          bool
 	syncJobTableName   config.PgTableName
 	syncJobs           chan config.PgTableName
-
-	pgxConnConfig pgx.ConnConfig
+	tblRelMsgs         map[config.PgTableName]message.Relation
 }
 
 func New(cfg config.Config) *Replicator {
@@ -95,6 +92,7 @@ func New(cfg config.Config) *Replicator {
 		pgxConnConfig: cfg.Postgres.Merge(pgx.ConnConfig{
 			RuntimeParams:        map[string]string{"replication": "database", "application_name": applicationName},
 			PreferSimpleProtocol: true}),
+		tblRelMsgs: make(map[config.PgTableName]message.Relation, len(cfg.Tables)),
 	}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 
@@ -356,9 +354,7 @@ func (r *Replicator) Run() error {
 	}
 
 	r.finalLSN = r.minLSN()
-	pgConf := r.cfg.Postgres.ConnConfig
-	pgConf.RuntimeParams["application_name"] = applicationName
-	r.consumer = consumer.New(r.ctx, r.errCh, pgConf,
+	r.consumer = consumer.New(r.ctx, r.errCh, r.pgxConnConfig,
 		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.finalLSN)
 
 	if syncTables, err = r.GetSyncTables(); err != nil {

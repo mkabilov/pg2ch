@@ -542,12 +542,6 @@ func (t *genericTable) Init() error {
 	return t.truncateBufTable()
 }
 
-// SetTupleColumns sets the tuple columns
-func (t *genericTable) SetTupleColumns(tupleColumns []message.Column) {
-	//TODO: suggest alter table message for adding/deleting new/old columns on clickhouse side
-	t.tupleColumns = tupleColumns
-}
-
 func (t *genericTable) compareRows(a, b message.Row) (bool, bool) {
 	equal := true
 	keyColumnChanged := false

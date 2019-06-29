@@ -1,6 +1,7 @@
 package replicator
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 
@@ -120,7 +121,11 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 			}
 		}
 
-		chTbl.SetTupleColumns(v.Columns)
+		if relMsg, ok := r.tblRelMsgs[r.oidName[v.OID]]; ok {
+			if bytes.Compare(relMsg.Raw, v.Raw) != 0 {
+				log.Fatalln("table name or structure has been changed")
+			}
+		}
 	case message.Insert:
 		chTbl, skip, startTx := r.getTable(v.RelationOID)
 		if skip {
