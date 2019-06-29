@@ -29,23 +29,23 @@ func (r *Replicator) mergeTables() error {
 	}
 
 	r.consumer.AdvanceLSN(r.finalLSN)
-	r.consumer.SendStatus()
+	if err := r.consumer.SendStatus(); err != nil {
+		log.Printf("could not send status: %v", err)
+	}
 
 	return nil
 }
 
-func (r *Replicator) getTable(oid utils.OID) (chTbl clickHouseTable, skip bool, startTx bool) {
+func (r *Replicator) getTable(oid utils.OID) (chTbl clickHouseTable, err error) {
 	var lsn utils.LSN
 
 	tblName, ok := r.oidName[oid]
 	if !ok {
-		skip = true
 		return
 	}
 
 	chTbl, ok = r.chTables[tblName]
 	if !ok {
-		skip = true
 		return
 	}
 
@@ -53,16 +53,22 @@ func (r *Replicator) getTable(oid utils.OID) (chTbl clickHouseTable, skip bool, 
 		r.tablesToMerge[tblName] = struct{}{}
 	}
 
-	if tblKey := tblName.KeyName(); !r.persStorage.Has(tblKey) {
-		skip = false
-	} else if err := lsn.Parse(r.persStorage.ReadString(tblKey)); err != nil {
-		log.Fatalf("incorrect lsn stored for %q table: %v", tblName.String(), err)
+	if tblKey := tblName.KeyName(); r.persStorage.Has(tblKey) {
+		if err := lsn.Parse(r.persStorage.ReadString(tblKey)); err != nil {
+			log.Fatalf("incorrect lsn stored for %q table: %v", tblName.String(), err)
+		}
 	}
 
-	skip = r.consumer.CurrentLSN() <= lsn
-	if _, ok := r.inTxTables[tblName]; !ok && !skip { // TODO: skip adding tables with no buffer table
+	if r.finalLSN <= lsn {
+		chTbl = nil
+	}
+
+	if _, ok := r.inTxTables[tblName]; !ok && chTbl != nil { // TODO: skip adding tables with no buffer table
 		r.inTxTables[tblName] = chTbl
-		startTx = true
+		err = chTbl.Begin()
+		if err != nil {
+			err = fmt.Errorf("could not begin tx for table %q: %v", tblName, err)
+		}
 	}
 
 	return
@@ -112,14 +118,10 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 		r.inTxTables = make(map[config.PgTableName]clickHouseTable)
 		r.inTx = false
 	case message.Relation:
-		chTbl, skip, startTx := r.getTable(v.OID)
-		if skip {
+		if chTbl, err := r.getTable(v.OID); err != nil {
+			return err
+		} else if chTbl == nil {
 			break
-		}
-		if startTx {
-			if err := chTbl.Begin(); err != nil {
-				return fmt.Errorf("could not begin tx: %v", err)
-			}
 		}
 
 		if relMsg, ok := r.tblRelMsgs[r.oidName[v.OID]]; ok {
@@ -128,14 +130,11 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 			}
 		}
 	case message.Insert:
-		chTbl, skip, startTx := r.getTable(v.RelationOID)
-		if skip {
+		chTbl, err := r.getTable(v.RelationOID)
+		if err != nil {
+			return err
+		} else if chTbl == nil {
 			break
-		}
-		if startTx {
-			if err := chTbl.Begin(); err != nil {
-				return fmt.Errorf("could not begin tx: %v", err)
-			}
 		}
 
 		if mergeIsNeeded, err := chTbl.Insert(r.finalLSN, v.NewRow); err != nil {
@@ -143,16 +142,14 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 		} else {
 			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
 		}
+
 		r.isEmptyTx = false
 	case message.Update:
-		chTbl, skip, startTx := r.getTable(v.RelationOID)
-		if skip {
+		chTbl, err := r.getTable(v.RelationOID)
+		if err != nil {
+			return err
+		} else if chTbl == nil {
 			break
-		}
-		if startTx {
-			if err := chTbl.Begin(); err != nil {
-				return fmt.Errorf("could not begin tx: %v", err)
-			}
 		}
 
 		if mergeIsNeeded, err := chTbl.Update(r.finalLSN, v.OldRow, v.NewRow); err != nil {
@@ -160,16 +157,14 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 		} else {
 			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
 		}
+
 		r.isEmptyTx = false
 	case message.Delete:
-		chTbl, skip, startTx := r.getTable(v.RelationOID)
-		if skip {
+		chTbl, err := r.getTable(v.RelationOID)
+		if err != nil {
+			return err
+		} else if chTbl == nil {
 			break
-		}
-		if startTx {
-			if err := chTbl.Begin(); err != nil {
-				return fmt.Errorf("could not begin tx: %v", err)
-			}
 		}
 
 		if mergeIsNeeded, err := chTbl.Delete(r.finalLSN, v.OldRow); err != nil {
@@ -177,23 +172,21 @@ func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
 		} else {
 			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
 		}
+
 		r.isEmptyTx = false
 	case message.Truncate:
 		for _, oid := range v.RelationOIDs {
-			if chTbl, skip, startTx := r.getTable(oid); skip {
+			if chTbl, err := r.getTable(oid); err != nil {
+				return err
+			} else if chTbl == nil {
 				continue
 			} else {
-				if startTx {
-					if err := chTbl.Begin(); err != nil {
-						return fmt.Errorf("could not begin tx: %v", err)
-					}
-				}
-
 				if err := chTbl.Truncate(lsn); err != nil {
 					return err
 				}
 			}
 		}
+
 		r.isEmptyTx = false
 	}
 
