@@ -98,8 +98,10 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN utils.LSN, w io.Writer)
 	}
 	close(loaderErrCh)
 
-	// post sync
-	log.Printf("%s: starting post sync. waiting for current tx to finish", t.cfg.PgTableName.String())
+	return t.postSync()
+}
+
+func (t *genericTable) postSync() error {
 	t.Lock()
 	defer t.Unlock()
 
@@ -107,7 +109,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN utils.LSN, w io.Writer)
 		return fmt.Errorf("could not flush buffer: %v", err)
 	}
 
-	log.Printf("%s: delta size: %s", t.cfg.PgTableName.String(), t.deltaSize(snapshotLSN))
+	log.Printf("%s: delta size: %s", t.cfg.PgTableName.String(), t.deltaSize(t.syncSnapshotLSN))
 
 	if err := t.chLoader.Exec(
 		fmt.Sprintf("INSERT INTO %[1]s(%[2]s) SELECT %[2]s FROM %[3]s WHERE %[4]s > %[5]d ORDER BY %[6]s",
@@ -115,7 +117,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN utils.LSN, w io.Writer)
 			strings.Join(t.chUsedColumns, ","),
 			t.cfg.ChSyncAuxTable,
 			t.cfg.LsnColumnName,
-			uint64(snapshotLSN),
+			uint64(t.syncSnapshotLSN),
 			t.cfg.BufferTableRowIdColumn)); err != nil {
 		return fmt.Errorf("could not merge with sync aux table: %v", err)
 	}
@@ -126,7 +128,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN utils.LSN, w io.Writer)
 		}
 	}
 
-	if err := t.persStorage.Write(t.cfg.PgTableName.KeyName(), snapshotLSN.FormattedBytes()); err != nil {
+	if err := t.persStorage.Write(t.cfg.PgTableName.KeyName(), t.syncSnapshotLSN.FormattedBytes()); err != nil {
 		return fmt.Errorf("could not save lsn for table %q: %v", t.cfg.PgTableName, err)
 	}
 

@@ -63,7 +63,7 @@ type genericTable struct {
 	auxTblRowID       uint64
 
 	bulkUploader    *bulkupload.BulkUpload
-	syncSnapshotLSN utils.LSN // LSN of the initial copy snapshot
+	syncSnapshotLSN utils.LSN // LSN of the initial copy snapshot, protected via table mutex
 	persStorage     *diskv.Diskv
 }
 

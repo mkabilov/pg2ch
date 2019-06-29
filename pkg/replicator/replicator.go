@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"sort"
 	"strconv"
 	"sync"
 	"syscall"
@@ -94,6 +93,82 @@ func New(cfg config.Config) *Replicator {
 	return &r
 }
 
+func (r *Replicator) Init() error {
+	r.persStorage = diskv.New(diskv.Options{
+		BasePath:     r.cfg.PersStoragePath,
+		CacheSizeMax: 1024 * 1024, // 1MB
+	})
+
+	if err := r.pgConnect(); err != nil {
+		return fmt.Errorf("could not connect to postgresql: %v", err)
+	}
+	defer r.pgDisconnect()
+
+	if err := r.pgCheck(); err != nil {
+		return err
+	}
+
+	if err := r.readGenerationID(); err != nil {
+		return fmt.Errorf("could not get start lsn positions: %v", err)
+	}
+
+	if err := r.initTables(); err != nil {
+		return fmt.Errorf("could not init tables: %v", err)
+	}
+
+	return nil
+}
+
+func (r *Replicator) Run() error {
+	if err := r.Init(); err != nil {
+		return err
+	}
+
+	r.consumer = consumer.New(r.ctx, r.errCh, r.pgxConnConfig,
+		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.minLSN())
+
+	go r.logErrCh()
+	go r.inactivityMerge()
+
+	if r.cfg.RedisBind != "" {
+		go r.redisServer()
+	}
+
+	if syncTables, err := r.GetSyncTables(); err != nil {
+		return fmt.Errorf("could not get tables to sync: %v", err)
+	} else if err := r.Sync(syncTables, true); err != nil {
+		return fmt.Errorf("could not sync tables: %v", err)
+	}
+
+	if err := r.consumer.Run(r); err != nil {
+		return err
+	}
+
+	r.waitForShutdown()
+	r.cancel()
+	log.Printf("waiting for consumer to finish") // debug
+	r.consumer.Wait()
+
+	for tblName, tbl := range r.chTables {
+		log.Printf("flushing buffer data for %s table", tblName.String()) // debug
+		if err := tbl.FlushToMainTable(r.finalLSN); err != nil {
+			log.Printf("could not flush %s table: %v", tblName.String(), err)
+		}
+
+		if !r.finalLSN.IsValid() {
+			continue
+		}
+	}
+
+	log.Printf("advancing lsn to %v", r.finalLSN) // debug
+	r.consumer.AdvanceLSN(r.finalLSN)
+	if err := r.consumer.SendStatus(); err != nil {
+		log.Printf("could not send status: %v", err)
+	}
+
+	return nil
+}
+
 func (r *Replicator) newTable(tblName config.PgTableName, tblConfig config.Table) (clickHouseTable, error) {
 	switch tblConfig.Engine {
 	case config.ReplacingMergeTree:
@@ -149,82 +224,6 @@ func (r *Replicator) initTables() error {
 	return nil
 }
 
-func (r *Replicator) getTxAndLSN(conn *pgx.Conn, pgTableName config.PgTableName) (*pgx.Tx, utils.LSN, error) {
-	for attempt := 0; attempt < 10; attempt++ {
-		tx, err := r.pgBegin(conn)
-		if err != nil {
-			log.Printf("could not begin transaction: %v", err)
-			r.pgRollback(tx)
-			continue
-		}
-
-		tmpSlotName := genTempSlotName(pgTableName)
-		log.Printf("creating %q temporary logical replication slot for %q pg table (attempt: %d)",
-			tmpSlotName, pgTableName.String(), attempt)
-
-		lsn, err := r.pgCreateTempRepSlot(tx, tmpSlotName)
-		if err == nil {
-			return tx, lsn, nil
-		}
-
-		r.pgRollback(tx)
-		log.Printf("could not create logical replication slot: %v", err)
-	}
-
-	return nil, utils.InvalidLSN, fmt.Errorf("attempts exceeded")
-}
-
-func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
-	conn, err := pgx.Connect(r.pgxConnConfig)
-	if err != nil {
-		return fmt.Errorf("could not connect: %v", err)
-	}
-	defer func() {
-		if err := conn.Close(); err != nil {
-			r.errCh <- err
-		}
-	}()
-	connInfo, err := initPostgresql(conn)
-	if err != nil {
-		return fmt.Errorf("could not fetch conn info: %v", err)
-	}
-	conn.ConnInfo = connInfo
-
-	tx, snapshotLSN, err := r.getTxAndLSN(conn, pgTableName)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := tx.Rollback(); err != nil {
-			r.errCh <- err
-		}
-	}()
-
-	tbl := r.chTables[pgTableName]
-	if err := tbl.Sync(tx, snapshotLSN); err != nil {
-		return fmt.Errorf("could not sync: %v", err)
-	}
-
-	return nil
-}
-
-// go routine
-func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
-	defer func() {
-		doneCh <- struct{}{}
-	}()
-
-	for pgTableName := range r.syncJobs {
-		log.Printf("sync job %d: starting syncing %q pg table", i, pgTableName.String())
-		if err := r.syncTable(pgTableName); err != nil {
-			r.errCh <- err
-			return
-		}
-
-		log.Printf("sync job %d: %q table synced", i, pgTableName.String())
-	}
-}
-
 func (r *Replicator) readGenerationID() error {
 	if !r.persStorage.Has(generationIDKey) {
 		return nil
@@ -237,155 +236,6 @@ func (r *Replicator) readGenerationID() error {
 
 	r.generationID = genID
 	log.Printf("generation_id: %v", r.generationID)
-
-	return nil
-}
-
-func (r *Replicator) Init() error {
-	r.persStorage = diskv.New(diskv.Options{
-		BasePath:     r.cfg.PersStoragePath,
-		CacheSizeMax: 1024 * 1024, // 1MB
-	})
-
-	if err := r.pgConnect(); err != nil {
-		return fmt.Errorf("could not connect to postgresql: %v", err)
-	}
-	defer r.pgDisconnect()
-
-	if err := r.pgCheck(); err != nil {
-		return err
-	}
-
-	if err := r.readGenerationID(); err != nil {
-		return fmt.Errorf("could not get start lsn positions: %v", err)
-	}
-
-	if err := r.initTables(); err != nil {
-		return fmt.Errorf("could not init tables: %v", err)
-	}
-
-	return nil
-}
-
-func (r *Replicator) GetSyncTables() ([]config.PgTableName, error) {
-	syncTables := make([]config.PgTableName, 0)
-
-	syncNeeded := false
-	for tblName := range r.cfg.Tables {
-		if !r.persStorage.Has(tblName.KeyName()) {
-			syncNeeded = true
-			break
-		}
-	}
-	if !syncNeeded {
-		return syncTables, nil
-	}
-
-	for tblName := range r.cfg.Tables {
-		if r.persStorage.Has(tblName.KeyName()) || r.cfg.Tables[tblName].InitSyncSkip {
-			continue
-		}
-
-		syncTables = append(syncTables, tblName)
-	}
-
-	//TODO: adjust hack to get fresh tables first
-	sort.SliceStable(syncTables, func(i, j int) bool {
-		if len(syncTables[i].TableName) > 6 && len(syncTables[j].TableName) > 6 {
-			part1 := syncTables[i].TableName[len(syncTables[i].TableName)-7:]
-			part2 := syncTables[j].TableName[len(syncTables[j].TableName)-7:]
-			return part1 > part2
-		}
-
-		return false
-	})
-
-	return syncTables, nil
-}
-
-func (r *Replicator) Sync(syncTables []config.PgTableName, async bool) error {
-	if len(syncTables) == 0 {
-		return nil
-	}
-
-	for _, pgTableName := range syncTables {
-		r.chTables[pgTableName].StartSync()
-	}
-
-	doneCh := make(chan struct{}, r.cfg.SyncWorkers)
-	for i := 0; i < r.cfg.SyncWorkers; i++ {
-		go r.syncJob(i, doneCh)
-	}
-
-	for _, tblName := range syncTables {
-		r.syncJobs <- tblName
-	}
-	close(r.syncJobs)
-
-	if async {
-		go func() {
-			for i := 0; i < r.cfg.SyncWorkers; i++ {
-				<-doneCh
-			}
-
-			log.Printf("all synced!")
-		}()
-	} else {
-		for i := 0; i < r.cfg.SyncWorkers; i++ {
-			<-doneCh
-		}
-		log.Printf("all synced!")
-	}
-
-	return nil
-}
-
-func (r *Replicator) Run() error {
-	if err := r.Init(); err != nil {
-		return err
-	}
-
-	r.consumer = consumer.New(r.ctx, r.errCh, r.pgxConnConfig,
-		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.minLSN())
-
-	go r.logErrCh()
-	go r.inactivityMerge()
-
-	if r.cfg.RedisBind != "" {
-		go r.redisServer()
-	}
-
-	if syncTables, err := r.GetSyncTables(); err != nil {
-		return fmt.Errorf("could not get tables to sync: %v", err)
-	} else if err := r.Sync(syncTables, true); err != nil {
-		return fmt.Errorf("could not sync tables: %v", err)
-	}
-
-	if err := r.consumer.Run(r); err != nil {
-		return err
-	}
-
-	r.waitForShutdown()
-	r.cancel()
-	log.Printf("waiting for consumer to finish") // debug
-	r.consumer.Wait()
-
-	for tblName, tbl := range r.chTables {
-		log.Printf("flushing buffer data for %s table", tblName.String()) // debug
-		if err := tbl.FlushToMainTable(r.finalLSN); err != nil {
-			log.Printf("could not flush %s table: %v", tblName.String(), err)
-		}
-
-		if !r.finalLSN.IsValid() {
-			continue
-		}
-	}
-
-	log.Printf("advancing lsn to %v", r.finalLSN) // debug
-	r.consumer.AdvanceLSN(r.finalLSN)
-	if err := r.consumer.SendStatus(); err != nil {
-		log.Printf("could not send status: %v", err)
-	}
 
 	return nil
 }
