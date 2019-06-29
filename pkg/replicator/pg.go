@@ -52,12 +52,13 @@ func (r *Replicator) pgCreateTempRepSlot(tx *pgx.Tx, slotName string) (utils.LSN
 	var (
 		snapshotLSN, snapshotName, plugin sql.NullString
 		lsn                               utils.LSN
+		tmpSlotName                       sql.NullString
 	)
 
 	row := tx.QueryRow(fmt.Sprintf("CREATE_REPLICATION_SLOT %s TEMPORARY LOGICAL %s USE_SNAPSHOT",
 		slotName, utils.OutputPlugin))
 
-	if err := row.Scan(&r.tempSlotName, &snapshotLSN, &snapshotName, &plugin); err != nil {
+	if err := row.Scan(&tmpSlotName, &snapshotLSN, &snapshotName, &plugin); err != nil {
 		return utils.InvalidLSN, fmt.Errorf("could not scan: %v", err)
 	}
 

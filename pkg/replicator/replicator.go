@@ -55,9 +55,8 @@ type Replicator struct {
 	pgxConnConfig pgx.ConnConfig
 	persStorage   *diskv.Diskv
 
-	chTables     map[config.PgTableName]clickHouseTable
-	oidName      map[utils.OID]config.PgTableName
-	tempSlotName string
+	chTables map[config.PgTableName]clickHouseTable
+	oidName  map[utils.OID]config.PgTableName
 
 	finalLSN utils.LSN
 	beginMsg message.Begin
@@ -198,6 +197,11 @@ func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err := tx.Rollback(); err != nil {
+			r.errCh <- err
+		}
+	}()
 
 	tbl := r.chTables[pgTableName]
 	if err := tbl.Sync(tx, snapshotLSN); err != nil {
@@ -374,7 +378,7 @@ func (r *Replicator) Run() error {
 	r.consumer.Wait()
 
 	for tblName, tbl := range r.chTables {
-		log.Printf("flushing buffer data for %s table", tblName) // debug
+		log.Printf("flushing buffer data for %s table", tblName.String()) // debug
 		if err := tbl.FlushToMainTable(); err != nil {
 			log.Printf("could not flush %s table: %v", tblName.String(), err)
 		}
