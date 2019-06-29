@@ -370,9 +370,11 @@ func (r *Replicator) Run() error {
 
 	r.waitForShutdown()
 	r.cancel()
+	log.Printf("waiting for consumer to finish") // debug
 	r.consumer.Wait()
 
 	for tblName, tbl := range r.chTables {
+		log.Printf("flushing buffer data for %s table", tblName) // debug
 		if err := tbl.FlushToMainTable(); err != nil {
 			log.Printf("could not flush %s table: %v", tblName.String(), err)
 		}
@@ -386,7 +388,11 @@ func (r *Replicator) Run() error {
 		}
 	}
 
+	log.Printf("advancing lsn to %v", r.finalLSN) // debug
 	r.consumer.AdvanceLSN(r.finalLSN)
+	if err := r.consumer.SendStatus(); err != nil {
+		log.Printf("could not send status: %v", err)
+	}
 
 	return nil
 }
