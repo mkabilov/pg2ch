@@ -58,9 +58,8 @@ type Replicator struct {
 
 	finalLSN utils.LSN
 
-	inTxMutex          *sync.RWMutex
-	inTx               bool // indicates if we're inside tx
-	tablesToMergeMutex *sync.Mutex
+	inTxMutex          *sync.Mutex
+	inTx               bool                                   // indicates if we're inside tx
 	tablesToMerge      map[config.PgTableName]struct{}        // tables to be merged
 	inTxTables         map[config.PgTableName]clickHouseTable // tables inside running tx
 	curTxMergeIsNeeded bool                                   // if tables in the current transaction are needed to be merged
@@ -77,12 +76,11 @@ func New(cfg config.Config) *Replicator {
 		oidName:  make(map[utils.OID]config.PgTableName),
 		errCh:    make(chan error),
 
-		inTxMutex:          &sync.RWMutex{},
-		tablesToMergeMutex: &sync.Mutex{},
-		tablesToMerge:      make(map[config.PgTableName]struct{}),
-		inTxTables:         make(map[config.PgTableName]clickHouseTable),
-		chConnString:       fmt.Sprintf("http://%s:%d", cfg.ClickHouse.Host, cfg.ClickHouse.Port),
-		syncJobs:           make(chan config.PgTableName, cfg.SyncWorkers),
+		inTxMutex:     &sync.Mutex{},
+		tablesToMerge: make(map[config.PgTableName]struct{}),
+		inTxTables:    make(map[config.PgTableName]clickHouseTable),
+		chConnString:  fmt.Sprintf("http://%s:%d", cfg.ClickHouse.Host, cfg.ClickHouse.Port),
+		syncJobs:      make(chan config.PgTableName, cfg.SyncWorkers),
 		pgxConnConfig: cfg.Postgres.Merge(pgx.ConnConfig{
 			RuntimeParams:        map[string]string{"replication": "database", "application_name": applicationName},
 			PreferSimpleProtocol: true}),
@@ -250,27 +248,23 @@ func (r *Replicator) readGenerationID() error {
 }
 
 func (r *Replicator) inactivityMerge() {
-	ticker := time.NewTicker(r.cfg.InactivityFlushTimeout)
-
 	mergeFn := func() {
-		r.inTxMutex.RLock()
-		defer r.inTxMutex.RUnlock()
+		r.inTxMutex.Lock()
+		defer r.inTxMutex.Unlock()
 
 		if r.inTx {
 			return
 		}
 
-		r.tablesToMergeMutex.Lock()
 		if err := r.flushTables(); err != nil {
 			select {
 			case r.errCh <- fmt.Errorf("could not backgound merge tables: %v", err):
 			default:
 			}
 		}
-		r.consumer.AdvanceLSN(r.finalLSN)
-		r.tablesToMergeMutex.Unlock()
 	}
 
+	ticker := time.NewTicker(r.cfg.InactivityFlushTimeout)
 	for {
 		select {
 		case <-r.ctx.Done():

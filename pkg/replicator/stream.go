@@ -23,6 +23,7 @@ func (r *Replicator) flushTables() error {
 
 		delete(r.tablesToMerge, tblName)
 	}
+	r.consumer.AdvanceLSN(r.finalLSN)
 
 	return nil
 }
@@ -74,9 +75,6 @@ func (r *Replicator) incrementGeneration() {
 
 // HandleMessage processes the incoming wal message
 func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
-	r.tablesToMergeMutex.Lock()
-	defer r.tablesToMergeMutex.Unlock()
-
 	switch v := msg.(type) {
 	case message.Begin:
 		r.inTxMutex.Lock()
