@@ -34,20 +34,22 @@ func (t *genericTable) genSyncWrite(p []byte) error {
 	return nil
 }
 
-func (t *genericTable) StartSync() {
+func (t *genericTable) StartSync() error {
 	t.Lock()
 	defer t.Unlock()
 
-	t.inSync = true
-}
-
-func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN utils.LSN, w io.Writer) error {
 	if !t.cfg.ChSyncAuxTable.IsEmpty() {
 		if err := t.truncateTable(t.cfg.ChSyncAuxTable); err != nil {
 			return fmt.Errorf("could not truncate aux table: %v", err)
 		}
 	}
 
+	t.inSync = true
+
+	return nil
+}
+
+func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN utils.LSN, w io.Writer) error {
 	t.syncSnapshotLSN = snapshotLSN
 
 	if tblLiveTuples, err := t.pgStatLiveTuples(pgTx); err != nil {

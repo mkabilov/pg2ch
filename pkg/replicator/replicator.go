@@ -30,7 +30,7 @@ type clickHouseTable interface {
 	Init() error
 
 	Begin() error
-	StartSync()
+	StartSync() error
 	Sync(*pgx.Tx, utils.LSN) error
 	Insert(lsn utils.LSN, new message.Row) (mergeIsNeeded bool, err error)
 	Update(lsn utils.LSN, old message.Row, new message.Row) (mergeIsNeeded bool, err error)
@@ -139,7 +139,9 @@ func (r *Replicator) Run() error {
 
 	if len(syncTables) > 0 {
 		for _, pgTableName := range syncTables {
-			r.chTables[pgTableName].StartSync()
+			if err := r.chTables[pgTableName].StartSync(); err != nil {
+				return fmt.Errorf("could not start sync for %q table: %v", pgTableName.String(), err)
+			}
 		}
 	}
 
