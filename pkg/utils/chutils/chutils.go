@@ -133,6 +133,9 @@ func ConvertColumn(colType string, val message.Tuple, colProps config.ColumnProp
 		fallthrough
 	case utils.PgBoolean:
 		if val.Kind == message.TupleNull {
+			if len(colProps.Coalesce) > 0 {
+				return colProps.Coalesce
+			}
 			return nullStr
 		}
 
@@ -148,6 +151,9 @@ func ConvertColumn(colType string, val message.Tuple, colProps config.ColumnProp
 		fallthrough
 	case utils.PgTimestamp:
 		if val.Kind == message.TupleNull {
+			if len(colProps.Coalesce) > 0 {
+				return colProps.Coalesce
+			}
 			return nullStr
 		}
 
@@ -161,6 +167,9 @@ func ConvertColumn(colType string, val message.Tuple, colProps config.ColumnProp
 		//TODO
 	}
 	if val.Kind == message.TupleNull {
+		if len(colProps.Coalesce) > 0 {
+			return colProps.Coalesce
+		}
 		return nullStr
 	}
 

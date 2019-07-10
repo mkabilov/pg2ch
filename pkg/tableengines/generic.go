@@ -290,11 +290,11 @@ func (t *genericTable) convertRow(row message.Row) chTuple {
 			continue
 		}
 
-		values := chutils.ConvertColumn(t.cfg.PgColumns[col.Name].BaseType, row[colId], t.cfg.ColumnProperties[col.Name])
+		value := chutils.ConvertColumn(t.cfg.PgColumns[col.Name].BaseType, row[colId], t.cfg.ColumnProperties[col.Name])
 		if colId > 0 {
 			res = append(res, columnDelimiter)
 		}
-		res = append(res, values...)
+		res = append(res, value...)
 	}
 
 	if t.cfg.GenerationColumn != "" {

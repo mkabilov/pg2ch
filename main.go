@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"runtime"
 
@@ -45,6 +46,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "could not load config: %v\n", err)
 		os.Exit(1)
 	}
+
+	log.Printf("%#v", cfg)
+	os.Exit(0)
 
 	repl := replicator.New(*cfg)
 

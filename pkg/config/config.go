@@ -69,13 +69,16 @@ type ChTableName struct {
 	TableName    string
 }
 
+type coalesceValue []byte
+
 // ColumnProperty describes column properties
 type ColumnProperty struct {
-	FlattenIstore      bool   `yaml:"flatten_istore"`
-	FlattenIstoreMin   int    `yaml:"flatten_istore_min"` // needed for building ch table ddl
-	FlattenIstoreMax   int    `yaml:"flatten_istore_max"` // needed for building ch table ddl
-	IstoreKeysSuffix   string `yaml:"istore_keys_suffix"`
-	IstoreValuesSuffix string `yaml:"istore_values_suffix"`
+	FlattenIstore      bool          `yaml:"flatten_istore"`
+	FlattenIstoreMin   int           `yaml:"flatten_istore_min"` // needed for building ch table ddl
+	FlattenIstoreMax   int           `yaml:"flatten_istore_max"` // needed for building ch table ddl
+	IstoreKeysSuffix   string        `yaml:"istore_keys_suffix"`
+	IstoreValuesSuffix string        `yaml:"istore_values_suffix"`
+	Coalesce           coalesceValue `yaml:"coalesce"`
 }
 
 // Table contains information about the table
@@ -183,6 +186,18 @@ func (tn *PgTableName) Parse(val string) error {
 	} else {
 		return fmt.Errorf("invalid table name: %q", val)
 	}
+
+	return nil
+}
+
+func (cv *coalesceValue) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var val string
+
+	if err := unmarshal(&val); err != nil {
+		return err
+	}
+
+	*cv = []byte(val)
 
 	return nil
 }
