@@ -27,7 +27,7 @@
     "pgproto3",
     "pgtype"
   ]
-  revision = "a5afe697d17a6be0aafea0a3b00d9aa5ac628273"
+  revision = "6954c15ad0bd3c9aa6dd1b190732b020379beb28"
 
 [[projects]]
   branch = "master"
@@ -54,10 +54,35 @@
   version = "v1.0.0"
 
 [[projects]]
+  name = "go.uber.org/atomic"
+  packages = ["."]
+  revision = "df976f2515e274675050de7b3f42545de80594fd"
+  version = "v1.4.0"
+
+[[projects]]
+  name = "go.uber.org/multierr"
+  packages = ["."]
+  revision = "3c4937480c32f4c13a875a1829af76c98ca3d40a"
+  version = "v1.1.0"
+
+[[projects]]
+  name = "go.uber.org/zap"
+  packages = [
+    ".",
+    "buffer",
+    "internal/bufferpool",
+    "internal/color",
+    "internal/exit",
+    "zapcore"
+  ]
+  revision = "27376062155ad36be76b0f12cf1572a221d3a48c"
+  version = "v1.10.0"
+
+[[projects]]
   branch = "master"
   name = "golang.org/x/crypto"
   packages = ["pbkdf2"]
-  revision = "cc06ce4a13d484c0101a9e92913248488a75786d"
+  revision = "4def268fd1a49955bfb3dda92fe3db4f924f2285"
 
 [[projects]]
   name = "golang.org/x/text"
@@ -108,6 +133,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "cec1647adabd0e74fe14a943e8348c9b11a40560195a1a21500cae6d3937e77a"
+  inputs-digest = "f593c042c635e0a03ec7618e1d0c8cc39d5fa31e8b2ef0470af6534b10112043"
   solver-name = "gps-cdcl"
   solver-version = 1

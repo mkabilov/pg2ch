@@ -6,7 +6,8 @@ import (
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
-	"github.com/mkabilov/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
+	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
 )
 
 const (
@@ -21,38 +22,38 @@ const (
 
 var (
 	pgToChMap = map[string]string{
-		utils.PgSmallint:                 utils.ChInt16,
-		utils.PgInteger:                  utils.ChInt32,
-		utils.PgBigint:                   utils.ChInt64,
-		utils.PgCharacterVarying:         utils.ChString,
-		utils.PgVarchar:                  utils.ChString,
-		utils.PgText:                     utils.ChString,
-		utils.PgReal:                     utils.ChFloat32,
-		utils.PgDoublePrecision:          utils.ChFloat64,
-		utils.PgInterval:                 utils.ChInt32,
-		utils.PgBoolean:                  utils.ChUInt8,
-		utils.PgDecimal:                  utils.ChDecimal,
-		utils.PgNumeric:                  utils.ChDecimal,
-		utils.PgCharacter:                utils.ChFixedString,
-		utils.PgChar:                     utils.ChFixedString,
-		utils.PgJsonb:                    utils.ChString,
-		utils.PgJson:                     utils.ChString,
-		utils.PgUuid:                     utils.ChUUID,
-		utils.PgBytea:                    utils.ChUInt8Array,
-		utils.PgInet:                     utils.ChInt64,
-		utils.PgTimestamp:                utils.ChDateTime,
-		utils.PgTimestampWithTimeZone:    utils.ChDateTime,
-		utils.PgTimestampWithoutTimeZone: utils.ChDateTime,
-		utils.PgDate:                     utils.ChDate,
-		utils.PgTime:                     utils.ChUint32,
-		utils.PgTimeWithoutTimeZone:      utils.ChUint32,
-		utils.PgTimeWithTimeZone:         utils.ChUint32,
+		dbtypes.PgSmallint:                 dbtypes.ChInt16,
+		dbtypes.PgInteger:                  dbtypes.ChInt32,
+		dbtypes.PgBigint:                   dbtypes.ChInt64,
+		dbtypes.PgCharacterVarying:         dbtypes.ChString,
+		dbtypes.PgVarchar:                  dbtypes.ChString,
+		dbtypes.PgText:                     dbtypes.ChString,
+		dbtypes.PgReal:                     dbtypes.ChFloat32,
+		dbtypes.PgDoublePrecision:          dbtypes.ChFloat64,
+		dbtypes.PgInterval:                 dbtypes.ChInt32,
+		dbtypes.PgBoolean:                  dbtypes.ChUInt8,
+		dbtypes.PgDecimal:                  dbtypes.ChDecimal,
+		dbtypes.PgNumeric:                  dbtypes.ChDecimal,
+		dbtypes.PgCharacter:                dbtypes.ChFixedString,
+		dbtypes.PgChar:                     dbtypes.ChFixedString,
+		dbtypes.PgJsonb:                    dbtypes.ChString,
+		dbtypes.PgJson:                     dbtypes.ChString,
+		dbtypes.PgUuid:                     dbtypes.ChUUID,
+		dbtypes.PgBytea:                    dbtypes.ChUInt8Array,
+		dbtypes.PgInet:                     dbtypes.ChInt64,
+		dbtypes.PgTimestamp:                dbtypes.ChDateTime,
+		dbtypes.PgTimestampWithTimeZone:    dbtypes.ChDateTime,
+		dbtypes.PgTimestampWithoutTimeZone: dbtypes.ChDateTime,
+		dbtypes.PgDate:                     dbtypes.ChDate,
+		dbtypes.PgTime:                     dbtypes.ChUint32,
+		dbtypes.PgTimeWithoutTimeZone:      dbtypes.ChUint32,
+		dbtypes.PgTimeWithTimeZone:         dbtypes.ChUint32,
 
-		utils.PgAdjustIstore:    utils.ChInt32,    // type for istore values
-		utils.PgAdjustBigIstore: utils.ChInt64,    // type for bigistore values
-		utils.PgAdjustAjTime:    utils.ChDateTime, // adjust time
-		utils.PgAdjustAjDate:    utils.ChDate,     // adjust date
-		utils.PgAdjustAjBool:    utils.ChUInt8,    // adjust boolean: true, false, unknown
+		dbtypes.PgAdjustIstore:    dbtypes.ChInt32,    // type for istore values
+		dbtypes.PgAdjustBigIstore: dbtypes.ChInt64,    // type for bigistore values
+		dbtypes.PgAdjustAjTime:    dbtypes.ChDateTime, // adjust time
+		dbtypes.PgAdjustAjDate:    dbtypes.ChDate,     // adjust date
+		dbtypes.PgAdjustAjBool:    dbtypes.ChUInt8,    // adjust boolean: true, false, unknown
 	}
 
 	ajBoolUnkownValue = []byte("2")
@@ -64,29 +65,29 @@ var (
 func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
 	chType, ok := pgToChMap[pgColumn.BaseType]
 	if !ok {
-		chType = utils.ChString
+		chType = dbtypes.ChString
 	}
 
 	switch pgColumn.BaseType {
-	case utils.PgDecimal:
+	case dbtypes.PgDecimal:
 		fallthrough
-	case utils.PgNumeric:
+	case dbtypes.PgNumeric:
 		if pgColumn.Ext == nil {
 			return "", fmt.Errorf("precision must be specified for the numeric type")
 		}
 		chType = fmt.Sprintf("%s(%d, %d)", chType, pgColumn.Ext[0], pgColumn.Ext[1])
-	case utils.PgCharacter:
+	case dbtypes.PgCharacter:
 		fallthrough
-	case utils.PgChar:
+	case dbtypes.PgChar:
 		if pgColumn.Ext == nil {
 			return "", fmt.Errorf("length must be specified for character type")
 		}
 		chType = fmt.Sprintf("%s(%d)", chType, pgColumn.Ext[0])
-	case utils.PgAdjustCountry:
+	case dbtypes.PgAdjustCountry:
 		fallthrough
-	case utils.PgAdjustOsName:
+	case dbtypes.PgAdjustOsName:
 		fallthrough
-	case utils.PgAdjustDeviceType:
+	case dbtypes.PgAdjustDeviceType:
 		chType = fmt.Sprintf("LowCardinality(%s)", chType)
 	}
 
@@ -113,25 +114,25 @@ func GenInsertQuery(tableName config.ChTableName, columns []string) string {
 
 func ConvertColumn(colType string, val message.Tuple, colProps config.ColumnProperty) []byte {
 	switch colType {
-	case utils.PgAdjustIstore:
+	case dbtypes.PgAdjustIstore:
 		fallthrough
-	case utils.PgAdjustBigIstore:
+	case dbtypes.PgAdjustBigIstore:
 		if colProps.FlattenIstore {
 			if val.Kind == message.TupleNull {
 				return []byte(strings.Repeat("\t\\N", colProps.FlattenIstoreMax-colProps.FlattenIstoreMin+1))[1:]
 			}
 
-			return utils.IstoreValues(val.Value, colProps.FlattenIstoreMin, colProps.FlattenIstoreMax)
+			return pgutils.IstoreValues(val.Value, colProps.FlattenIstoreMin, colProps.FlattenIstoreMax)
 		} else {
 			if val.Kind == message.TupleNull {
 				return istoreNull
 			}
 
-			return utils.IstoreToArrays(val.Value)
+			return pgutils.IstoreToArrays(val.Value)
 		}
-	case utils.PgAdjustAjBool:
+	case dbtypes.PgAdjustAjBool:
 		fallthrough
-	case utils.PgBoolean:
+	case dbtypes.PgBoolean:
 		if val.Kind == message.TupleNull {
 			if len(colProps.Coalesce) > 0 {
 				return colProps.Coalesce
@@ -147,9 +148,9 @@ func ConvertColumn(colType string, val message.Tuple, colProps config.ColumnProp
 		case ajBoolUnknown:
 			return ajBoolUnkownValue
 		}
-	case utils.PgTimestampWithTimeZone:
+	case dbtypes.PgTimestampWithTimeZone:
 		fallthrough
-	case utils.PgTimestamp:
+	case dbtypes.PgTimestamp:
 		if val.Kind == message.TupleNull {
 			if len(colProps.Coalesce) > 0 {
 				return colProps.Coalesce
@@ -159,11 +160,11 @@ func ConvertColumn(colType string, val message.Tuple, colProps config.ColumnProp
 
 		return val.Value[:timestampLength]
 
-	case utils.PgTime:
+	case dbtypes.PgTime:
 		fallthrough
-	case utils.PgTimeWithoutTimeZone:
+	case dbtypes.PgTimeWithoutTimeZone:
 		//TODO
-	case utils.PgTimeWithTimeZone:
+	case dbtypes.PgTimeWithTimeZone:
 		//TODO
 	}
 	if val.Kind == message.TupleNull {

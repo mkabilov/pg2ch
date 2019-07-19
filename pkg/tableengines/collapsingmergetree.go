@@ -7,10 +7,11 @@ import (
 
 	"github.com/jackc/pgx"
 	"github.com/peterbourgon/diskv"
+	"go.uber.org/zap"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
-	"github.com/mkabilov/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 )
 
 type collapsingMergeTreeTable struct {
@@ -20,26 +21,26 @@ type collapsingMergeTreeTable struct {
 }
 
 // NewCollapsingMergeTree instantiates collapsingMergeTreeTable
-func NewCollapsingMergeTree(ctx context.Context, persStorage *diskv.Diskv, connUrl string, tblCfg config.Table, genID *uint64) *collapsingMergeTreeTable {
+func NewCollapsingMergeTree(ctx context.Context, logger *zap.SugaredLogger, persStorage *diskv.Diskv, connUrl string, tblCfg config.Table, genID *uint64) *collapsingMergeTreeTable {
 	t := collapsingMergeTreeTable{
-		genericTable: newGenericTable(ctx, persStorage, connUrl, tblCfg, genID),
+		genericTable: newGenericTable(ctx, logger, persStorage, connUrl, tblCfg, genID),
 		signColumn:   tblCfg.SignColumn,
 	}
 	t.chUsedColumns = append(t.chUsedColumns, tblCfg.SignColumn)
 
-	t.flushQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
+	t.tblBufferFlushQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
 		t.cfg.ChMainTable, strings.Join(t.chUsedColumns, ", "), t.cfg.ChBufferTable, t.cfg.BufferTableRowIdColumn)}
 
 	return &t
 }
 
 // Sync performs initial sync of the data; pgTx is a transaction in which temporary replication slot is created
-func (t *collapsingMergeTreeTable) Sync(pgTx *pgx.Tx, snapshotLSN utils.LSN) error {
+func (t *collapsingMergeTreeTable) Sync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN) error {
 	return t.genSync(pgTx, snapshotLSN, t)
 }
 
 // Write implements io.Writer which is used during the Sync process, see genSync method
-func (t *collapsingMergeTreeTable) Write(p []byte) (int, error) {
+func (t *collapsingMergeTreeTable) Write(p []byte) (int, error) { // sync only
 	if err := t.genSyncWrite(p); err != nil {
 		return 0, err
 	}
@@ -64,27 +65,34 @@ func (t *collapsingMergeTreeTable) Write(p []byte) (int, error) {
 }
 
 // Insert handles incoming insert DML operation
-func (t *collapsingMergeTreeTable) Insert(lsn utils.LSN, new message.Row) (bool, error) {
-	return t.processChTuples(lsn, chTuples{
-		appendField(t.convertRow(new), oneStr),
+func (t *collapsingMergeTreeTable) Insert(newRow message.Row) (bool, error) {
+	defer t.logger.Sync()
+	t.logger.Debugf("insert: %v", newRow)
+	return t.processChTuples(chTuples{
+		appendField(t.convertRow(newRow), oneStr),
 	})
 }
 
 // Update handles incoming update DML operation
-func (t *collapsingMergeTreeTable) Update(lsn utils.LSN, old, new message.Row) (bool, error) {
-	if equal, _ := t.compareRows(old, new); equal {
-		return t.processChTuples(0, nil)
+func (t *collapsingMergeTreeTable) Update(oldRow, newRow message.Row) (bool, error) {
+	defer t.logger.Sync()
+	t.logger.Debugf("update: old: %v new: %v", oldRow, newRow)
+	if equal, _ := t.compareRows(oldRow, newRow); equal {
+		t.logger.Debugf("update: tuples seem to be identical")
+		return t.processChTuples(nil)
 	}
 
-	return t.processChTuples(lsn, chTuples{
-		appendField(t.convertRow(old), minusOneStr),
-		appendField(t.convertRow(new), oneStr),
+	return t.processChTuples(chTuples{
+		appendField(t.convertRow(oldRow), minusOneStr),
+		appendField(t.convertRow(newRow), oneStr),
 	})
 }
 
 // Delete handles incoming delete DML operation
-func (t *collapsingMergeTreeTable) Delete(lsn utils.LSN, old message.Row) (bool, error) {
-	return t.processChTuples(lsn, chTuples{
-		appendField(t.convertRow(old), minusOneStr),
+func (t *collapsingMergeTreeTable) Delete(oldRow message.Row) (bool, error) {
+	defer t.logger.Sync()
+	t.logger.Debugf("delete: %v", oldRow)
+	return t.processChTuples(chTuples{
+		appendField(t.convertRow(oldRow), minusOneStr),
 	})
 }

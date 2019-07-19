@@ -2,16 +2,17 @@ package replicator
 
 import (
 	"fmt"
-	"log"
 	"sort"
 
 	"github.com/jackc/pgx"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
-	"github.com/mkabilov/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
+	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
 )
 
-func (r *Replicator) Sync(syncTables []config.PgTableName, async bool) error {
+func (r *Replicator) SyncTables(syncTables []config.PgTableName, async bool) error {
+	defer r.logger.Sync()
 	if len(syncTables) == 0 {
 		return nil
 	}
@@ -28,17 +29,18 @@ func (r *Replicator) Sync(syncTables []config.PgTableName, async bool) error {
 
 	if async {
 		go func() {
+			defer r.logger.Sync()
 			for i := 0; i < r.cfg.SyncWorkers; i++ {
 				<-doneCh
 			}
 
-			log.Printf("all synced!")
+			r.logger.Infof("sync is finished")
 		}()
 	} else {
 		for i := 0; i < r.cfg.SyncWorkers; i++ {
 			<-doneCh
 		}
-		log.Printf("all synced!")
+		r.logger.Infof("sync is finished")
 	}
 
 	return nil
@@ -65,13 +67,12 @@ func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 		return err
 	}
 	defer func() {
-		if err := tx.Rollback(); err != nil {
+		if err := tx.Commit(); err != nil {
 			r.errCh <- err
 		}
 	}()
 
-	tbl := r.chTables[pgTableName]
-	if err := tbl.Sync(tx, snapshotLSN); err != nil {
+	if err := r.chTables[pgTableName].Sync(tx, snapshotLSN); err != nil {
 		return fmt.Errorf("could not sync: %v", err)
 	}
 
@@ -79,59 +80,63 @@ func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
 }
 
 func (r *Replicator) GetSyncTables() ([]config.PgTableName, error) {
+	var err error
 	syncTables := make([]config.PgTableName, 0)
 
-	syncNeeded := false
-	for tblName := range r.cfg.Tables {
-		if !r.persStorage.Has(tblName.KeyName()) {
-			syncNeeded = true
-			break
-		}
+	if err := r.pgConnect(); err != nil {
+		return nil, fmt.Errorf("could not connect: %v", err)
 	}
-	if !syncNeeded {
-		return syncTables, nil
-	}
+	defer r.pgDisconnect()
 
+	tx, err := r.pgBegin(r.pgDeltaConn)
+	if err != nil {
+		return nil, fmt.Errorf("could not start transaction: %v", err)
+	}
+	defer r.pgCommit(tx)
+
+	rowsCnt := make(map[config.PgTableName]uint64)
 	for tblName := range r.cfg.Tables {
 		if r.persStorage.Has(tblName.KeyName()) || r.cfg.Tables[tblName].InitSyncSkip {
 			continue
 		}
-
 		syncTables = append(syncTables, tblName)
+
+		rowsCnt[tblName], err = pgutils.PgStatLiveTuples(tx, tblName)
+		if err != nil {
+			return nil, fmt.Errorf("could not get stat live tuples: %v", err)
+		}
 	}
 
-	//TODO: adjust hack to get fresh tables first
-	sort.SliceStable(syncTables, func(i, j int) bool {
-		if len(syncTables[i].TableName) > 6 && len(syncTables[j].TableName) > 6 {
-			part1 := syncTables[i].TableName[len(syncTables[i].TableName)-7:]
-			part2 := syncTables[j].TableName[len(syncTables[j].TableName)-7:]
-			return part1 > part2
-		}
+	if len(syncTables) == 0 {
+		return syncTables, nil
+	}
 
-		return false
+	sort.SliceStable(syncTables, func(i, j int) bool {
+		return rowsCnt[syncTables[i]] > rowsCnt[syncTables[j]]
 	})
 
 	return syncTables, nil
 }
 
-func (r *Replicator) getTxAndLSN(conn *pgx.Conn, pgTableName config.PgTableName) (*pgx.Tx, utils.LSN, error) {
+func (r *Replicator) getTxAndLSN(conn *pgx.Conn, pgTableName config.PgTableName) (*pgx.Tx, dbtypes.LSN, error) { //TODO: better name: getSnapshot?
+	defer r.logger.Sync()
 	for attempt := 0; attempt < 10; attempt++ {
 		select {
 		case <-r.ctx.Done():
-			return nil, utils.InvalidLSN, fmt.Errorf("context done")
+			return nil, dbtypes.InvalidLSN, fmt.Errorf("context done")
 		default:
 		}
 
 		tx, err := r.pgBegin(conn)
 		if err != nil {
-			log.Printf("could not begin transaction: %v", err)
-			r.pgRollback(tx)
+			r.logger.Warnf("could not begin transaction: %v", err)
+			r.pgCommit(tx)
 			continue
 		}
 
-		tmpSlotName := genTempSlotName(pgTableName)
-		log.Printf("creating %q temporary logical replication slot for %q pg table (attempt: %d)",
-			tmpSlotName, pgTableName.String(), attempt)
+		tmpSlotName := tempSlotName(pgTableName)
+		r.logger.Debugf("creating %q temporary logical replication slot for %q pg table (attempt: %d)",
+			tmpSlotName, pgTableName, attempt)
 
 		lsn, err := r.pgCreateTempRepSlot(tx, tmpSlotName)
 		if err == nil {
@@ -139,10 +144,10 @@ func (r *Replicator) getTxAndLSN(conn *pgx.Conn, pgTableName config.PgTableName)
 		}
 
 		r.pgRollback(tx)
-		log.Printf("could not create logical replication slot: %v", err)
+		r.logger.Warnf("could not create logical replication slot: %v", err)
 	}
 
-	return nil, utils.InvalidLSN, fmt.Errorf("attempts exceeded")
+	return nil, dbtypes.InvalidLSN, fmt.Errorf("attempts exceeded")
 }
 
 // go routine
@@ -150,14 +155,15 @@ func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
 	defer func() {
 		doneCh <- struct{}{}
 	}()
+	defer r.logger.Sync()
 
 	for pgTableName := range r.syncJobs {
-		log.Printf("sync job %d: starting syncing %q pg table", i, pgTableName.String())
+		r.logger.Debugf("sync job %d: starting syncing %q pg table", i, pgTableName)
 		if err := r.syncTable(pgTableName); err != nil {
 			r.errCh <- err
 			return
 		}
 
-		log.Printf("sync job %d: %q table synced", i, pgTableName.String())
+		r.logger.Debugf("sync job %d: %q table synced", i, pgTableName)
 	}
 }

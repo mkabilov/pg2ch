@@ -3,15 +3,15 @@ package consumer
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx"
+	"go.uber.org/zap"
 
 	"github.com/mkabilov/pg2ch/pkg/decoder"
 	"github.com/mkabilov/pg2ch/pkg/message"
-	"github.com/mkabilov/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 )
 
 const (
@@ -21,15 +21,15 @@ const (
 
 // Handler represents interface for processing logical replication messages
 type Handler interface {
-	HandleMessage(utils.LSN, message.Message) error
+	HandleMessage(dbtypes.LSN, message.Message) error
 }
 
 // Interface represents interface for the consumer
 type Interface interface {
 	SendStatus() error
 	Run(Handler) error
-	AdvanceLSN(utils.LSN)
-	CurrentLSN() utils.LSN
+	AdvanceLSN(dbtypes.LSN)
+	CurrentLSN() dbtypes.LSN
 	Wait()
 }
 
@@ -42,34 +42,39 @@ type consumer struct {
 	dbCfg           pgx.ConnConfig
 	slotName        string
 	publicationName string
-	currentLSN      utils.LSN
+	logger          *zap.SugaredLogger
+
+	currentLSNMutex *sync.RWMutex
+	currentLSN      dbtypes.LSN
 	errCh           chan error
 }
 
 // New instantiates the consumer
-func New(ctx context.Context, errCh chan error, dbCfg pgx.ConnConfig, slotName, publicationName string, startLSN utils.LSN) *consumer {
+func New(ctx context.Context, logger *zap.SugaredLogger, errCh chan error, dbCfg pgx.ConnConfig, slotName, publicationName string, startLSN dbtypes.LSN) *consumer {
 	return &consumer{
 		waitGr:          &sync.WaitGroup{},
 		ctx:             ctx,
 		dbCfg:           dbCfg,
 		slotName:        slotName,
 		publicationName: publicationName,
+		currentLSNMutex: &sync.RWMutex{},
 		currentLSN:      startLSN,
 		errCh:           errCh,
+		logger:          logger.Named("consumer"),
 	}
 }
 
-func (c *consumer) CurrentLSN() utils.LSN {
-	c.RLock()
-	defer c.RUnlock()
+func (c *consumer) CurrentLSN() dbtypes.LSN {
+	c.currentLSNMutex.RLock()
+	defer c.currentLSNMutex.RUnlock()
 
 	return c.currentLSN
 }
 
 // AdvanceLSN advances lsn position
-func (c *consumer) AdvanceLSN(lsn utils.LSN) {
-	c.Lock()
-	defer c.Unlock()
+func (c *consumer) AdvanceLSN(lsn dbtypes.LSN) {
+	c.currentLSNMutex.Lock()
+	defer c.currentLSNMutex.Unlock()
 
 	c.currentLSN = lsn
 }
@@ -111,10 +116,13 @@ func (c *consumer) Run(handler Handler) error {
 }
 
 func (c *consumer) startDecoding() error {
-	log.Printf("Starting from %s lsn", c.currentLSN)
+	defer c.logger.Sync()
 
+	c.logger.Infof("starting from %s lsn", c.currentLSN)
+	c.currentLSNMutex.RLock()
 	err := c.conn.StartReplication(c.slotName, uint64(c.currentLSN), -1,
 		`"proto_version" '1'`, fmt.Sprintf(`"publication_names" '%s'`, c.publicationName))
+	c.currentLSNMutex.RUnlock()
 	if err != nil {
 		c.closeDbConnection()
 		return fmt.Errorf("failed to start decoding logical replication messages: %v", err)
@@ -141,13 +149,15 @@ func (c *consumer) startDecoding() error {
 }
 
 func (c *consumer) closeDbConnection() {
+	defer c.logger.Sync()
 	if err := c.conn.Close(); err != nil {
-		log.Printf("could not close replication connection: %v", err)
+		c.logger.Warnf("could not close replication connection: %v", err)
 	}
 }
 
 func (c *consumer) processReplicationMessage(handler Handler) {
 	defer c.waitGr.Done()
+	defer c.logger.Sync()
 
 	for {
 		select {
@@ -164,7 +174,7 @@ func (c *consumer) processReplicationMessage(handler Handler) {
 			if err == context.DeadlineExceeded {
 				continue
 			} else if err == context.Canceled {
-				log.Printf("received shutdown request: decoding terminated")
+				c.logger.Infof("received shutdown request: decoding terminated")
 				return
 			} else if err != nil {
 				// TODO: make sure we retry and cleanup after ourselves afterwards
@@ -173,7 +183,7 @@ func (c *consumer) processReplicationMessage(handler Handler) {
 			}
 
 			if repMsg == nil {
-				log.Printf("received null replication message")
+				c.logger.Debugf("received null replication message")
 				continue
 			}
 
@@ -184,14 +194,14 @@ func (c *consumer) processReplicationMessage(handler Handler) {
 					return
 				}
 
-				if err := handler.HandleMessage(utils.LSN(repMsg.WalMessage.WalStart), msg); err != nil {
+				if err := handler.HandleMessage(dbtypes.LSN(repMsg.WalMessage.WalStart), msg); err != nil {
 					c.close(fmt.Errorf("error handling waldata: %s", err))
 					return
 				}
 			}
 
 			if repMsg.ServerHeartbeat != nil && repMsg.ServerHeartbeat.ReplyRequested == 1 {
-				log.Println("server wants a reply")
+				c.logger.Debugf("server wants a reply")
 				if err := c.SendStatus(); err != nil {
 					c.close(fmt.Errorf("could not send replay progress: %v", err))
 					return
@@ -205,9 +215,12 @@ func (c *consumer) processReplicationMessage(handler Handler) {
 func (c *consumer) SendStatus() error {
 	c.Lock()
 	defer c.Unlock()
+	defer c.logger.Sync()
 
-	log.Printf("sending status: %v", c.currentLSN) //TODO: move to debug log level
+	c.currentLSNMutex.RLock()
+	c.logger.Debugf("sending status: %v", c.currentLSN)
 	status, err := pgx.NewStandbyStatus(uint64(c.currentLSN))
+	c.currentLSNMutex.RUnlock()
 
 	if err != nil {
 		return fmt.Errorf("error creating standby status: %s", err)

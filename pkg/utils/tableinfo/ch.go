@@ -3,15 +3,14 @@ package tableinfo
 import (
 	"fmt"
 
-	"github.com/mkabilov/pg2ch/pkg/utils/chutils/loader"
-
 	"github.com/mkabilov/pg2ch/pkg/config"
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils/chload"
 )
 
 func TableChColumns(chConnectionString string, chTable config.ChTableName) (map[string]config.ChColumn, error) {
 	result := make(map[string]config.ChColumn)
 
-	chLoader := loader.New(chConnectionString)
+	chLoader := chload.New(chConnectionString)
 
 	rows, err := chLoader.Query(fmt.Sprintf("select name, type from system.columns where database = '%s' and table = '%s'",
 		chTable.DatabaseName, chTable.TableName)) //TODO: fix SQL injections

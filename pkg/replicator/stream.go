@@ -3,33 +3,36 @@ package replicator
 import (
 	"bytes"
 	"fmt"
-	"log"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
-	"github.com/mkabilov/pg2ch/pkg/utils"
+	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 )
 
-func (r *Replicator) flushTables() error {
-	for tblName := range r.tablesToMerge {
-		if _, ok := r.inTxTables[tblName]; ok {
-			continue
+func (r *Replicator) tblBuffersFlush() error { // protected by inTxMutex: inactivity merge or on commit
+	defer r.logger.Sync()
+	for tblName := range r.tablesToFlush {
+		r.logger.Debugf("processing %s table", tblName)
+		select {
+		case <-r.ctx.Done():
+			return nil
+		default:
 		}
-		tbl := r.chTables[tblName]
 
-		if err := tbl.FlushToMainTable(r.finalLSN); err != nil {
+		if err := r.chTables[tblName].FlushToMainTable(); err != nil {
 			return fmt.Errorf("could not commit %s table: %v", tblName.String(), err)
 		}
 
-		delete(r.tablesToMerge, tblName)
+		delete(r.tablesToFlush, tblName)
 	}
-	r.consumer.AdvanceLSN(r.finalLSN)
+	r.consumer.AdvanceLSN(r.txFinalLSN) //TODO: wrong?
 
 	return nil
 }
 
-func (r *Replicator) getTable(oid utils.OID) (chTbl clickHouseTable, err error) {
-	var lsn utils.LSN
+func (r *Replicator) getTable(oid dbtypes.OID) (chTbl clickHouseTable, err error) {
+	defer r.logger.Sync()
+	var lsn dbtypes.LSN
 
 	tblName, ok := r.oidName[oid]
 	if !ok {
@@ -41,23 +44,24 @@ func (r *Replicator) getTable(oid utils.OID) (chTbl clickHouseTable, err error) 
 		return
 	}
 
-	if _, ok := r.tablesToMerge[tblName]; !ok {
-		r.tablesToMerge[tblName] = struct{}{}
+	if _, ok := r.tablesToFlush[tblName]; !ok {
+		r.tablesToFlush[tblName] = struct{}{}
 	}
 
 	if tblKey := tblName.KeyName(); r.persStorage.Has(tblKey) {
 		if err := lsn.Parse(r.persStorage.ReadString(tblKey)); err != nil {
-			log.Fatalf("incorrect lsn stored for %q table: %v", tblName.String(), err)
+			r.logger.Warnf("incorrect lsn stored for %q table: %v", tblName, err)
 		}
 	}
 
-	if r.finalLSN <= lsn {
+	if r.txFinalLSN <= lsn {
 		chTbl = nil
 	}
 
 	if _, ok := r.inTxTables[tblName]; !ok && chTbl != nil { // TODO: skip adding tables with no buffer table
 		r.inTxTables[tblName] = chTbl
-		err = chTbl.Begin()
+		r.logger.Debugf("table %s was added to inTxTables", tblName)
+		err = chTbl.Begin(r.txFinalLSN)
 		if err != nil {
 			err = fmt.Errorf("could not begin tx for table %q: %v", tblName, err)
 		}
@@ -67,117 +71,161 @@ func (r *Replicator) getTable(oid utils.OID) (chTbl clickHouseTable, err error) 
 }
 
 func (r *Replicator) incrementGeneration() {
+	defer r.logger.Sync()
 	r.generationID++
-	if err := r.persStorage.Write("generation_id", []byte(fmt.Sprintf("%v", r.generationID))); err != nil {
-		log.Printf("could not save generation id: %v", err)
+	if err := r.persStorage.WriteString(generationIDKey, fmt.Sprintf("%v", r.generationID)); err != nil {
+		r.logger.Warnf("could not save generation id: %v", err)
 	}
 }
 
-// HandleMessage processes the incoming wal message
-func (r *Replicator) HandleMessage(lsn utils.LSN, msg message.Message) error {
-	switch v := msg.(type) {
-	case message.Begin:
-		r.inTxMutex.Lock()
-		defer r.inTxMutex.Unlock()
+func (r *Replicator) processBegin(finalLSN dbtypes.LSN) error { // TODO: make me lazy: begin transaction on first DML operation
+	r.inTxMutex.Lock()
+	defer r.inTxMutex.Unlock()
 
-		r.inTx = true
-		r.finalLSN = v.FinalLSN
-		r.curTxMergeIsNeeded = false
-		r.isEmptyTx = true
-	case message.Commit:
-		r.inTxMutex.Lock()
-		defer r.inTxMutex.Unlock()
+	r.inTx = true
+	r.txFinalLSN = finalLSN
+	r.curTxTblFlushIsNeeded = false
+	r.isEmptyTx = true
 
-		if r.curTxMergeIsNeeded {
-			if err := r.flushTables(); err != nil {
-				return fmt.Errorf("could not merge tables: %v", err)
+	return nil
+}
+
+func (r *Replicator) processCommit() error {
+	defer r.logger.Sync()
+	r.logger.Debugf("commit: trying to acquire inTxMutex lock")
+	r.inTxMutex.Lock()
+	r.logger.Debugf("commit: inTxMutex lock acquired")
+	defer r.inTxMutex.Unlock()
+
+	r.logger.Debugw("commit",
+		"isEmptyTx", r.isEmptyTx,
+		"inTxTables", r.inTxTables,
+		"flushIsNeeded", r.curTxTblFlushIsNeeded)
+	if !r.isEmptyTx {
+		r.incrementGeneration()
+
+		for _, chTbl := range r.inTxTables {
+			if err := chTbl.Commit(r.curTxTblFlushIsNeeded); err != nil {
+				return fmt.Errorf("could not commit: %v", err)
 			}
 		}
-		r.consumer.AdvanceLSN(r.finalLSN)
+	}
+	r.inTxTables = make(map[config.PgTableName]clickHouseTable)
+	r.inTx = false
+	r.consumer.AdvanceLSN(r.txFinalLSN) // TODO: wrong?
 
-		if !r.isEmptyTx {
-			r.incrementGeneration()
+	return nil
+}
 
-			for _, chTbl := range r.inTxTables {
-				if err := chTbl.Commit(); err != nil {
-					return fmt.Errorf("could not commit: %v", err)
-				}
-			}
-		}
-		r.inTxTables = make(map[config.PgTableName]clickHouseTable)
-		r.inTx = false
-	case message.Relation:
-		if chTbl, err := r.getTable(v.OID); err != nil {
-			return err
-		} else if chTbl == nil {
-			break
-		}
+func (r *Replicator) processRelation(msg message.Relation) error {
+	defer r.logger.Sync()
+	if chTbl, err := r.getTable(msg.OID); err != nil {
+		return err
+	} else if chTbl == nil {
+		return nil
+	}
 
-		if relMsg, ok := r.tblRelMsgs[r.oidName[v.OID]]; ok {
-			if bytes.Compare(relMsg.Raw, v.Raw) != 0 {
-				log.Fatalln("table name or structure has been changed")
-			}
+	tblName := r.oidName[msg.OID]
+	if relMsg, ok := r.tblRelMsgs[tblName]; ok {
+		if bytes.Compare(relMsg.Raw, msg.Raw) != 0 {
+			r.logger.Fatalf("table or structure of %s table has been changed", tblName)
 		}
-	case message.Insert:
-		chTbl, err := r.getTable(v.RelationOID)
-		if err != nil {
-			return err
-		} else if chTbl == nil {
-			break
-		}
-
-		if mergeIsNeeded, err := chTbl.Insert(r.finalLSN, v.NewRow); err != nil {
-			return fmt.Errorf("could not insert: %v", err)
-		} else {
-			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
-		}
-
-		r.isEmptyTx = false
-	case message.Update:
-		chTbl, err := r.getTable(v.RelationOID)
-		if err != nil {
-			return err
-		} else if chTbl == nil {
-			break
-		}
-
-		if mergeIsNeeded, err := chTbl.Update(r.finalLSN, v.OldRow, v.NewRow); err != nil {
-			return fmt.Errorf("could not update: %v", err)
-		} else {
-			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
-		}
-
-		r.isEmptyTx = false
-	case message.Delete:
-		chTbl, err := r.getTable(v.RelationOID)
-		if err != nil {
-			return err
-		} else if chTbl == nil {
-			break
-		}
-
-		if mergeIsNeeded, err := chTbl.Delete(r.finalLSN, v.OldRow); err != nil {
-			return fmt.Errorf("could not delete: %v", err)
-		} else {
-			r.curTxMergeIsNeeded = r.curTxMergeIsNeeded || mergeIsNeeded
-		}
-
-		r.isEmptyTx = false
-	case message.Truncate:
-		for _, oid := range v.RelationOIDs {
-			if chTbl, err := r.getTable(oid); err != nil {
-				return err
-			} else if chTbl == nil {
-				continue
-			} else {
-				if err := chTbl.Truncate(lsn); err != nil {
-					return err
-				}
-			}
-		}
-
-		r.isEmptyTx = false
 	}
 
 	return nil
+}
+
+func (r *Replicator) processInsert(msg message.Insert) error {
+	chTbl, err := r.getTable(msg.RelationOID)
+	if err != nil {
+		return err
+	} else if chTbl == nil {
+		return nil
+	}
+
+	if tblFlushIsNeeded, err := chTbl.Insert(msg.NewRow); err != nil {
+		return fmt.Errorf("could not insert: %v", err)
+	} else {
+		r.curTxTblFlushIsNeeded = r.curTxTblFlushIsNeeded || tblFlushIsNeeded
+	}
+
+	r.isEmptyTx = false
+	return nil
+}
+
+func (r *Replicator) processUpdate(msg message.Update) error {
+	chTbl, err := r.getTable(msg.RelationOID)
+	if err != nil {
+		return err
+	} else if chTbl == nil {
+		return nil
+	}
+
+	if tblFlushIsNeeded, err := chTbl.Update(msg.OldRow, msg.NewRow); err != nil {
+		return fmt.Errorf("could not update: %v", err)
+	} else {
+		r.curTxTblFlushIsNeeded = r.curTxTblFlushIsNeeded || tblFlushIsNeeded
+	}
+
+	r.isEmptyTx = false
+	return nil
+}
+
+func (r *Replicator) processDelete(msg message.Delete) error {
+	chTbl, err := r.getTable(msg.RelationOID)
+	if err != nil {
+		return err
+	} else if chTbl == nil {
+		return nil
+	}
+
+	if tblFlushIsNeeded, err := chTbl.Delete(msg.OldRow); err != nil {
+		return fmt.Errorf("could not delete: %v", err)
+	} else {
+		r.curTxTblFlushIsNeeded = r.curTxTblFlushIsNeeded || tblFlushIsNeeded
+	}
+
+	r.isEmptyTx = false
+	return nil
+}
+
+func (r *Replicator) processTruncate(msg message.Truncate) error {
+	for _, oid := range msg.RelationOIDs {
+		if chTbl, err := r.getTable(oid); err != nil {
+			return err
+		} else if chTbl == nil {
+			continue
+		} else {
+			if err := chTbl.Truncate(); err != nil {
+				return err
+			}
+		}
+	}
+
+	r.isEmptyTx = false
+	return nil
+}
+
+// HandleMessage processes the incoming wal message
+func (r *Replicator) HandleMessage(lsn dbtypes.LSN, msg message.Message) error {
+	defer r.logger.Sync()
+	r.logger.Debugf("replication message %[1]T: %[1]v", msg)
+	switch v := msg.(type) {
+	case message.Begin:
+		return r.processBegin(v.FinalLSN)
+	case message.Commit:
+		return r.processCommit()
+	case message.Relation:
+		return r.processRelation(v)
+	case message.Insert:
+		return r.processInsert(v)
+	case message.Update:
+		return r.processUpdate(v)
+	case message.Delete:
+		return r.processDelete(v)
+	case message.Truncate:
+		return r.processTruncate(v)
+	default:
+		return fmt.Errorf("unknown message type %T", v)
+	}
 }

@@ -30,6 +30,13 @@ var (
 		}}
 )
 
+type BulkUploader interface {
+	Start() error
+	Finish() error
+	Write(p []byte) error
+	BulkUpload(name config.ChTableName, columns []string) error
+}
+
 type BulkUpload struct {
 	baseURL      string
 	pipeWriter   *nio.PipeWriter
@@ -57,6 +64,7 @@ func (c *BulkUpload) performRequest(query string, body io.Reader) error {
 		return fmt.Errorf("could not create request: %v", err)
 	}
 	req.Header.Add("Content-Encoding", "gzip")
+	req.Header.Set("User-Agent", config.ApplicationName)
 
 	client := *clientsPool.Get().(*http.Client)
 	resp, err := client.Do(req)

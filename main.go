@@ -45,6 +45,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "could not load config: %v\n", err)
 		os.Exit(1)
 	}
+	cfg.Print()
 
 	repl := replicator.New(*cfg)
 
@@ -57,10 +58,10 @@ func main() {
 		var err error
 
 		if err = repl.Init(); err == nil {
-			var syncTables []config.PgTableName
+			var tablesToSync []config.PgTableName
 
-			if syncTables, err = repl.GetSyncTables(); err == nil {
-				err = repl.Sync(syncTables, false)
+			if tablesToSync, err = repl.GetSyncTables(); err == nil {
+				err = repl.SyncTables(tablesToSync, false)
 			}
 		}
 
