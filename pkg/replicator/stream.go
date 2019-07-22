@@ -55,6 +55,7 @@ func (r *Replicator) getTable(oid dbtypes.OID) (chTbl clickHouseTable, err error
 	}
 
 	if r.txFinalLSN <= lsn {
+		r.logger.Debugf("tx lsn(%v) <= table lsn(%v)", r.txFinalLSN.Dec(), lsn.Dec())
 		chTbl = nil
 	}
 
@@ -97,9 +98,14 @@ func (r *Replicator) processCommit() error {
 	r.logger.Debugf("commit: inTxMutex lock acquired")
 	defer r.inTxMutex.Unlock()
 
+	inTxTables := make([]string, 0, len(r.inTxTables))
+	for tblName := range r.inTxTables {
+		inTxTables = append(inTxTables, tblName.String())
+	}
+
 	r.logger.Debugw("commit",
 		"isEmptyTx", r.isEmptyTx,
-		"inTxTables", r.inTxTables,
+		"inTxTables", inTxTables,
 		"flushIsNeeded", r.curTxTblFlushIsNeeded)
 	if !r.isEmptyTx {
 		r.incrementGeneration()
@@ -122,6 +128,7 @@ func (r *Replicator) processRelation(msg message.Relation) error {
 	if chTbl, err := r.getTable(msg.OID); err != nil {
 		return err
 	} else if chTbl == nil {
+		r.logger.Debug("relation message: discarding")
 		return nil
 	}
 
@@ -140,6 +147,7 @@ func (r *Replicator) processInsert(msg message.Insert) error {
 	if err != nil {
 		return err
 	} else if chTbl == nil {
+		r.logger.Debug("insert message: discarding")
 		return nil
 	}
 
@@ -158,6 +166,7 @@ func (r *Replicator) processUpdate(msg message.Update) error {
 	if err != nil {
 		return err
 	} else if chTbl == nil {
+		r.logger.Debug("update message: discarding")
 		return nil
 	}
 
@@ -176,6 +185,7 @@ func (r *Replicator) processDelete(msg message.Delete) error {
 	if err != nil {
 		return err
 	} else if chTbl == nil {
+		r.logger.Debug("delete message: discarding")
 		return nil
 	}
 
@@ -194,6 +204,7 @@ func (r *Replicator) processTruncate(msg message.Truncate) error {
 		if chTbl, err := r.getTable(oid); err != nil {
 			return err
 		} else if chTbl == nil {
+			r.logger.Debug("truncate message: table with oid %v discarding", oid)
 			continue
 		} else {
 			if err := chTbl.Truncate(); err != nil {
@@ -209,7 +220,7 @@ func (r *Replicator) processTruncate(msg message.Truncate) error {
 // HandleMessage processes the incoming wal message
 func (r *Replicator) HandleMessage(lsn dbtypes.LSN, msg message.Message) error {
 	defer r.logger.Sync()
-	r.logger.Debugf("replication message %[1]T: %[1]v", msg)
+	//r.logger.Debugf("replication message %[1]T: %[1]v", msg)
 	switch v := msg.(type) {
 	case message.Begin:
 		return r.processBegin(v.FinalLSN)

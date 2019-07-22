@@ -60,7 +60,7 @@ func New(ctx context.Context, logger *zap.SugaredLogger, errCh chan error, dbCfg
 		currentLSNMutex: &sync.RWMutex{},
 		currentLSN:      startLSN,
 		errCh:           errCh,
-		logger:          logger.Named("consumer"),
+		logger:          logger,
 	}
 }
 
@@ -118,7 +118,7 @@ func (c *consumer) Run(handler Handler) error {
 func (c *consumer) startDecoding() error {
 	defer c.logger.Sync()
 
-	c.logger.Infof("starting from %s lsn", c.currentLSN)
+	c.logger.Infof("starting decoding from %s lsn", c.currentLSN)
 	c.currentLSNMutex.RLock()
 	err := c.conn.StartReplication(c.slotName, uint64(c.currentLSN), -1,
 		`"proto_version" '1'`, fmt.Sprintf(`"publication_names" '%s'`, c.publicationName))

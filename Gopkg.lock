@@ -23,6 +23,7 @@
     ".",
     "chunkreader",
     "internal/sanitize",
+    "log/zapadapter",
     "pgio",
     "pgproto3",
     "pgtype"
@@ -133,6 +134,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "f593c042c635e0a03ec7618e1d0c8cc39d5fa31e8b2ef0470af6534b10112043"
+  inputs-digest = "8497ebd9ef06b9060d575fc16140bc85ef61b1889aca5f568d633ee9d5e0d8d0"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -52,12 +52,12 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, w io.Write
 	t.syncSnapshotLSN = snapshotLSN
 
 	if tblLiveTuples, err := pgutils.PgStatLiveTuples(pgTx, t.cfg.PgTableName); err != nil {
-		t.logger.Named("genSync").Warnf("could not get approximate number of rows: %v", err)
+		t.logger.Warnf("genSync: could not get approximate number of rows: %v", err)
 	} else {
 		t.rowsToSync = tblLiveTuples
 	}
 
-	t.logger.Named("genSync").Infow("copy from postgresql to clickhouse table started",
+	t.logger.Infow("genSync: copy from postgresql to clickhouse table started",
 		"postgres", t.cfg.PgTableName.String(),
 		"clickhouse", t.cfg.ChMainTable,
 		"rows", t.rowsToSync,

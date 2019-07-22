@@ -26,6 +26,7 @@ const (
 	defaultPostgresHost           = "127.0.0.1"
 	defaultRowIdColumn            = "row_id"
 	defaultMaxBufferLength        = 10000
+	defaultFlushThreshold         = 100
 	defaultSignColumn             = "sign"
 	defaultVerColumn              = "ver"
 	defaultLsnColumn              = "lsn"
@@ -58,6 +59,7 @@ type pgConnConfig struct {
 
 	ReplicationSlotName string `yaml:"replication_slot_name"`
 	PublicationName     string `yaml:"publication_name"`
+	Debug               bool   `yaml:"debug"`
 }
 
 // PgTableName represents namespaced name
@@ -315,6 +317,10 @@ func New(filepath string) (*Config, error) {
 		if !tbl.ChSyncAuxTable.IsEmpty() && tbl.ChSyncAuxTable.DatabaseName == "" {
 			newTbl.ChSyncAuxTable.DatabaseName = cfg.ClickHouse.Database
 		}
+		if tbl.FlushThreshold == 0 {
+			newTbl.FlushThreshold = defaultFlushThreshold
+		}
+
 		cfg.Tables[tblName] = newTbl
 	}
 
@@ -421,5 +427,10 @@ func (c PgColumn) IsTime() bool {
 
 func (c Config) Print() {
 	fmt.Printf("inactivity flush timeout: %v\n", c.InactivityFlushTimeout)
-	fmt.Printf("debug: %t", c.Debug)
+	fmt.Printf("debug: %t\n", c.Debug)
+
+	for tbl, tblCfg := range c.Tables {
+		fmt.Printf("%s: flush threshold: %v buffer threshold: %v\n",
+			tbl, tblCfg.FlushThreshold, tblCfg.MaxBufferPgDMLs)
+	}
 }

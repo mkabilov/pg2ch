@@ -178,32 +178,32 @@ func (t *genericTable) flushMemBuffer() error {
 // flush from memory to the buffer/main table
 func (t *genericTable) attemptFlushMemBuffer() error {
 	defer t.logger.Sync()
-	t.logger.Named("attemptFlushMemBuffer").Debugf("started")
+	t.logger.Debugf("Memory buffer flush: started")
 	if t.memBufferPgDMLsCnt == 0 {
-		t.logger.Named("attemptFlushMemBuffer").Debugf("mem buffer is empty")
+		t.logger.Debugf("Memory buffer flush: mem buffer is empty")
 		return nil
 	}
 
 	if t.inSync {
-		t.logger.Named("attemptFlushMemBuffer").Debugf("in sync buffer flush to %s", t.cfg.ChSyncAuxTable)
+		t.logger.Debugf("Memory buffer flush: in sync buffer flush to %s", t.cfg.ChSyncAuxTable)
 		if err := t.chLoader.BufferFlush(t.cfg.ChSyncAuxTable, t.syncAuxTableColumns()); err != nil {
 			return fmt.Errorf("could not flush buffer for %q table: %v", t.cfg.ChSyncAuxTable, err)
 		}
 	} else {
 		if !t.cfg.ChBufferTable.IsEmpty() {
-			t.logger.Named("attemptFlushMemBuffer").Debugf("not in sync flushing to buffer %s table", t.cfg.ChBufferTable)
+			t.logger.Debugf("Memory buffer flush: not in sync flushing to buffer %s table", t.cfg.ChBufferTable)
 			if err := t.chLoader.BufferFlush(t.cfg.ChBufferTable, append(t.chUsedColumns, t.cfg.BufferTableRowIdColumn)); err != nil {
 				return fmt.Errorf("could not flush buffer for %q table: %v", t.cfg.ChBufferTable, err)
 			}
 		} else {
-			t.logger.Named("attemptFlushMemBuffer").Debugf("not in sync flushing to main table")
+			t.logger.Debugf("Memory buffer flush: not in sync flushing to main table")
 			if err := t.chLoader.BufferFlush(t.cfg.ChMainTable, t.chUsedColumns); err != nil {
 				return fmt.Errorf("could not flush buffer for %q table: %v", t.cfg.ChMainTable, err)
 			}
 		}
 	}
 
-	t.logger.Named("attemptFlushMemBuffer").Debugf("finished")
+	t.logger.Debugf("Memory buffer flush: finished")
 	t.memBufferPgDMLsCnt = 0
 	t.memBufferFlushCnt++
 
@@ -213,9 +213,9 @@ func (t *genericTable) attemptFlushMemBuffer() error {
 // flush from buffer table to main table
 func (t *genericTable) attemptFlushTblBuffer() error {
 	defer t.logger.Sync()
-	t.logger.Named("attemptFlushTblBuffer").Debugf("started")
+	t.logger.Debugf("Table buffer flush: started")
 	for _, query := range t.tblBufferFlushQueries {
-		t.logger.Named("attemptFlushTblBuffer").Debugf("executing: %v", query)
+		t.logger.Debugf("Table buffer flush: executing: %v", query)
 		if err := t.chLoader.Exec(query); err != nil {
 			return err
 		}
@@ -227,7 +227,7 @@ func (t *genericTable) attemptFlushTblBuffer() error {
 		return fmt.Errorf("could not truncate buffer table: %v", err)
 	}
 
-	t.logger.Named("attemptFlushTblBuffer").Debugf("finished")
+	t.logger.Debugf("Table buffer flush: finished")
 
 	return nil
 }
@@ -239,11 +239,12 @@ func (t *genericTable) flush() error {
 	}
 
 	if t.cfg.ChBufferTable.IsEmpty() || t.memBufferFlushCnt == 0 {
+		t.logger.Debugf("Flush to main table: nothing to flush")
 		return nil
 	}
 
 	defer func(startTime time.Time, rows uint64) {
-		t.logger.Named("flush").Debugf("processed in %v (rows: %d)",
+		t.logger.Debugf("Flush to main table: processed in %v (rows: %d)",
 			time.Since(startTime).Truncate(time.Second), rows)
 	}(time.Now(), t.memBufferRowId)
 
@@ -263,9 +264,9 @@ func (t *genericTable) flush() error {
 //FlushToMainTable flushes data from buffer table to the main one
 func (t *genericTable) FlushToMainTable() error {
 	defer t.logger.Sync()
-	t.logger.Named("FlushToMainTable").Debugf("trying to acquire table lock")
+	t.logger.Debugf("Flush to main table: trying to acquire table lock")
 	t.Lock()
-	t.logger.Named("FlushToMainTable").Debugf("table lock acquired")
+	t.logger.Debugf("Flush to main table: table lock acquired")
 	defer t.Unlock()
 
 	return t.flush()
@@ -381,9 +382,9 @@ func (t *genericTable) bufTableColumns() []string {
 
 func (t *genericTable) Begin(finalLSN dbtypes.LSN) error {
 	defer t.logger.Sync()
-	t.logger.Named("Begin").Debugf("trying to acquire table lock")
+	t.logger.Debugf("Begin: trying to acquire table lock")
 	t.Lock()
-	t.logger.Named("Begin").Debugf("table lock acquired")
+	t.logger.Debugf("Begin: table lock acquired")
 	t.txFinalLSN = finalLSN
 
 	return nil
@@ -392,9 +393,9 @@ func (t *genericTable) Begin(finalLSN dbtypes.LSN) error {
 func (t *genericTable) Commit(flush bool) error {
 	defer t.Unlock()
 	defer t.logger.Sync()
-	t.logger.Named("Commit").Debugf("with %t flush", flush)
+	t.logger.Debugf("Commit: with %t flush", flush)
 	if !flush {
-		t.logger.Named("Begin").Debugf("finished")
+		t.logger.Debugf("Commit: finished")
 		return nil
 	}
 
@@ -402,7 +403,7 @@ func (t *genericTable) Commit(flush bool) error {
 		return fmt.Errorf("could not flush: %v", err)
 	}
 
-	t.logger.Named("Begin").Debugf("finished")
+	t.logger.Debugf("Begin: finished")
 	return nil
 }
 

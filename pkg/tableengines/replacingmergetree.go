@@ -49,7 +49,6 @@ func (t *replacingMergeTree) Write(p []byte) (int, error) {
 	}
 
 	suffixes := make([]string, 0)
-
 	if t.cfg.GenerationColumn != "" {
 		suffixes = append(suffixes, "0") // generation id
 	}

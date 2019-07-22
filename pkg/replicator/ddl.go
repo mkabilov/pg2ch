@@ -158,6 +158,21 @@ func (r *Replicator) GenerateChDDL() error {
 				processedTables[tblCfg.ChBufferTable] = struct{}{}
 			}
 		}
+
+		if !tblCfg.ChSyncAuxTable.IsEmpty() {
+			if _, ok := processedTables[tblCfg.ChSyncAuxTable]; !ok {
+				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree()%s;\n",
+					tblCfg.ChSyncAuxTable,
+					strings.Join(
+						append(chColumnDDLs,
+							fmt.Sprintf("    %s UInt64", tblCfg.BufferTableRowIdColumn),
+							fmt.Sprintf("    %s UInt64", tblCfg.LsnColumnName),
+						), ",\n"),
+					orderBy)
+				processedTables[tblCfg.ChSyncAuxTable] = struct{}{}
+			}
+		}
+
 	}
 
 	return nil

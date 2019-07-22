@@ -150,6 +150,8 @@ func ConvertColumn(colType string, val message.Tuple, colProps config.ColumnProp
 		}
 	case dbtypes.PgTimestampWithTimeZone:
 		fallthrough
+	case dbtypes.PgTimestampWithoutTimeZone:
+		fallthrough
 	case dbtypes.PgTimestamp:
 		if val.Kind == message.TupleNull {
 			if len(colProps.Coalesce) > 0 {

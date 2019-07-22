@@ -45,7 +45,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "could not load config: %v\n", err)
 		os.Exit(1)
 	}
-	cfg.Print()
 
 	repl := replicator.New(*cfg)
 
@@ -70,6 +69,7 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
+		cfg.Print()
 		if err := repl.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "could not start: %v\n", err)
 			os.Exit(1)

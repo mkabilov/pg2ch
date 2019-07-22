@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/log/zapadapter"
 	"github.com/peterbourgon/diskv"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/consumer"
@@ -81,6 +82,7 @@ func New(cfg config.Config) *Replicator {
 		ErrorOutputPaths: []string{"stderr"},
 		Level:            zap.NewAtomicLevelAt(zap.InfoLevel),
 	}
+	zapCfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 	if cfg.Debug {
 		zapCfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
 	}
@@ -103,16 +105,18 @@ func New(cfg config.Config) *Replicator {
 		chConnString:  fmt.Sprintf("http://%s:%d", cfg.ClickHouse.Host, cfg.ClickHouse.Port),
 		syncJobs:      make(chan config.PgTableName, cfg.SyncWorkers),
 		pgxConnConfig: cfg.Postgres.Merge(pgx.ConnConfig{
-			Logger:               zapadapter.NewLogger(logger),
-			LogLevel:             pgx.LogLevelWarn,
-			RuntimeParams:        map[string]string{"replication": "database", "application_name": config.ApplicationName},
+			Logger:   zapadapter.NewLogger(logger),
+			LogLevel: pgx.LogLevelWarn,
+			RuntimeParams: map[string]string{
+				"replication":      "database",
+				"application_name": config.ApplicationName},
 			PreferSimpleProtocol: true}),
 		tblRelMsgs: make(map[config.PgTableName]message.Relation, len(cfg.Tables)),
 	}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.logger = logger.Sugar()
 
-	if cfg.Debug {
+	if cfg.Postgres.Debug {
 		r.pgxConnConfig.LogLevel = pgx.LogLevelDebug
 	}
 
@@ -211,7 +215,6 @@ func (r *Replicator) Run() error {
 	if err := r.consumer.Run(r); err != nil {
 		return err
 	}
-	r.logger.Infof("logical replication consumer started")
 
 	if err := r.SyncTables(tablesToSync, true); err != nil {
 		return fmt.Errorf("could not sync tables: %v", err)
@@ -231,12 +234,6 @@ func (r *Replicator) Run() error {
 		if !r.txFinalLSN.IsValid() {
 			continue
 		}
-	}
-
-	r.logger.Debugf("advancing LSN to %v", r.txFinalLSN)
-	r.consumer.AdvanceLSN(r.txFinalLSN)
-	if err := r.consumer.SendStatus(); err != nil {
-		r.logger.Warnf("could not send status: %v", err)
 	}
 
 	return nil
