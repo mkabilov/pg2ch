@@ -84,11 +84,11 @@ func (r *Replicator) startRedisServer() {
 					conn.WriteInt(1)
 				}
 			case "pause":
-				//TODO
-				conn.WriteString("OK")
+				conn.WriteString(r.pause())
 			case "resume":
-				//TODO
-				conn.WriteString("OK")
+				conn.WriteString(r.resume())
+			case "status":
+				conn.WriteString(r.status())
 			default:
 				conn.WriteError("ERR unknown command '" + string(cmd.Args[0]) + "'")
 			}

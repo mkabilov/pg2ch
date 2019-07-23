@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/jackc/pgx"
 	"github.com/jackc/pgx/log/zapadapter"
@@ -63,7 +62,7 @@ type Replicator struct {
 	txFinalLSN dbtypes.LSN
 
 	inTxMutex             *sync.Mutex
-	inTx                  bool                                   // indicates if we're inside tx
+	state                 uint32
 	tablesToFlush         map[config.PgTableName]struct{}        // tables to be merged
 	inTxTables            map[config.PgTableName]clickHouseTable // tables inside running tx
 	curTxTblFlushIsNeeded bool                                   // if tables in the current transaction are needed to be flushed from buffer tables to main ones
@@ -175,8 +174,6 @@ func (r *Replicator) Init() error {
 		return fmt.Errorf("could not init tables: %v", err)
 	}
 
-	r.consumer = consumer.New(r.ctx, r.logger, r.errCh, r.pgxConnConfig,
-		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, startLSN)
 	r.txFinalLSN = startLSN
 
 	return nil
@@ -194,9 +191,9 @@ func (r *Replicator) Run() error {
 	r.wg.Add(1)
 	go r.inactivityTblBufferFlush()
 
-	if r.cfg.RedisBind != "" {
-		go r.startRedisServer()
-	}
+	consumerCtx, consumerCancel := context.WithCancel(context.Background())
+	r.consumer = consumer.New(consumerCtx, r.logger, r.errCh, r.pgxConnConfig,
+		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.txFinalLSN)
 
 	tablesToSync, err := r.GetSyncTables()
 	if err != nil {
@@ -212,8 +209,14 @@ func (r *Replicator) Run() error {
 		}
 	}
 
+	r.wg.Add(1)
 	if err := r.consumer.Run(r); err != nil {
 		return err
+	}
+	r.state = stateIdle
+
+	if r.cfg.RedisBind != "" {
+		go r.startRedisServer()
 	}
 
 	if err := r.SyncTables(tablesToSync, true); err != nil {
@@ -221,9 +224,15 @@ func (r *Replicator) Run() error {
 	}
 
 	r.waitForShutdown()
+	r.logger.Debugf("cancelling main context")
 	r.cancel()
+	r.logger.Debugf("waiting for current transaction to finish")
 	r.wg.Wait()
+	r.logger.Debugf("transaction finished. stopping consumer")
+	consumerCancel()
+	r.logger.Debugf("waiting for consumer to finish")
 	r.consumer.Wait()
+	r.logger.Debugf("consumer stopped")
 
 	for tblName, tbl := range r.chTables {
 		r.logger.Debugw("flushing buffer data", "table", tblName)
@@ -310,37 +319,6 @@ func (r *Replicator) readGenerationID() error {
 	r.logger.Debugf("generation ID: %v", r.generationID)
 
 	return nil
-}
-
-func (r *Replicator) inactivityTblBufferFlush() {
-	defer r.wg.Done()
-	defer r.logger.Sync()
-
-	flushFn := func() {
-		r.logger.Debugf("inactivity tbl flush started")
-		r.inTxMutex.Lock()
-		defer r.inTxMutex.Unlock()
-		if r.inTx {
-			return
-		}
-
-		if err := r.tblBuffersFlush(); err != nil {
-			select {
-			case r.errCh <- fmt.Errorf("could not backgound merge tables: %v", err):
-			default:
-			}
-		}
-	}
-
-	ticker := time.NewTicker(r.cfg.InactivityFlushTimeout)
-	for {
-		select {
-		case <-r.ctx.Done():
-			return
-		case <-ticker.C:
-			flushFn()
-		}
-	}
 }
 
 func (r *Replicator) logErrCh() {

@@ -3,10 +3,19 @@ package replicator
 import (
 	"bytes"
 	"fmt"
+	"sync/atomic"
+	"time"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
+)
+
+const (
+	stateIdle uint32 = iota
+	statePaused
+	statePausing
+	stateInactivityFlush
 )
 
 func (r *Replicator) tblBuffersFlush() error { // protected by inTxMutex: inactivity merge or on commit
@@ -79,11 +88,49 @@ func (r *Replicator) incrementGeneration() {
 	}
 }
 
+func (r *Replicator) inactivityTblBufferFlush() {
+	defer r.wg.Done()
+	defer r.logger.Sync()
+
+	flushFn := func() {
+		if atomic.LoadUint32(&r.state) != stateIdle {
+			return
+		}
+		r.inTxMutex.Lock()
+		defer r.inTxMutex.Unlock()
+
+		r.logger.Debugf("inactivity tbl flush started")
+		if !atomic.CompareAndSwapUint32(&r.state, stateIdle, stateInactivityFlush) {
+			return
+		}
+
+		if err := r.tblBuffersFlush(); err != nil {
+			select {
+			case r.errCh <- fmt.Errorf("could not backgound merge tables: %v", err):
+			default:
+			}
+		}
+
+		atomic.StoreUint32(&r.state, stateIdle)
+	}
+
+	ticker := time.NewTicker(r.cfg.InactivityFlushTimeout)
+	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		case <-ticker.C:
+			flushFn()
+		}
+	}
+}
+
 func (r *Replicator) processBegin(finalLSN dbtypes.LSN) error { // TODO: make me lazy: begin transaction on first DML operation
+	r.logger.Debugf("begin: trying to acquire inTxMutex lock")
 	r.inTxMutex.Lock()
+	r.logger.Debugf("begin: inTxMutex lock acquired")
 	defer r.inTxMutex.Unlock()
 
-	r.inTx = true
 	r.txFinalLSN = finalLSN
 	r.curTxTblFlushIsNeeded = false
 	r.isEmptyTx = true
@@ -92,11 +139,19 @@ func (r *Replicator) processBegin(finalLSN dbtypes.LSN) error { // TODO: make me
 }
 
 func (r *Replicator) processCommit() error {
-	defer r.logger.Sync()
 	r.logger.Debugf("commit: trying to acquire inTxMutex lock")
 	r.inTxMutex.Lock()
 	r.logger.Debugf("commit: inTxMutex lock acquired")
+	select {
+	case <-r.ctx.Done():
+		r.logger.Debugf("commit: got context cancel")
+		defer r.wg.Done()
+	default:
+	}
+
+	defer atomic.StoreUint32(&r.state, stateIdle)
 	defer r.inTxMutex.Unlock()
+	defer r.logger.Sync()
 
 	inTxTables := make([]string, 0, len(r.inTxTables))
 	for tblName := range r.inTxTables {
@@ -117,7 +172,6 @@ func (r *Replicator) processCommit() error {
 		}
 	}
 	r.inTxTables = make(map[config.PgTableName]clickHouseTable)
-	r.inTx = false
 	r.consumer.AdvanceLSN(r.txFinalLSN) // TODO: wrong?
 
 	return nil
@@ -220,7 +274,8 @@ func (r *Replicator) processTruncate(msg message.Truncate) error {
 // HandleMessage processes the incoming wal message
 func (r *Replicator) HandleMessage(lsn dbtypes.LSN, msg message.Message) error {
 	defer r.logger.Sync()
-	//r.logger.Debugf("replication message %[1]T: %[1]v", msg)
+
+	r.logger.Debugf("replication message %[1]T: %[1]v", msg)
 	switch v := msg.(type) {
 	case message.Begin:
 		return r.processBegin(v.FinalLSN)
