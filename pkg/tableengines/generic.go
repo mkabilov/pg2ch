@@ -470,6 +470,8 @@ func convert(val string, chType config.ChColumn, pgType config.PgColumn) (interf
 		return time.Parse("2006-01-02", val[:10])
 	case utils.ChDateTime:
 		return time.Parse("2006-01-02 15:04:05", val[:19])
+	case utils.ChUUID:
+		return val, nil
 	}
 
 	return nil, fmt.Errorf("unknown type: %v", chType)
