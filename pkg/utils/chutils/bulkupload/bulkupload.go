@@ -24,10 +24,7 @@ var (
 			return buffer.New(1 * 1024 * 1024)
 		}}
 
-	clientsPool = sync.Pool{
-		New: func() interface{} {
-			return &http.Client{}
-		}}
+	client = &http.Client{}
 )
 
 type BulkUploader interface {
@@ -66,7 +63,6 @@ func (c *BulkUpload) performRequest(query string, body io.Reader) error {
 	req.Header.Add("Content-Encoding", "gzip")
 	req.Header.Set("User-Agent", config.ApplicationName)
 
-	client := *clientsPool.Get().(*http.Client)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("could not perform request: %v", err)
@@ -85,7 +81,6 @@ func (c *BulkUpload) performRequest(query string, body io.Reader) error {
 
 		return fmt.Errorf("got %d status code from clickhouse: %s", resp.StatusCode, string(body))
 	}
-	clientsPool.Put(&client)
 
 	return nil
 }
