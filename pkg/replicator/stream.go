@@ -289,6 +289,9 @@ func (r *Replicator) HandleMessage(lsn dbtypes.LSN, msg message.Message) error {
 		return r.processUpdate(v)
 	case message.Delete:
 		return r.processDelete(v)
+	case message.Type:
+		r.logger.Debugf("incoming type message: %v", msg)
+		return nil
 	case message.Truncate:
 		return r.processTruncate(v)
 	default:
