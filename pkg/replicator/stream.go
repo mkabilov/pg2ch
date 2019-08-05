@@ -93,14 +93,15 @@ func (r *Replicator) inactivityTblBufferFlush() {
 	defer r.logger.Sync()
 
 	flushFn := func() {
-		if atomic.LoadUint32(&r.state) != stateIdle {
+		if atomic.LoadUint32(&r.curState.v) != stateIdle {
 			return
 		}
 		r.inTxMutex.Lock()
 		defer r.inTxMutex.Unlock()
 
 		r.logger.Debugf("inactivity tbl flush started")
-		if !atomic.CompareAndSwapUint32(&r.state, stateIdle, stateInactivityFlush) {
+		defer r.logger.Debugf("inactivity tbl flush finished")
+		if !atomic.CompareAndSwapUint32(&r.curState.v, stateIdle, stateInactivityFlush) {
 			return
 		}
 
@@ -111,7 +112,7 @@ func (r *Replicator) inactivityTblBufferFlush() {
 			}
 		}
 
-		atomic.StoreUint32(&r.state, stateIdle)
+		atomic.StoreUint32(&r.curState.v, stateIdle)
 	}
 
 	ticker := time.NewTicker(r.cfg.InactivityFlushTimeout)
@@ -126,11 +127,9 @@ func (r *Replicator) inactivityTblBufferFlush() {
 }
 
 func (r *Replicator) processBegin(finalLSN dbtypes.LSN) error { // TODO: make me lazy: begin transaction on first DML operation
-	r.logger.Debugf("begin: trying to acquire inTxMutex lock")
+	r.logger.Debugf("begin. trying to acquire lock")
 	r.inTxMutex.Lock()
-	r.logger.Debugf("begin: inTxMutex lock acquired")
-	defer r.inTxMutex.Unlock()
-
+	r.logger.Debugf("begin. lock acquired")
 	r.txFinalLSN = finalLSN
 	r.curTxTblFlushIsNeeded = false
 	r.isEmptyTx = true
@@ -139,18 +138,9 @@ func (r *Replicator) processBegin(finalLSN dbtypes.LSN) error { // TODO: make me
 }
 
 func (r *Replicator) processCommit() error {
-	r.logger.Debugf("commit: trying to acquire inTxMutex lock")
-	r.inTxMutex.Lock()
-	r.logger.Debugf("commit: inTxMutex lock acquired")
-	select {
-	case <-r.ctx.Done():
-		r.logger.Debugf("commit: got context cancel")
-		defer r.wg.Done()
-	default:
-	}
-
-	defer atomic.StoreUint32(&r.state, stateIdle)
+	r.logger.Debugf("commit")
 	defer r.inTxMutex.Unlock()
+	defer atomic.StoreUint32(&r.curState.v, stateIdle)
 	defer r.logger.Sync()
 
 	inTxTables := make([]string, 0, len(r.inTxTables))

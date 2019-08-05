@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/jackc/pgx"
@@ -62,7 +63,7 @@ type Replicator struct {
 	txFinalLSN dbtypes.LSN
 
 	inTxMutex             *sync.Mutex
-	state                 uint32
+	curState              state
 	tablesToFlush         map[config.PgTableName]struct{}        // tables to be merged
 	inTxTables            map[config.PgTableName]clickHouseTable // tables inside running tx
 	curTxTblFlushIsNeeded bool                                   // if tables in the current transaction are needed to be flushed from buffer tables to main ones
@@ -209,11 +210,10 @@ func (r *Replicator) Run() error {
 		}
 	}
 
-	r.wg.Add(1)
 	if err := r.consumer.Run(r); err != nil {
 		return err
 	}
-	r.state = stateIdle
+	r.curState.v = stateIdle
 
 	if r.cfg.RedisBind != "" {
 		go r.startRedisServer()
@@ -224,15 +224,20 @@ func (r *Replicator) Run() error {
 	}
 
 	r.waitForShutdown()
-	r.logger.Debugf("cancelling main context")
-	r.cancel()
-	r.logger.Debugf("waiting for current transaction to finish")
-	r.wg.Wait()
-	r.logger.Debugf("transaction finished. stopping consumer")
+	if atomic.LoadUint32(&r.curState.v) != statePaused {
+		r.logger.Debugf("acquiring tx lock")
+		r.inTxMutex.Lock()
+	} else {
+		r.logger.Debugf("in paused state, no need to wait for tx to finish")
+	}
+
 	consumerCancel()
 	r.logger.Debugf("waiting for consumer to finish")
 	r.consumer.Wait()
-	r.logger.Debugf("consumer stopped")
+
+	r.cancel()
+	r.logger.Debugf("waiting for go routintes to finish")
+	r.wg.Wait()
 
 	for tblName, tbl := range r.chTables {
 		r.logger.Debugw("flushing buffer data", "table", tblName)

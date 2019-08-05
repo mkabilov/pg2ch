@@ -2,6 +2,10 @@ package replicator
 
 import "sync/atomic"
 
+type state struct {
+	v uint32
+}
+
 var states = map[uint32]string{
 	stateIdle:            "IDLE",
 	stateInactivityFlush: "INACTIVITY FLUSH",
@@ -11,14 +15,16 @@ var states = map[uint32]string{
 
 func (r *Replicator) pause() string {
 	r.logger.Debugf("pausing")
-	if state := atomic.LoadUint32(&r.state); state == statePausing ||
+	if state := atomic.LoadUint32(&r.curState.v); state == statePausing ||
 		state == statePaused ||
 		state == stateInactivityFlush {
-		return r.status()
+		return r.curState.String()
 	}
-	atomic.StoreUint32(&r.state, statePausing)
+	if !atomic.CompareAndSwapUint32(&r.curState.v, stateIdle, statePausing) {
+		return r.curState.String()
+	}
 	r.inTxMutex.Lock()
-	atomic.StoreUint32(&r.state, statePaused)
+	atomic.StoreUint32(&r.curState.v, statePaused)
 	r.logger.Debugf("paused")
 
 	return "OK"
@@ -27,8 +33,8 @@ func (r *Replicator) pause() string {
 // resume should mind the pause in progress state
 func (r *Replicator) resume() string {
 	r.logger.Debugf("resuming")
-	if !atomic.CompareAndSwapUint32(&r.state, statePaused, stateIdle) {
-		if atomic.LoadUint32(&r.state) == statePausing {
+	if !atomic.CompareAndSwapUint32(&r.curState.v, statePaused, stateIdle) {
+		if atomic.LoadUint32(&r.curState.v) == statePausing {
 			r.logger.Debugf("pause is in progress")
 			return "PAUSE IS IN PROGRESS"
 		} else {
@@ -42,8 +48,8 @@ func (r *Replicator) resume() string {
 	return "OK"
 }
 
-func (r *Replicator) status() string {
-	stateName, ok := states[atomic.LoadUint32(&r.state)]
+func (s *state) String() string {
+	stateName, ok := states[atomic.LoadUint32(&s.v)]
 	if !ok {
 		return "UNKNOWN"
 	}
