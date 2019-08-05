@@ -49,7 +49,7 @@ func (r *Replicator) startRedisServer() {
 					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 					return
 				}
-				key := string(cmd.Args[1])
+				key := config.TableLSNKeyPrefix + string(cmd.Args[1])
 				value, err := r.persStorage.Read(key)
 				if err != nil {
 					conn.WriteNull()
@@ -57,7 +57,13 @@ func (r *Replicator) startRedisServer() {
 					conn.WriteBulk(value)
 				}
 			case "keys":
-				//TODO
+				for key := range r.persStorage.Keys(nil) {
+					if !strings.HasPrefix(key, config.TableLSNKeyPrefix) {
+						continue
+					}
+
+					conn.WriteString(key[len(config.TableLSNKeyPrefix):])
+				}
 				conn.WriteString("OK")
 			case "exists":
 				if len(cmd.Args) != 2 {
