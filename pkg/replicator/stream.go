@@ -3,19 +3,11 @@ package replicator
 import (
 	"bytes"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
-)
-
-const (
-	stateIdle uint32 = iota
-	statePaused
-	statePausing
-	stateInactivityFlush
 )
 
 func (r *Replicator) tblBuffersFlush() error { // protected by inTxMutex: inactivity merge or on commit
@@ -93,7 +85,7 @@ func (r *Replicator) inactivityTblBufferFlush() {
 	defer r.logger.Sync()
 
 	flushFn := func() {
-		if atomic.LoadUint32(&r.curState.v) != stateIdle {
+		if r.curState.Load() != stateIdle {
 			return
 		}
 		r.inTxMutex.Lock()
@@ -101,9 +93,6 @@ func (r *Replicator) inactivityTblBufferFlush() {
 
 		r.logger.Debugf("inactivity tbl flush started")
 		defer r.logger.Debugf("inactivity tbl flush finished")
-		if !atomic.CompareAndSwapUint32(&r.curState.v, stateIdle, stateInactivityFlush) {
-			return
-		}
 
 		if err := r.tblBuffersFlush(); err != nil {
 			select {
@@ -111,8 +100,6 @@ func (r *Replicator) inactivityTblBufferFlush() {
 			default:
 			}
 		}
-
-		atomic.StoreUint32(&r.curState.v, stateIdle)
 	}
 
 	ticker := time.NewTicker(r.cfg.InactivityFlushTimeout)
@@ -140,7 +127,6 @@ func (r *Replicator) processBegin(finalLSN dbtypes.LSN) error { // TODO: make me
 func (r *Replicator) processCommit() error {
 	r.logger.Debugf("commit")
 	defer r.inTxMutex.Unlock()
-	defer atomic.StoreUint32(&r.curState.v, stateIdle)
 	defer r.logger.Sync()
 
 	inTxTables := make([]string, 0, len(r.inTxTables))

@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"syscall"
 
 	"github.com/jackc/pgx"
@@ -213,7 +212,7 @@ func (r *Replicator) Run() error {
 	if err := r.consumer.Run(r); err != nil {
 		return err
 	}
-	r.curState.v = stateIdle
+	r.curState.Store(stateIdle)
 
 	if r.cfg.RedisBind != "" {
 		go r.startRedisServer()
@@ -224,7 +223,7 @@ func (r *Replicator) Run() error {
 	}
 
 	r.waitForShutdown()
-	if atomic.LoadUint32(&r.curState.v) != statePaused {
+	if r.curState.Load() != statePaused {
 		r.logger.Debugf("acquiring tx lock")
 		r.inTxMutex.Lock()
 	} else {
