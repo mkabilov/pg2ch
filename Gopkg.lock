@@ -28,7 +28,7 @@
     "pgproto3",
     "pgtype"
   ]
-  revision = "6954c15ad0bd3c9aa6dd1b190732b020379beb28"
+  revision = "157b85b6ec2a2fd7581dadae973779dcfad59ed2"
 
 [[projects]]
   branch = "master"
@@ -134,6 +134,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "8497ebd9ef06b9060d575fc16140bc85ef61b1889aca5f568d633ee9d5e0d8d0"
+  inputs-digest = "04e145f35c8ef9bf0fde0bdffb66ab81e963a3db30ef29d94a0db4561e191c60"
   solver-name = "gps-cdcl"
   solver-version = 1

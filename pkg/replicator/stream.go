@@ -295,6 +295,6 @@ func (r *Replicator) HandleMessage(lsn dbtypes.LSN, msg message.Message) error {
 	case message.Truncate:
 		return r.processTruncate(v)
 	default:
-		return fmt.Errorf("unknown message type %T", v)
+		return nil
 	}
 }
