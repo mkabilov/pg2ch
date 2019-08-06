@@ -20,7 +20,7 @@ const (
 
 	defaultInactivityMergeTimeout = time.Minute
 	publicSchema                  = "public"
-	defaultClickHousePort         = 9000
+	defaultClickHousePort         = 8123
 	defaultClickHouseHost         = "127.0.0.1"
 	defaultPostgresPort           = 5432
 	defaultPostgresHost           = "127.0.0.1"
