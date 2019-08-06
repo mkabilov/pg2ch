@@ -332,8 +332,10 @@ func (t *genericTable) Init() error {
 		}
 	}
 
-	if err := t.truncateTable(t.cfg.ChSyncAuxTable); err != nil {
-		return err
+	if !t.cfg.ChSyncAuxTable.IsEmpty() {
+		if err := t.truncateTable(t.cfg.ChSyncAuxTable); err != nil {
+			return err
+		}
 	}
 
 	return nil
