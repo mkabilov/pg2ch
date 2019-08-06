@@ -209,6 +209,8 @@ func (r *Replicator) minLSN() dbtypes.LSN {
 			continue
 		}
 
+		r.logger.Debugf("consuming changes for table %q starting from %s", tblName, lsn)
+
 		if !result.IsValid() || lsn < result {
 			result = lsn
 		}

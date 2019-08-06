@@ -33,7 +33,7 @@ func (r *Replicator) tblBuffersFlush() error { // protected by inTxMutex: inacti
 
 func (r *Replicator) getTable(oid dbtypes.OID) (chTbl clickHouseTable, err error) {
 	defer r.logger.Sync()
-	var lsn dbtypes.LSN
+	var tblLSN dbtypes.LSN
 
 	tblName, ok := r.oidName[oid]
 	if !ok {
@@ -50,13 +50,13 @@ func (r *Replicator) getTable(oid dbtypes.OID) (chTbl clickHouseTable, err error
 	}
 
 	if tblKey := tblName.KeyName(); r.persStorage.Has(tblKey) {
-		if err := lsn.Parse(r.persStorage.ReadString(tblKey)); err != nil {
+		if err := tblLSN.Parse(r.persStorage.ReadString(tblKey)); err != nil {
 			r.logger.Warnf("incorrect lsn stored for %q table: %v", tblName, err)
 		}
 	}
 
-	if r.txFinalLSN <= lsn {
-		r.logger.Debugf("tx lsn(%v) <= table lsn(%v)", r.txFinalLSN.Dec(), lsn.Dec())
+	if r.txFinalLSN <= tblLSN {
+		r.logger.Debugf("tx lsn(%v) <= table lsn(%v)", r.txFinalLSN.Dec(), tblLSN.Dec())
 		chTbl = nil
 	}
 

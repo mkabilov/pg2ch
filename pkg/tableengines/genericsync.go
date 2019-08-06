@@ -104,6 +104,7 @@ func (t *genericTable) postSync() error {
 	t.Lock()
 	defer t.Unlock()
 	defer t.logger.Sync()
+	defer func() { t.inSync = false }()
 
 	if err := t.flushMemBuffer(); err != nil {
 		return fmt.Errorf("could not flush buffer: %v", err)
@@ -128,11 +129,10 @@ func (t *genericTable) postSync() error {
 		}
 	}
 
-	if err := t.persStorage.Write(t.cfg.PgTableName.KeyName(), t.syncSnapshotLSN.FormattedBytes()); err != nil {
-		return fmt.Errorf("could not save lsn for table %q: %v", t.cfg.PgTableName, err)
+	if err := t.saveLSN(); err != nil {
+		return fmt.Errorf("could not save lsn to file: %v", err)
 	}
 
-	t.inSync = false
 	return nil
 }
 

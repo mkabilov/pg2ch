@@ -232,7 +232,12 @@ func (t *genericTable) attemptFlushTblBuffer() error {
 	return nil
 }
 
+func (t *genericTable) saveLSN() error {
+	return t.persStorage.Write(t.cfg.PgTableName.KeyName(), t.txFinalLSN.FormattedBytes())
+}
+
 func (t *genericTable) flush() error {
+	t.logger.Debugf("flush (in sync: %t, txFinalLSN: %v)", t.inSync, t.txFinalLSN)
 	defer t.logger.Sync()
 	if err := t.flushMemBuffer(); err != nil {
 		return fmt.Errorf("could not flush buffers: %v", err)
@@ -240,6 +245,11 @@ func (t *genericTable) flush() error {
 
 	if t.cfg.ChBufferTable.IsEmpty() || t.memBufferFlushCnt == 0 {
 		t.logger.Debugf("Flush to main table: nothing to flush")
+		if !t.inSync {
+			if err := t.saveLSN(); err != nil {
+				return fmt.Errorf("could not save lsn to file: %v", err)
+			}
+		}
 		return nil
 	}
 
@@ -253,8 +263,8 @@ func (t *genericTable) flush() error {
 	}
 
 	if !t.inSync {
-		if err := t.persStorage.Write(t.cfg.PgTableName.KeyName(), t.txFinalLSN.FormattedBytes()); err != nil {
-			return fmt.Errorf("could not save lsn for table %q: %v", t.cfg.PgTableName, err)
+		if err := t.saveLSN(); err != nil {
+			return fmt.Errorf("could not save lsn to file: %v", err)
 		}
 	}
 
@@ -280,7 +290,7 @@ func (t *genericTable) convertRow(row message.Row) chTuple {
 			continue
 		}
 
-		value := chutils.ConvertColumn(t.cfg.PgColumns[col.Name].BaseType, row[colId], t.cfg.ColumnProperties[col.Name])
+		value := chutils.ConvertColumn(t.cfg.PgColumns[col.Name], row[colId], t.cfg.ColumnProperties[col.Name])
 		if colId > 0 {
 			res = append(res, columnDelimiter)
 		}
@@ -322,10 +332,8 @@ func (t *genericTable) Init() error {
 		}
 	}
 
-	if !t.cfg.ChSyncAuxTable.IsEmpty() {
-		if err := t.truncateTable(t.cfg.ChSyncAuxTable); err != nil {
-			return err
-		}
+	if err := t.truncateTable(t.cfg.ChSyncAuxTable); err != nil {
+		return err
 	}
 
 	return nil

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/pgtype"
+
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
@@ -16,11 +18,14 @@ const (
 
 	//ajBool specific value
 	ajBoolUnknown = 'u'
+	null          = "null"
 
 	timestampLength = 19 // ->2019-06-08 15:50:01<- clickhouse does not support milliseconds
 )
 
 var (
+	escaper = strings.NewReplacer(`\`, `\\`, `'`, `\'`)
+
 	pgToChMap = map[string]string{
 		dbtypes.PgSmallint:                 dbtypes.ChInt16,
 		dbtypes.PgInteger:                  dbtypes.ChInt32,
@@ -49,6 +54,7 @@ var (
 		dbtypes.PgTimeWithoutTimeZone:      dbtypes.ChUint32,
 		dbtypes.PgTimeWithTimeZone:         dbtypes.ChUint32,
 
+		// adjust gmbh specific types
 		dbtypes.PgAdjustIstore:    dbtypes.ChInt32,    // type for istore values
 		dbtypes.PgAdjustBigIstore: dbtypes.ChInt64,    // type for bigistore values
 		dbtypes.PgAdjustAjTime:    dbtypes.ChDateTime, // adjust time
@@ -112,35 +118,35 @@ func GenInsertQuery(tableName config.ChTableName, columns []string) string {
 	return fmt.Sprintf(queryFormat, tableName, columnsStr)
 }
 
-func ConvertColumn(colType string, val message.Tuple, colProps config.ColumnProperty) []byte {
-	switch colType {
+func convertBaseType(baseType string, tupleData message.Tuple, colProp config.ColumnProperty) []byte {
+	switch baseType {
 	case dbtypes.PgAdjustIstore:
 		fallthrough
 	case dbtypes.PgAdjustBigIstore:
-		if colProps.FlattenIstore {
-			if val.Kind == message.TupleNull {
-				return []byte(strings.Repeat("\t\\N", colProps.FlattenIstoreMax-colProps.FlattenIstoreMin+1))[1:]
+		if colProp.FlattenIstore {
+			if tupleData.Kind == message.TupleNull {
+				return []byte(strings.Repeat("\t\\N", colProp.FlattenIstoreMax-colProp.FlattenIstoreMin+1))[1:]
 			}
 
-			return pgutils.IstoreValues(val.Value, colProps.FlattenIstoreMin, colProps.FlattenIstoreMax)
+			return pgutils.IstoreValues(tupleData.Value, colProp.FlattenIstoreMin, colProp.FlattenIstoreMax)
 		} else {
-			if val.Kind == message.TupleNull {
+			if tupleData.Kind == message.TupleNull {
 				return istoreNull
 			}
 
-			return pgutils.IstoreToArrays(val.Value)
+			return pgutils.IstoreToArrays(tupleData.Value)
 		}
 	case dbtypes.PgAdjustAjBool:
 		fallthrough
 	case dbtypes.PgBoolean:
-		if val.Kind == message.TupleNull {
-			if len(colProps.Coalesce) > 0 {
-				return colProps.Coalesce
+		if tupleData.Kind == message.TupleNull {
+			if len(colProp.Coalesce) > 0 {
+				return colProp.Coalesce
 			}
 			return nullStr
 		}
 
-		switch val.Value[0] {
+		switch tupleData.Value[0] {
 		case pgTrue:
 			return []byte("1")
 		case pgFalse:
@@ -153,15 +159,14 @@ func ConvertColumn(colType string, val message.Tuple, colProps config.ColumnProp
 	case dbtypes.PgTimestampWithoutTimeZone:
 		fallthrough
 	case dbtypes.PgTimestamp:
-		if val.Kind == message.TupleNull {
-			if len(colProps.Coalesce) > 0 {
-				return colProps.Coalesce
+		if tupleData.Kind == message.TupleNull {
+			if len(colProp.Coalesce) > 0 {
+				return colProp.Coalesce
 			}
 			return nullStr
 		}
 
-		return val.Value[:timestampLength]
-
+		return tupleData.Value[:timestampLength]
 	case dbtypes.PgTime:
 		fallthrough
 	case dbtypes.PgTimeWithoutTimeZone:
@@ -169,12 +174,47 @@ func ConvertColumn(colType string, val message.Tuple, colProps config.ColumnProp
 	case dbtypes.PgTimeWithTimeZone:
 		//TODO
 	}
-	if val.Kind == message.TupleNull {
-		if len(colProps.Coalesce) > 0 {
-			return colProps.Coalesce
+	if tupleData.Kind == message.TupleNull {
+		if len(colProp.Coalesce) > 0 {
+			return colProp.Coalesce
 		}
+
 		return nullStr
 	}
 
-	return val.Value
+	return tupleData.Value
+}
+
+func ConvertColumn(column config.PgColumn, tupleData message.Tuple, colProp config.ColumnProperty) []byte {
+	if !column.IsArray {
+		return convertBaseType(column.BaseType, tupleData, colProp)
+	}
+
+	switch column.BaseType {
+	case dbtypes.PgBigint:
+		fallthrough
+	case dbtypes.PgInteger:
+		return append(append([]byte("["), tupleData.Value[1:len(tupleData.Value)-1]...), ']')
+	default:
+		val := pgtype.TextArray{}
+		if err := val.DecodeText(nil, tupleData.Value); err != nil {
+			panic(err)
+		}
+		res := make([]string, len(val.Elements))
+		for i, val := range val.Elements {
+			if val.Status == pgtype.Null {
+				res[i] = null
+			} else {
+				res[i] = QuoteLiteral(val.String)
+			}
+		}
+
+		return []byte("[" + strings.Join(res, ", ") + "]")
+	}
+
+	return nil
+}
+
+func QuoteLiteral(s string) string {
+	return "'" + escaper.Replace(s) + "'"
 }
