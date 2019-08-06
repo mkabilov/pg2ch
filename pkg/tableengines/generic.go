@@ -254,7 +254,7 @@ func (t *genericTable) flush() error {
 	}
 
 	defer func(startTime time.Time, rows uint64) {
-		t.logger.Debugf("Flush to main table: processed in %v (rows: %d)",
+		t.logger.Infof("Flush to main table: processed in %v (rows: %d)",
 			time.Since(startTime).Truncate(time.Second), rows)
 	}(time.Now(), t.memBufferRowId)
 
