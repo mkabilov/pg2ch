@@ -1,0 +1,22 @@
+tables:
+    pg1:
+        main_table: pg2ch_test.ch1
+        sync_aux_table: pg2ch_test.ch1_aux
+        engine: CollapsingMergeTree
+        init_sync_skip_truncate: true
+        sign_column: sign
+
+inactivity_merge_timeout: '1s'
+
+clickhouse:
+    host: localhost
+    port: 8123
+    username: default
+postgres:
+    host: localhost
+    database: postgres
+    user: postgres
+    replication_slot_name: pg2ch_slot
+    publication_name: pg2ch_pub
+
+db_path: /tmp/db

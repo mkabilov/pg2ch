@@ -35,7 +35,7 @@ func New(baseURL string) *CHLoad {
 	ch := &CHLoad{
 		client:        &http.Client{},
 		urlValues:     url.Values{},
-		baseURL:       strings.TrimRight(baseURL, "/") + "/",
+		baseURL:       strings.TrimRight(baseURL, "/"),
 		requestBuffer: &bytes.Buffer{},
 	}
 	ch.gzipWriter, err = gzip.NewWriterLevel(ch.requestBuffer, gzip.BestSpeed)

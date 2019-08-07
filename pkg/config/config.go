@@ -22,7 +22,6 @@ const (
 	publicSchema                  = "public"
 	defaultClickHousePort         = 8123
 	defaultClickHouseHost         = "127.0.0.1"
-	defaultPostgresPort           = 5432
 	defaultPostgresHost           = "127.0.0.1"
 	defaultRowIdColumn            = "row_id"
 	defaultMaxBufferLength        = 10000
@@ -33,6 +32,10 @@ const (
 	defaultIsDeletedColumn        = "is_deleted"
 
 	TableLSNKeyPrefix = "table_lsn_"
+)
+
+var (
+	DefaultPostgresPort uint16 = 5432 // could be changed in tests
 )
 
 type tableEngine int
@@ -280,7 +283,7 @@ func New(filepath string) (*Config, error) {
 	}
 
 	if cfg.Postgres.Port == 0 {
-		cfg.Postgres.Port = defaultPostgresPort
+		cfg.Postgres.Port = DefaultPostgresPort
 	}
 
 	if cfg.Postgres.Host == "" {
@@ -395,15 +398,19 @@ func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
 func (c *chConnConfig) ConnectionString() string {
 	connStr := url.Values{}
 
-	connStr.Add("username", c.User)
-	connStr.Add("password", c.Password)
-	connStr.Add("database", c.Database)
+	if len(c.User) > 0 {
+		connStr.Add("user", c.User)
+	}
+
+	if len(c.Password) > 0 {
+		connStr.Add("password", c.Password)
+	}
 
 	for param, value := range c.Params {
 		connStr.Add(param, value)
 	}
 
-	return fmt.Sprintf("tcp://%s:%d?%s", c.Host, c.Port, connStr.Encode())
+	return fmt.Sprintf("http://%s:%d?%s", c.Host, c.Port, connStr.Encode())
 }
 
 func (c PgColumn) IsIstore() bool {
