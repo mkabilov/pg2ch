@@ -12,7 +12,7 @@ services:
 install:
     - docker-compose pull clickhouse
     - docker-compose run -d clickhouse
-    - docker-compose build --build-arg --build-arg PG_VERSION=${PG_VERSION} tests
+    - docker-compose build --build-arg PG_VERSION=${PG_VERSION} tests
 
 script:
     - docker-compose run tests
