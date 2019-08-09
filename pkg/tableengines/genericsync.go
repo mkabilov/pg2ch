@@ -32,7 +32,7 @@ func (t *genericTable) genSyncWrite(p []byte) error {
 	return nil
 }
 
-func (t *genericTable) StartSync() error {
+func (t *genericTable) InitSync() error {
 	t.Lock()
 	defer t.Unlock()
 

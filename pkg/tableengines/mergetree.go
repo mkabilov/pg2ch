@@ -1,13 +1,10 @@
 package tableengines
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx"
-	"github.com/peterbourgon/diskv"
-	"go.uber.org/zap"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
@@ -19,9 +16,9 @@ type mergeTreeTable struct {
 }
 
 // NewMergeTree instantiates mergeTreeTable
-func NewMergeTree(ctx context.Context, logger *zap.SugaredLogger, persStorage *diskv.Diskv, connUrl string, tblCfg config.Table, genID *uint64) *mergeTreeTable {
+func NewMergeTree(table genericTable, tblCfg *config.Table) *mergeTreeTable {
 	t := mergeTreeTable{
-		genericTable: newGenericTable(ctx, logger, persStorage, connUrl, tblCfg, genID),
+		genericTable: table,
 	}
 
 	if t.cfg.ChBufferTable.IsEmpty() {

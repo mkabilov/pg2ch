@@ -65,9 +65,6 @@ func New(ctx context.Context, logger *zap.SugaredLogger, errCh chan error, dbCfg
 }
 
 func (c *consumer) CurrentLSN() dbtypes.LSN {
-	c.currentLSNMutex.RLock()
-	defer c.currentLSNMutex.RUnlock()
-
 	return c.currentLSN
 }
 

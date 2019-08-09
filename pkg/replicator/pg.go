@@ -120,18 +120,18 @@ func (r *Replicator) pgRollback(tx *pgx.Tx) {
 	}
 }
 
-func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (config.Table, error) {
+func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) error {
 	var err error
 	cfg := r.cfg.Tables[tblName]
 
 	cfg.TupleColumns, cfg.PgColumns, err = tableinfo.TablePgColumns(tx, tblName)
 	if err != nil {
-		return cfg, fmt.Errorf("could not get columns for %s postgres table: %v", tblName.String(), err)
+		return fmt.Errorf("could not get columns for %s postgres table: %v", tblName.String(), err)
 	}
 
-	chColumns, err := tableinfo.TableChColumns(r.chConnString, cfg.ChMainTable)
+	chColumns, err := tableinfo.TableChColumns(r.chConn, cfg.ChMainTable)
 	if err != nil {
-		return cfg, fmt.Errorf("could not get columns for %q clickhouse table: %v", cfg.ChMainTable, err)
+		return fmt.Errorf("could not get columns for %q clickhouse table: %v", cfg.ChMainTable, err)
 	}
 
 	cfg.ColumnMapping = make(map[string]config.ChColumn)
@@ -141,7 +141,7 @@ func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (c
 				if cfg.PgColumns[pgCol].IsIstore() {
 					cfg.ColumnMapping[pgCol] = config.ChColumn{Name: chCol}
 				} else {
-					return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", chCol, cfg.ChMainTable)
+					return fmt.Errorf("could not find %q column in %q clickhouse table", chCol, cfg.ChMainTable)
 				}
 			} else {
 				cfg.ColumnMapping[pgCol] = chColCfg
@@ -153,7 +153,7 @@ func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (c
 				if cfg.PgColumns[pgCol.Name].IsIstore() {
 					cfg.ColumnMapping[pgCol.Name] = config.ChColumn{Name: pgCol.Name}
 				} else {
-					return cfg, fmt.Errorf("could not find %q column in %q clickhouse table", pgCol.Name, cfg.ChMainTable)
+					return fmt.Errorf("could not find %q column in %q clickhouse table", pgCol.Name, cfg.ChMainTable)
 				}
 			} else {
 				cfg.ColumnMapping[pgCol.Name] = chColCfg
@@ -175,8 +175,7 @@ func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) (c
 		}
 	}
 	cfg.PgTableName = tblName
-
-	return cfg, nil
+	return nil
 }
 
 func (r *Replicator) pgBegin(pgxConn *pgx.Conn) (*pgx.Tx, error) {

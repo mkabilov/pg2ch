@@ -108,16 +108,6 @@ func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
 	return chType, nil
 }
 
-func GenInsertQuery(tableName config.ChTableName, columns []string) string {
-	columnsStr := ""
-	queryFormat := "INSERT INTO %s%s FORMAT TabSeparated"
-	if columns != nil && len(columns) > 0 {
-		columnsStr = "(" + strings.Join(columns, ", ") + ")"
-	}
-
-	return fmt.Sprintf(queryFormat, tableName, columnsStr)
-}
-
 func convertBaseType(baseType string, tupleData message.Tuple, colProp config.ColumnProperty) []byte {
 	switch baseType {
 	case dbtypes.PgAdjustIstore:

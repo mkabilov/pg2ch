@@ -46,7 +46,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	repl := replicator.New(*cfg)
+	repl := replicator.New(cfg)
 
 	if *generateChDDL {
 		if err := repl.GenerateChDDL(); err != nil {

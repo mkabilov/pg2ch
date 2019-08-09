@@ -29,10 +29,6 @@
   branch = "master"
 
 [[constraint]]
-  name = "github.com/ildus/pqt"
-  branch = "master"
-
-[[constraint]]
   name = "github.com/peterbourgon/diskv"
   version = "3.0.0"
 

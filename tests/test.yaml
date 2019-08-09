@@ -1,7 +1,7 @@
 tables:
     pg1:
-        main_table: pg2ch_test.ch1
-        sync_aux_table: pg2ch_test.ch1_aux
+        main_table: ch1
+        sync_aux_table: ch1_aux
         engine: CollapsingMergeTree
         init_sync_skip_truncate: true
         sign_column: sign
@@ -11,6 +11,7 @@ inactivity_merge_timeout: '1s'
 clickhouse:
     host: localhost
     port: 8123
+    database: pg2ch_test
     username: default
 postgres:
     host: localhost

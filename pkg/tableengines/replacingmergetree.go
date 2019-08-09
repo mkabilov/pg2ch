@@ -1,13 +1,10 @@
 package tableengines
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx"
-	"github.com/peterbourgon/diskv"
-	"go.uber.org/zap"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
@@ -21,9 +18,9 @@ type replacingMergeTree struct {
 }
 
 // NewReplacingMergeTree instantiates replacingMergeTree
-func NewReplacingMergeTree(ctx context.Context, logger *zap.SugaredLogger, persStorage *diskv.Diskv, connUrl string, tblCfg config.Table, genID *uint64) *replacingMergeTree {
+func NewReplacingMergeTree(table genericTable, tblCfg *config.Table) *replacingMergeTree {
 	t := replacingMergeTree{
-		genericTable: newGenericTable(ctx, logger, persStorage, connUrl, tblCfg, genID),
+		genericTable: table,
 		verColumn:    tblCfg.VerColumn,
 	}
 	if tblCfg.VerColumn != "" {

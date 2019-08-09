@@ -1,13 +1,10 @@
 package tableengines
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx"
-	"github.com/peterbourgon/diskv"
-	"go.uber.org/zap"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
@@ -21,9 +18,9 @@ type collapsingMergeTreeTable struct {
 }
 
 // NewCollapsingMergeTree instantiates collapsingMergeTreeTable
-func NewCollapsingMergeTree(ctx context.Context, logger *zap.SugaredLogger, persStorage *diskv.Diskv, connUrl string, tblCfg config.Table, genID *uint64) *collapsingMergeTreeTable {
+func NewCollapsingMergeTree(table genericTable, tblCfg *config.Table) *collapsingMergeTreeTable {
 	t := collapsingMergeTreeTable{
-		genericTable: newGenericTable(ctx, logger, persStorage, connUrl, tblCfg, genID),
+		genericTable: table,
 		signColumn:   tblCfg.SignColumn,
 	}
 	t.chUsedColumns = append(t.chUsedColumns, tblCfg.SignColumn)

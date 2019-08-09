@@ -44,7 +44,7 @@ type genericTable struct {
 	ctx      context.Context
 	chLoader chload.CHLoader
 
-	cfg           config.Table
+	cfg           *config.Table
 	chUsedColumns []string
 	pgUsedColumns []string
 	columnMapping map[string]config.ChColumn // [pg column name]ch column description
@@ -71,18 +71,19 @@ type genericTable struct {
 	txFinalLSN dbtypes.LSN
 }
 
-func newGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage *diskv.Diskv, connUrl string, tblCfg config.Table, genID *uint64) genericTable {
+func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage *diskv.Diskv,
+	conn *chutils.CHConn, tblCfg *config.Table, genID *uint64) genericTable {
 	t := genericTable{
 		Mutex:         sync.Mutex{},
 		ctx:           ctx,
-		chLoader:      chload.New(connUrl),
+		chLoader:      chload.New(conn),
 		cfg:           tblCfg,
 		columnMapping: make(map[string]config.ChColumn),
 		chUsedColumns: make([]string, 0),
 		pgUsedColumns: make([]string, 0),
 		tupleColumns:  tblCfg.TupleColumns,
 		generationID:  genID,
-		bulkUploader:  bulkupload.New(connUrl, gzipFlushCount),
+		bulkUploader:  bulkupload.New(conn, gzipFlushCount),
 		persStorage:   persStorage,
 		logger:        logger.With("table", tblCfg.PgTableName.String()),
 	}

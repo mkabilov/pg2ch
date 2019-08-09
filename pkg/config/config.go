@@ -3,8 +3,8 @@ package config
 import (
 	"fmt"
 	"log"
-	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -114,7 +114,7 @@ type Table struct {
 	ColumnMapping map[string]ChColumn `yaml:"-"`
 }
 
-type chConnConfig struct {
+type CHConnConfig struct {
 	Host     string            `yaml:"host"`
 	Port     uint32            `yaml:"port"`
 	Database string            `yaml:"database"`
@@ -125,14 +125,14 @@ type chConnConfig struct {
 
 // Config contains config
 type Config struct {
-	ClickHouse             chConnConfig          `yaml:"clickhouse"`
-	Postgres               pgConnConfig          `yaml:"postgres"`
-	Tables                 map[PgTableName]Table `yaml:"tables"`
-	InactivityFlushTimeout time.Duration         `yaml:"inactivity_flush_timeout"`
-	PersStoragePath        string                `yaml:"db_path"`
-	RedisBind              string                `yaml:"redis_bind"`
-	SyncWorkers            int                   `yaml:"sync_workers"`
-	Debug                  bool                  `yaml:"debug"`
+	ClickHouse             CHConnConfig           `yaml:"clickhouse"`
+	Postgres               pgConnConfig           `yaml:"postgres"`
+	Tables                 map[PgTableName]*Table `yaml:"tables"`
+	InactivityFlushTimeout time.Duration          `yaml:"inactivity_flush_timeout"`
+	PersStoragePath        string                 `yaml:"db_path"`
+	RedisBind              string                 `yaml:"redis_bind"`
+	SyncWorkers            int                    `yaml:"sync_workers"`
+	Debug                  bool                   `yaml:"debug"`
 }
 
 type Column struct {
@@ -254,7 +254,7 @@ func (tn *PgTableName) ParseKey(key string) error {
 
 // New instantiates config
 func New(filepath string) (*Config, error) {
-	var cfg Config
+	cfg := &Config{}
 
 	fp, err := os.Open(filepath)
 	if err != nil {
@@ -266,7 +266,7 @@ func New(filepath string) (*Config, error) {
 		}
 	}()
 
-	if err := yaml.NewDecoder(fp).Decode(&cfg); err != nil {
+	if err := yaml.NewDecoder(fp).Decode(cfg); err != nil {
 		return nil, fmt.Errorf("could not decode yaml: %v", err)
 	}
 
@@ -302,25 +302,26 @@ func New(filepath string) (*Config, error) {
 		return nil, fmt.Errorf("db_filepath is not set")
 	}
 
-	for tblName, tbl := range cfg.Tables {
-		newTbl := cfg.Tables[tblName]
-		if !tbl.ChBufferTable.IsEmpty() && tbl.ChBufferTable.DatabaseName == "" {
-			newTbl.ChBufferTable.DatabaseName = cfg.ClickHouse.Database
-		}
-		if !tbl.ChMainTable.IsEmpty() && tbl.ChMainTable.DatabaseName == "" {
-			newTbl.ChMainTable.DatabaseName = cfg.ClickHouse.Database
-		}
-		if !tbl.ChSyncAuxTable.IsEmpty() && tbl.ChSyncAuxTable.DatabaseName == "" {
-			newTbl.ChSyncAuxTable.DatabaseName = cfg.ClickHouse.Database
-		}
-		if tbl.FlushThreshold == 0 {
-			newTbl.FlushThreshold = defaultFlushThreshold
-		}
-
-		cfg.Tables[tblName] = newTbl
+	if cfg.SyncWorkers == 0 {
+		cfg.SyncWorkers = runtime.NumCPU()
 	}
 
-	return &cfg, nil
+	for _, tbl := range cfg.Tables {
+		if !tbl.ChBufferTable.IsEmpty() && tbl.ChBufferTable.DatabaseName == "" {
+			tbl.ChBufferTable.DatabaseName = cfg.ClickHouse.Database
+		}
+		if !tbl.ChMainTable.IsEmpty() && tbl.ChMainTable.DatabaseName == "" {
+			tbl.ChMainTable.DatabaseName = cfg.ClickHouse.Database
+		}
+		if !tbl.ChSyncAuxTable.IsEmpty() && tbl.ChSyncAuxTable.DatabaseName == "" {
+			tbl.ChSyncAuxTable.DatabaseName = cfg.ClickHouse.Database
+		}
+		if tbl.FlushThreshold == 0 {
+			tbl.FlushThreshold = defaultFlushThreshold
+		}
+	}
+
+	return cfg, nil
 }
 
 func (ct ChTableName) String() string {
@@ -392,25 +393,6 @@ func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	*t = Table(val)
 
 	return nil
-}
-
-// ConnectionString returns clickhouse connection string
-func (c *chConnConfig) ConnectionString() string {
-	connStr := url.Values{}
-
-	if len(c.User) > 0 {
-		connStr.Add("user", c.User)
-	}
-
-	if len(c.Password) > 0 {
-		connStr.Add("password", c.Password)
-	}
-
-	for param, value := range c.Params {
-		connStr.Add(param, value)
-	}
-
-	return fmt.Sprintf("http://%s:%d?%s", c.Host, c.Port, connStr.Encode())
 }
 
 func (c PgColumn) IsIstore() bool {

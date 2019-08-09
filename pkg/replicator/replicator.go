@@ -20,6 +20,7 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/consumer"
 	"github.com/mkabilov/pg2ch/pkg/message"
 	"github.com/mkabilov/pg2ch/pkg/tableengines"
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 )
 
@@ -31,7 +32,7 @@ type clickHouseTable interface {
 	Init() error
 
 	Begin(finalLSN dbtypes.LSN) error
-	StartSync() error
+	InitSync() error
 	Sync(*pgx.Tx, dbtypes.LSN) error
 	Insert(new message.Row) (tblFlushIsNeeded bool, err error)
 	Update(old message.Row, new message.Row) (tblFlushIsNeeded bool, err error)
@@ -48,10 +49,11 @@ type Replicator struct {
 	cancel   context.CancelFunc
 	logger   *zap.SugaredLogger
 	consumer consumer.Interface
-	cfg      config.Config
+	cfg      *config.Config
 	errCh    chan error
+	endCh    chan bool //used to finish replicator
 
-	chConnString  string
+	chConn        *chutils.CHConn
 	pgDeltaConn   *pgx.Conn
 	pgxConnConfig pgx.ConnConfig
 	persStorage   *diskv.Diskv
@@ -72,7 +74,7 @@ type Replicator struct {
 	tblRelMsgs            map[config.PgTableName]message.Relation
 }
 
-func New(cfg config.Config) *Replicator {
+func New(cfg *config.Config) *Replicator {
 	zapCfg := zap.Config{
 		Development:      true,
 		Encoding:         "console",
@@ -97,11 +99,12 @@ func New(cfg config.Config) *Replicator {
 		chTables: make(map[config.PgTableName]clickHouseTable),
 		oidName:  make(map[dbtypes.OID]config.PgTableName),
 		errCh:    make(chan error),
+		endCh:    make(chan bool),
 
 		inTxMutex:     &sync.Mutex{},
 		tablesToFlush: make(map[config.PgTableName]struct{}),
 		inTxTables:    make(map[config.PgTableName]clickHouseTable),
-		chConnString:  fmt.Sprintf("http://%s:%d", cfg.ClickHouse.Host, cfg.ClickHouse.Port),
+		chConn:        chutils.MakeChConnection(&cfg.ClickHouse),
 		syncJobs:      make(chan config.PgTableName, cfg.SyncWorkers),
 		pgxConnConfig: cfg.Postgres.Merge(pgx.ConnConfig{
 			Logger:   zapadapter.NewLogger(logger),
@@ -203,7 +206,7 @@ func (r *Replicator) Run() error {
 	if len(tablesToSync) > 0 {
 		r.logger.Infof("need to sync %d tables", len(tablesToSync))
 		for _, pgTableName := range tablesToSync {
-			if err := r.chTables[pgTableName].StartSync(); err != nil {
+			if err := r.chTables[pgTableName].InitSync(); err != nil {
 				return fmt.Errorf("could not start sync for %q table: %v", pgTableName.String(), err)
 			}
 		}
@@ -252,7 +255,10 @@ func (r *Replicator) Run() error {
 	return nil
 }
 
-func (r *Replicator) newTable(tblName config.PgTableName, tblConfig config.Table) (clickHouseTable, error) {
+func (r *Replicator) newTable(tblName config.PgTableName, tblConfig *config.Table) (clickHouseTable, error) {
+	base := tableengines.NewGenericTable(r.ctx, r.logger, r.persStorage, r.chConn,
+		tblConfig, &r.generationID)
+
 	defer r.logger.Sync()
 	switch tblConfig.Engine {
 	case config.ReplacingMergeTree:
@@ -260,15 +266,15 @@ func (r *Replicator) newTable(tblName config.PgTableName, tblConfig config.Table
 			return nil, fmt.Errorf("ReplacingMergeTree requires either version or generation column to be set")
 		}
 
-		return tableengines.NewReplacingMergeTree(r.ctx, r.logger, r.persStorage, r.chConnString, tblConfig, &r.generationID), nil
+		return tableengines.NewReplacingMergeTree(base, tblConfig), nil
 	case config.CollapsingMergeTree:
 		if tblConfig.SignColumn == "" {
 			return nil, fmt.Errorf("CollapsingMergeTree requires sign column to be set")
 		}
 
-		return tableengines.NewCollapsingMergeTree(r.ctx, r.logger, r.persStorage, r.chConnString, tblConfig, &r.generationID), nil
+		return tableengines.NewCollapsingMergeTree(base, tblConfig), nil
 	case config.MergeTree:
-		return tableengines.NewMergeTree(r.ctx, r.logger, r.persStorage, r.chConnString, tblConfig, &r.generationID), nil
+		return tableengines.NewMergeTree(base, tblConfig), nil
 	}
 
 	return nil, fmt.Errorf("%s table engine is not implemented", tblConfig.Engine)
@@ -281,8 +287,8 @@ func (r *Replicator) initTables() error {
 	}
 	defer r.pgCommit(tx)
 
-	for tblName := range r.cfg.Tables {
-		tblConfig, err := r.fetchTableConfig(tx, tblName)
+	for tblName, tblConfig := range r.cfg.Tables {
+		err := r.fetchTableConfig(tx, tblName)
 		if err != nil {
 			return fmt.Errorf("could not get %s table config: %v", tblName.String(), err)
 		}
@@ -338,6 +344,10 @@ func (r *Replicator) logErrCh() {
 	}
 }
 
+func (r *Replicator) Finish() {
+	r.endCh <- true
+}
+
 func (r *Replicator) waitForShutdown() {
 	defer r.logger.Sync()
 	sigs := make(chan os.Signal, 1)
@@ -346,6 +356,8 @@ func (r *Replicator) waitForShutdown() {
 loop:
 	for {
 		select {
+		case <-r.endCh:
+			break loop
 		case sig := <-sigs:
 			switch sig {
 			case syscall.SIGABRT:
