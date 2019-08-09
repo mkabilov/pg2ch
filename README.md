@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/mkabilov/pg2ch.svg?branch=http)](https://travis-ci.org/mkabilov/pg2ch)
+
 # PostgreSQL to ClickHouse
 
 Continuous data transfer from PostgreSQL to ClickHouse using logical replication mechanism.
