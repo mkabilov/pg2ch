@@ -17,7 +17,14 @@ import (
 
 const (
 	initpg = `
-create role postgres superuser login;
+do $$
+begin
+	if not exists (select from pg_catalog.pg_roles
+		where rolname = 'postgres')
+	then
+		create role postgres superuser login;
+	end if;
+end $$;
 create table pg1(id bigserial, a int);
 alter table pg1 replica identity full;
 insert into pg1(a) select i from generate_series(1, 10000) i;

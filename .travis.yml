@@ -1,0 +1,24 @@
+os:
+    - linux
+
+sudo: required
+dist: trusty
+
+language: c
+
+services:
+    - docker
+
+install:
+    - docker-compose pull clickhouse
+    - docker-compose run -d clickhouse
+    - docker-compose build --build-arg --build-arg PG_VERSION=${PG_VERSION} tests
+
+script:
+    - docker-compose run tests
+    - docker-compose stop clickhouse
+
+env:
+    - PG_VERSION=10
+    - PG_VERSION=11
+    - PG_VERSION=12
