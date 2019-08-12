@@ -220,7 +220,7 @@ func (r *Replicator) Run() error {
 		go r.startRedisServer()
 	}
 
-	if r.cfg.PprofPort > 0 {
+	if r.cfg.PprofBind != "" {
 		r.wg.Add(1)
 		go r.startPprof()
 	}
@@ -237,7 +237,7 @@ func (r *Replicator) Run() error {
 		r.logger.Debugf("in paused state, no need to wait for tx to finish")
 	}
 
-	if r.cfg.PprofPort > 0 {
+	if r.cfg.PprofBind != "" {
 		if err := r.stopPprof(); err != nil {
 			r.logger.Warnf("could not stop pprof server: %v", err)
 		}
