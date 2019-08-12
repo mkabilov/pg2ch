@@ -12,7 +12,6 @@ import (
 const forbiddenError = "cannot modify '" + config.TableLSNKeyPrefix + "*' keys"
 
 func (r *Replicator) startRedisServer() {
-	defer r.logger.Sync()
 	r.logger.Infof("starting redis-like server: %v", r.cfg.RedisBind)
 	redisServer := redcon.NewServer(r.cfg.RedisBind,
 		func(conn redcon.Conn, cmd redcon.Command) {

@@ -12,7 +12,6 @@ import (
 )
 
 func (r *Replicator) SyncTables(syncTables []config.PgTableName, async bool) error {
-	defer r.logger.Sync()
 	if len(syncTables) == 0 {
 		return nil
 	}
@@ -29,7 +28,6 @@ func (r *Replicator) SyncTables(syncTables []config.PgTableName, async bool) err
 
 	if async {
 		go func() {
-			defer r.logger.Sync()
 			for i := 0; i < r.cfg.SyncWorkers; i++ {
 				<-doneCh
 			}
@@ -124,7 +122,6 @@ func (r *Replicator) GetTablesToSync() ([]config.PgTableName, error) {
 }
 
 func (r *Replicator) getTxAndLSN(conn *pgx.Conn, pgTableName config.PgTableName) (*pgx.Tx, dbtypes.LSN, error) { //TODO: better name: getSnapshot?
-	defer r.logger.Sync()
 	for attempt := 0; attempt < 10; attempt++ {
 		select {
 		case <-r.ctx.Done():
@@ -160,7 +157,6 @@ func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
 	defer func() {
 		doneCh <- struct{}{}
 	}()
-	defer r.logger.Sync()
 
 	for pgTableName := range r.syncJobs {
 		r.logger.Debugf("sync job %d: starting syncing %q pg table", i, pgTableName)

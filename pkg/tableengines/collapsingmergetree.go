@@ -63,7 +63,6 @@ func (t *collapsingMergeTreeTable) Write(p []byte) (int, error) { // sync only
 
 // Insert handles incoming insert DML operation
 func (t *collapsingMergeTreeTable) Insert(newRow message.Row) (bool, error) {
-	defer t.logger.Sync()
 	t.logger.Debugf("insert: %v", newRow)
 	return t.processChTuples(chTuples{
 		appendField(t.convertRow(newRow), oneStr),
@@ -72,7 +71,6 @@ func (t *collapsingMergeTreeTable) Insert(newRow message.Row) (bool, error) {
 
 // Update handles incoming update DML operation
 func (t *collapsingMergeTreeTable) Update(oldRow, newRow message.Row) (bool, error) {
-	defer t.logger.Sync()
 	t.logger.Debugf("update: old: %v new: %v", oldRow, newRow)
 	if equal, _ := t.compareRows(oldRow, newRow); equal {
 		t.logger.Debugf("update: tuples seem to be identical")
@@ -87,7 +85,6 @@ func (t *collapsingMergeTreeTable) Update(oldRow, newRow message.Row) (bool, err
 
 // Delete handles incoming delete DML operation
 func (t *collapsingMergeTreeTable) Delete(oldRow message.Row) (bool, error) {
-	defer t.logger.Sync()
 	t.logger.Debugf("delete: %v", oldRow)
 	return t.processChTuples(chTuples{
 		appendField(t.convertRow(oldRow), minusOneStr),

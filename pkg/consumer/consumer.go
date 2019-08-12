@@ -114,8 +114,6 @@ func (c *consumer) Run(handler Handler) error {
 }
 
 func (c *consumer) startDecoding() error {
-	defer c.logger.Sync()
-
 	c.logger.Infof("starting decoding from %s lsn", c.currentLSN)
 	c.currentLSNMutex.RLock()
 	err := c.conn.StartReplication(c.slotName, uint64(c.currentLSN), -1,
@@ -149,7 +147,6 @@ func (c *consumer) startDecoding() error {
 }
 
 func (c *consumer) closeDbConnection() {
-	defer c.logger.Sync()
 	c.logger.Debugf("closing replication connection in consumer")
 
 	if err := c.conn.Close(); err != nil {
@@ -159,7 +156,6 @@ func (c *consumer) closeDbConnection() {
 
 func (c *consumer) processReplicationMessage(handler Handler) {
 	defer c.waitGr.Done()
-	defer c.logger.Sync()
 	defer c.closeDbConnection()
 
 	for {
@@ -217,7 +213,6 @@ func (c *consumer) processReplicationMessage(handler Handler) {
 func (c *consumer) SendStatus() error {
 	c.Lock()
 	defer c.Unlock()
-	defer c.logger.Sync()
 
 	c.currentLSNMutex.RLock()
 	c.logger.Debugf("sending status: %v", c.currentLSN)

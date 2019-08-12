@@ -182,7 +182,6 @@ func (r *Replicator) Init() error {
 }
 
 func (r *Replicator) Run() error {
-	defer r.logger.Sync()
 	if err := r.Init(); err != nil {
 		return err
 	}
@@ -261,6 +260,7 @@ func (r *Replicator) Run() error {
 			continue
 		}
 	}
+	r.logger.Sync()
 
 	r.logger.Debugf("replicator finished its work")
 	return nil
@@ -270,7 +270,6 @@ func (r *Replicator) newTable(tblName config.PgTableName, tblConfig *config.Tabl
 	base := tableengines.NewGenericTable(r.ctx, r.logger, r.persStorage, r.chConn,
 		tblConfig, &r.generationID)
 
-	defer r.logger.Sync()
 	switch tblConfig.Engine {
 	case config.ReplacingMergeTree:
 		if tblConfig.VerColumn == "" && tblConfig.GenerationColumn == "" {
@@ -326,7 +325,6 @@ func (r *Replicator) initTables() error {
 }
 
 func (r *Replicator) readGenerationID() error {
-	defer r.logger.Sync()
 	if !r.persStorage.Has(generationIDKey) {
 		return nil
 	}
@@ -344,7 +342,6 @@ func (r *Replicator) readGenerationID() error {
 
 func (r *Replicator) logErrCh() {
 	defer r.wg.Done()
-	defer r.logger.Sync()
 	for {
 		select {
 		case <-r.ctx.Done():
@@ -360,7 +357,6 @@ func (r *Replicator) Finish() {
 }
 
 func (r *Replicator) waitForShutdown() {
-	defer r.logger.Sync()
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGABRT, syscall.SIGQUIT)
 

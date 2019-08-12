@@ -48,7 +48,6 @@ func (t *genericTable) InitSync() error {
 }
 
 func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, w io.Writer) error {
-	defer t.logger.Sync()
 	t.syncSnapshotLSN = snapshotLSN
 
 	if tblLiveTuples, err := pgutils.PgStatLiveTuples(pgTx, t.cfg.PgTableName); err != nil {
@@ -103,7 +102,6 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, w io.Write
 func (t *genericTable) postSync() error {
 	t.Lock()
 	defer t.Unlock()
-	defer t.logger.Sync()
 	defer func() { t.inSync = false }()
 
 	if err := t.flushMemBuffer(); err != nil {
@@ -137,7 +135,6 @@ func (t *genericTable) postSync() error {
 }
 
 func (t *genericTable) printSyncProgress() {
-	defer t.logger.Sync()
 	if t.syncedRows%syncProgressBatch == 0 {
 		var (
 			eta  time.Duration
@@ -164,7 +161,6 @@ func (t *genericTable) syncAuxTableColumns() []string {
 }
 
 func (t *genericTable) deltaSize(lsn dbtypes.LSN) string {
-	defer t.logger.Sync()
 	res, err := t.chLoader.Query(fmt.Sprintf("SELECT count(*) FROM %s WHERE %s > %d",
 		t.cfg.ChSyncAuxTable, t.cfg.LsnColumnName, uint64(lsn))) //TODO: sql injections
 	if err != nil {

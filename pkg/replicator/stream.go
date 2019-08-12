@@ -11,7 +11,6 @@ import (
 )
 
 func (r *Replicator) tblBuffersFlush() error { // protected by inTxMutex: inactivity merge or on commit
-	defer r.logger.Sync()
 	for tblName := range r.tablesToFlush {
 		r.logger.Debugf("processing %s table", tblName)
 		select {
@@ -32,7 +31,6 @@ func (r *Replicator) tblBuffersFlush() error { // protected by inTxMutex: inacti
 }
 
 func (r *Replicator) getTable(oid dbtypes.OID) (chTbl clickHouseTable, err error) {
-	defer r.logger.Sync()
 	var tblLSN dbtypes.LSN
 
 	tblName, ok := r.oidName[oid]
@@ -73,7 +71,6 @@ func (r *Replicator) getTable(oid dbtypes.OID) (chTbl clickHouseTable, err error
 }
 
 func (r *Replicator) incrementGeneration() {
-	defer r.logger.Sync()
 	r.generationID++
 	if err := r.persStorage.WriteString(generationIDKey, fmt.Sprintf("%v", r.generationID)); err != nil {
 		r.logger.Warnf("could not save generation id: %v", err)
@@ -82,7 +79,6 @@ func (r *Replicator) incrementGeneration() {
 
 func (r *Replicator) inactivityTblBufferFlush() {
 	defer r.wg.Done()
-	defer r.logger.Sync()
 
 	flushFn := func() {
 		if r.curState.Load() != stateIdle {
@@ -127,7 +123,6 @@ func (r *Replicator) processBegin(finalLSN dbtypes.LSN) error { // TODO: make me
 func (r *Replicator) processCommit() error {
 	r.logger.Debugf("commit")
 	defer r.inTxMutex.Unlock()
-	defer r.logger.Sync()
 
 	inTxTables := make([]string, 0, len(r.inTxTables))
 	for tblName := range r.inTxTables {
@@ -154,7 +149,6 @@ func (r *Replicator) processCommit() error {
 }
 
 func (r *Replicator) processRelation(msg message.Relation) error {
-	defer r.logger.Sync()
 	if chTbl, err := r.getTable(msg.OID); err != nil {
 		return err
 	} else if chTbl == nil {
@@ -249,8 +243,6 @@ func (r *Replicator) processTruncate(msg message.Truncate) error {
 
 // HandleMessage processes the incoming wal message
 func (r *Replicator) HandleMessage(lsn dbtypes.LSN, msg message.Message) error {
-	defer r.logger.Sync()
-
 	r.logger.Debugf("replication message %[1]T: %[1]v", msg)
 	if r.txFinalLSN == dbtypes.InvalidLSN {
 		if _, ok := msg.(message.Begin); !ok {

@@ -40,7 +40,6 @@ func (r *Replicator) pgConnect() error {
 }
 
 func (r *Replicator) pgDisconnect() {
-	defer r.logger.Sync()
 	if err := r.pgDeltaConn.Close(); err != nil {
 		r.logger.Warnf("could not close connection to postgresql: %v", err)
 	}
@@ -107,14 +106,12 @@ func (r *Replicator) checkPgSlotAndPub(tx *pgx.Tx) error {
 }
 
 func (r *Replicator) pgCommit(tx *pgx.Tx) {
-	defer r.logger.Sync()
 	if err := tx.Commit(); err != nil {
 		r.logger.Warnf("could not commit: %v", err)
 	}
 }
 
 func (r *Replicator) pgRollback(tx *pgx.Tx) {
-	defer r.logger.Sync()
 	if err := tx.Rollback(); err != nil {
 		r.logger.Warnf("could not rollback: %v", err)
 	}
@@ -190,7 +187,6 @@ func (r *Replicator) pgBegin(pgxConn *pgx.Conn) (*pgx.Tx, error) {
 }
 
 func (r *Replicator) minLSN() dbtypes.LSN {
-	defer r.logger.Sync()
 	result := dbtypes.InvalidLSN
 
 	for key := range r.persStorage.Keys(nil) {

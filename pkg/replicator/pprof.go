@@ -6,7 +6,6 @@ import (
 )
 
 func (r *Replicator) startPprof() {
-	defer r.logger.Sync()
 	defer r.wg.Done()
 	mux := http.NewServeMux()
 	r.logger.Debugf("starting pprof server")
@@ -29,8 +28,6 @@ func (r *Replicator) startPprof() {
 }
 
 func (r *Replicator) stopPprof() error {
-	defer r.logger.Sync()
-
 	r.logger.Debugf("stopping pprof server")
 	return r.pprofHttp.Close()
 }
