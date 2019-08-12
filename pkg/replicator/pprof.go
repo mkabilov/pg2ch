@@ -1,7 +1,6 @@
 package replicator
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/pprof"
 )
@@ -19,7 +18,7 @@ func (r *Replicator) startPprof() {
 	mux.Handle("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
 
 	r.pprofHttp = &http.Server{
-		Addr:    fmt.Sprintf(":%d", r.cfg.PprofPort),
+		Addr:    r.cfg.PprofBind,
 		Handler: mux,
 	}
 
