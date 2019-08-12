@@ -13,3 +13,6 @@
 
 .idea
 /vendor
+
+# Ignore binary
+pg2ch
