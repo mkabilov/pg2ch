@@ -85,18 +85,18 @@ func ParseIstore(str string) (keys, values []int, err error) {
 }
 
 func IstoreToArrays(str []byte) []byte {
-	keysBuf := *bytesBufPool.Get().(*bytes.Buffer)
-	valuesBuf := *bytesBufPool.Get().(*bytes.Buffer)
-	tmpStr := *bytesBufPool.Get().(*bytes.Buffer)
+	keysBuf := bytesBufPool.Get().(*bytes.Buffer)
+	valuesBuf := bytesBufPool.Get().(*bytes.Buffer)
+	tmpStr := bytesBufPool.Get().(*bytes.Buffer)
 	defer func() {
 		keysBuf.Reset()
-		bytesBufPool.Put(&keysBuf)
+		bytesBufPool.Put(keysBuf)
 
 		valuesBuf.Reset()
-		bytesBufPool.Put(&valuesBuf)
+		bytesBufPool.Put(valuesBuf)
 
 		tmpStr.Reset()
-		bytesBufPool.Put(&tmpStr)
+		bytesBufPool.Put(tmpStr)
 	}()
 
 	keysBuf.WriteByte('[')
