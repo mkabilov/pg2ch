@@ -132,6 +132,7 @@ type Config struct {
 	InactivityFlushTimeout time.Duration          `yaml:"inactivity_flush_timeout"`
 	PersStoragePath        string                 `yaml:"db_path"`
 	RedisBind              string                 `yaml:"redis_bind"`
+	PprofPort              uint32                 `yaml:"pprof_port"`
 	SyncWorkers            int                    `yaml:"sync_workers"`
 	LogLevel               zapcore.Level          `yaml:"loglevel"`
 }

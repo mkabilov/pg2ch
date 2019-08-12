@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -57,6 +58,7 @@ type Replicator struct {
 	pgDeltaConn   *pgx.Conn
 	pgxConnConfig pgx.ConnConfig
 	persStorage   *diskv.Diskv
+	pprofHttp     *http.Server
 
 	chTables map[config.PgTableName]clickHouseTable
 	oidName  map[dbtypes.OID]config.PgTableName
@@ -218,6 +220,11 @@ func (r *Replicator) Run() error {
 		go r.startRedisServer()
 	}
 
+	if r.cfg.PprofPort > 0 {
+		r.wg.Add(1)
+		go r.startPprof()
+	}
+
 	if err := r.SyncTables(tablesToSync, true); err != nil {
 		return fmt.Errorf("could not sync tables: %v", err)
 	}
@@ -228,6 +235,12 @@ func (r *Replicator) Run() error {
 		r.inTxMutex.Lock()
 	} else {
 		r.logger.Debugf("in paused state, no need to wait for tx to finish")
+	}
+
+	if r.cfg.PprofPort > 0 {
+		if err := r.stopPprof(); err != nil {
+			r.logger.Warnf("could not stop pprof server: %v", err)
+		}
 	}
 
 	consumerCancel()
