@@ -81,12 +81,9 @@ func New(cfg *config.Config) *Replicator {
 		EncoderConfig:    zap.NewDevelopmentEncoderConfig(),
 		OutputPaths:      []string{"stderr"},
 		ErrorOutputPaths: []string{"stderr"},
-		Level:            zap.NewAtomicLevelAt(zap.InfoLevel),
+		Level:            zap.NewAtomicLevelAt(cfg.LogLevel),
 	}
 	zapCfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
-	if cfg.Debug {
-		zapCfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
-	}
 
 	logger, err := zapCfg.Build()
 	if err != nil {
@@ -252,6 +249,7 @@ func (r *Replicator) Run() error {
 		}
 	}
 
+	r.logger.Debugf("replicator finished its work")
 	return nil
 }
 

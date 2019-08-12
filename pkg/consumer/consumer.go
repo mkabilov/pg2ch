@@ -79,6 +79,7 @@ func (c *consumer) AdvanceLSN(lsn dbtypes.LSN) {
 // Wait waits for the goroutines
 func (c *consumer) Wait() {
 	c.waitGr.Wait()
+	c.logger.Debugf("consumer finished its work")
 }
 
 func (c *consumer) close(err error) {
@@ -149,6 +150,8 @@ func (c *consumer) startDecoding() error {
 
 func (c *consumer) closeDbConnection() {
 	defer c.logger.Sync()
+	c.logger.Debugf("closing replication connection in consumer")
+
 	if err := c.conn.Close(); err != nil {
 		c.logger.Warnf("could not close replication connection: %v", err)
 	}
@@ -157,11 +160,11 @@ func (c *consumer) closeDbConnection() {
 func (c *consumer) processReplicationMessage(handler Handler) {
 	defer c.waitGr.Done()
 	defer c.logger.Sync()
+	defer c.closeDbConnection()
 
 	for {
 		select {
 		case <-c.ctx.Done():
-			c.closeDbConnection()
 			return
 		default:
 			wctx, cancel := context.WithTimeout(c.ctx, replWaitTimeout)

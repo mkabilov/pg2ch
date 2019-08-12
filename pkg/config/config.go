@@ -13,6 +13,7 @@ import (
 
 	"github.com/mkabilov/pg2ch/pkg/message"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
+	"go.uber.org/zap/zapcore"
 )
 
 const (
@@ -132,7 +133,7 @@ type Config struct {
 	PersStoragePath        string                 `yaml:"db_path"`
 	RedisBind              string                 `yaml:"redis_bind"`
 	SyncWorkers            int                    `yaml:"sync_workers"`
-	Debug                  bool                   `yaml:"debug"`
+	LogLevel               zapcore.Level          `yaml:"loglevel"`
 }
 
 type Column struct {
@@ -409,7 +410,7 @@ func (c PgColumn) IsTime() bool {
 
 func (c Config) Print() {
 	fmt.Printf("inactivity flush timeout: %v\n", c.InactivityFlushTimeout)
-	fmt.Printf("debug: %t\n", c.Debug)
+	fmt.Printf("logging level: %t\n", c.LogLevel.String())
 
 	for tbl, tblCfg := range c.Tables {
 		fmt.Printf("%s: flush threshold: %v buffer threshold: %v\n",

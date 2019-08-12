@@ -39,7 +39,7 @@ type chTuple []byte
 type chTuples []chTuple
 
 type genericTable struct {
-	sync.Mutex
+	*sync.Mutex
 
 	ctx      context.Context
 	chLoader chload.CHLoader
@@ -74,7 +74,7 @@ type genericTable struct {
 func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage *diskv.Diskv,
 	conn *chutils.CHConn, tblCfg *config.Table, genID *uint64) genericTable {
 	t := genericTable{
-		Mutex:         sync.Mutex{},
+		Mutex:         &sync.Mutex{},
 		ctx:           ctx,
 		chLoader:      chload.New(conn),
 		cfg:           tblCfg,

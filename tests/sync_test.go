@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -157,27 +158,35 @@ max_logical_replication_workers = 10
 	}
 
 	var repl *replicator.Replicator
+
+	stopCh := make(chan bool, 1)
 	go func() {
 		repl = replicator.New(cfg)
 		err := repl.Run()
 		if err != nil {
 			t.Fatal("could not start replicator: ", err)
 		}
+		stopCh <- true
+		log.Println("number of goroutines", runtime.NumGoroutine())
 	}()
 
-	ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", 1, 10)
-	if ch.getCount(t, "select count(*) from pg2ch_test.ch1") != 10000 {
-		t.Fatal("count shoud be equal to 10000")
-	}
+	go func() {
+		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", 1, 10)
+		if ch.getCount(t, "select count(*) from pg2ch_test.ch1") != 10000 {
+			t.Fatal("count shoud be equal to 10000")
+		}
 
-	for i := 0; i < 100; i++ {
-		node.Execute("postgres", addsql)
-	}
-	ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", 20000, 10)
-	count := ch.getCount(t, "select count(*) from pg2ch_test.ch1")
-	if count != 20000 {
-		t.Fatal("count shoud be equal to 20000")
-	}
+		for i := 0; i < 100; i++ {
+			node.Execute("postgres", addsql)
+		}
+		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", 20000, 10)
+		count := ch.getCount(t, "select count(*) from pg2ch_test.ch1")
+		if count != 20000 {
+			t.Fatal("count shoud be equal to 20000")
+		}
 
-	repl.Finish()
+		repl.Finish()
+	}()
+
+	<-stopCh
 }
