@@ -61,7 +61,7 @@ var (
 			},
 		},
 		{
-			row: []byte("\x48\x65\x6c\x6c\x6f\n"),
+			row: []byte(`\x48\x65\x6C\x6c\x6f` + "\n"),
 			expected: message.Row{
 				&message.Tuple{Kind: message.TupleText, Value: []byte("Hello")},
 			},

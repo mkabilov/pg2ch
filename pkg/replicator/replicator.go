@@ -147,7 +147,7 @@ func (r *Replicator) readSlotLSN() (dbtypes.LSN, error) {
 func (r *Replicator) Init() error {
 	r.persStorage = diskv.New(diskv.Options{
 		BasePath:     r.cfg.PersStoragePath,
-		CacheSizeMax: 1024 * 1024, // 1MB
+		CacheSizeMax: 100 * 1024 * 1024, // 100MB
 	})
 
 	err := r.pgConnect()
