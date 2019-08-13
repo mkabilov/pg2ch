@@ -6,6 +6,13 @@ tables:
         init_sync_skip_truncate: true
         sign_column: sign
 
+    pg2:
+        main_table: ch2
+        sync_aux_table: ch2_aux
+        engine: CollapsingMergeTree
+        init_sync_skip_truncate: true
+        sign_column: sign
+
 inactivity_merge_timeout: '1s'
 
 clickhouse:

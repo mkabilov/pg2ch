@@ -1,6 +1,7 @@
 package chutils
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -186,25 +187,33 @@ func ConvertColumn(column config.PgColumn, tupleData *message.Tuple, colProp con
 	case dbtypes.PgInteger:
 		return append(append([]byte("["), tupleData.Value[1:len(tupleData.Value)-1]...), ']')
 	default:
+		var res bytes.Buffer
+
 		val := pgtype.TextArray{}
 		if err := val.DecodeText(nil, tupleData.Value); err != nil {
 			panic(err)
 		}
-		res := make([]string, len(val.Elements))
-		for i, val := range val.Elements {
+
+		res.Grow(len(tupleData.Value))
+
+		first := true
+		res.WriteByte('[')
+		for _, val := range val.Elements {
+			if !first {
+				res.WriteByte(',')
+			}
+
+			first = false
+
 			if val.Status == pgtype.Null {
-				res[i] = null
+				res.WriteString(null)
 			} else {
-				res[i] = QuoteLiteral(val.String)
+				res.WriteByte('\'')
+				res.WriteString(escaper.Replace(val.String))
+				res.WriteByte('\'')
 			}
 		}
-
-		return []byte("[" + strings.Join(res, ", ") + "]")
+		res.WriteByte(']')
+		return res.Bytes()
 	}
-
-	return nil
-}
-
-func QuoteLiteral(s string) string {
-	return "'" + escaper.Replace(s) + "'"
 }
