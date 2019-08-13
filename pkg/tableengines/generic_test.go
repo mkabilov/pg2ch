@@ -10,6 +10,7 @@ var testData = []struct {
 	fields   [][]byte
 	expected []byte
 }{
+	{str: []byte{}, fields: [][]byte{}, expected: []byte{}},
 	{str: []byte{}, fields: [][]byte{[]byte("abc")}, expected: []byte("abc")},
 	{str: []byte{}, fields: [][]byte{[]byte("123"), []byte("456")}, expected: []byte("123\t456")},
 	{str: []byte("abc"), fields: [][]byte{}, expected: []byte("abc")},
@@ -23,5 +24,11 @@ func TestAppendField(t *testing.T) {
 		if bytes.Compare(tt.expected, got) != 0 {
 			t.Fatalf("%d: Expected %v(%q), got %v(%q)", i, tt.expected, string(tt.expected), got, string(got))
 		}
+	}
+}
+
+func BenchmarkAppendField(b *testing.B) {
+	for n := 0; n < b.N; n++ {
+		appendField(testData[5].str, testData[5].fields...)
 	}
 }

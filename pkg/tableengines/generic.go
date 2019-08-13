@@ -373,7 +373,9 @@ func appendField(str []byte, fields ...[]byte) []byte {
 		for _, v := range fields {
 			finalLen += len(v)
 		}
-		finalLen += len(fields) - 1
+		if len(fields) > 0 {
+			finalLen += len(fields) - 1
+		}
 		res := make([]byte, finalLen)
 
 		p := 0
