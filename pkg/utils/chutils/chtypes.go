@@ -109,55 +109,68 @@ func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
 	return chType, nil
 }
 
-func convertBaseType(baseType string, tupleData *message.Tuple, colProp config.ColumnProperty) []byte {
+func convertBaseType(buf *bytes.Buffer, baseType string, tupleData *message.Tuple, colProp config.ColumnProperty) {
+	var w []byte
+
+	if tupleData.Kind == message.TupleNull {
+		if len(colProp.Coalesce) > 0 {
+			w = colProp.Coalesce
+		} else {
+			w = nullStr
+		}
+	} else {
+		w = tupleData.Value
+	}
+
 	switch baseType {
 	case dbtypes.PgAdjustIstore:
 		fallthrough
 	case dbtypes.PgAdjustBigIstore:
 		if colProp.FlattenIstore {
 			if tupleData.Kind == message.TupleNull {
-				return []byte(strings.Repeat("\t\\N", colProp.FlattenIstoreMax-colProp.FlattenIstoreMin+1))[1:]
+				for i := 0; i < colProp.FlattenIstoreMax-colProp.FlattenIstoreMin+1; i++ {
+					if i > 0 {
+						buf.WriteByte('\t')
+					}
+					buf.Write(nullStr)
+				}
+				return
+			} else {
+				buf.Write(pgutils.IstoreValues(tupleData.Value, colProp.FlattenIstoreMin, colProp.FlattenIstoreMax))
+				return
 			}
-
-			return pgutils.IstoreValues(tupleData.Value, colProp.FlattenIstoreMin, colProp.FlattenIstoreMax)
 		} else {
 			if tupleData.Kind == message.TupleNull {
-				return istoreNull
+				w = istoreNull
+			} else {
+				buf.Write(pgutils.IstoreToArrays(tupleData.Value))
+				return
 			}
-
-			return pgutils.IstoreToArrays(tupleData.Value)
 		}
 	case dbtypes.PgAdjustAjBool:
 		fallthrough
 	case dbtypes.PgBoolean:
-		if tupleData.Kind == message.TupleNull {
-			if len(colProp.Coalesce) > 0 {
-				return colProp.Coalesce
+		if tupleData.Kind != message.TupleNull {
+			switch tupleData.Value[0] {
+			case pgTrue:
+				buf.WriteByte('1')
+				return
+			case pgFalse:
+				buf.WriteByte('0')
+				return
+			case ajBoolUnknown:
+				w = ajBoolUnkownValue
 			}
-			return nullStr
-		}
-
-		switch tupleData.Value[0] {
-		case pgTrue:
-			return []byte("1")
-		case pgFalse:
-			return []byte("0")
-		case ajBoolUnknown:
-			return ajBoolUnkownValue
 		}
 	case dbtypes.PgTimestampWithTimeZone:
 		fallthrough
 	case dbtypes.PgTimestampWithoutTimeZone:
 		fallthrough
 	case dbtypes.PgTimestamp:
-		if tupleData.Kind == message.TupleNull {
-			if len(colProp.Coalesce) > 0 {
-				return colProp.Coalesce
-			}
-			return nullStr
+		if tupleData.Kind != message.TupleNull {
+			buf.Write(tupleData.Value[:timestampLength])
+			return
 		}
-
-		return tupleData.Value[:timestampLength]
 	case dbtypes.PgTime:
 		fallthrough
 	case dbtypes.PgTimeWithoutTimeZone:
@@ -165,55 +178,45 @@ func convertBaseType(baseType string, tupleData *message.Tuple, colProp config.C
 	case dbtypes.PgTimeWithTimeZone:
 		//TODO
 	}
-	if tupleData.Kind == message.TupleNull {
-		if len(colProp.Coalesce) > 0 {
-			return colProp.Coalesce
-		}
 
-		return nullStr
-	}
-
-	return tupleData.Value
+	buf.Write(w)
 }
 
-func ConvertColumn(column config.PgColumn, tupleData *message.Tuple, colProp config.ColumnProperty) []byte {
+func ConvertColumn(buf *bytes.Buffer, column config.PgColumn, tupleData *message.Tuple, colProp config.ColumnProperty) {
 	if !column.IsArray {
-		return convertBaseType(column.BaseType, tupleData, colProp)
-	}
+		convertBaseType(buf, column.BaseType, tupleData, colProp)
+	} else {
+		// array
+		buf.WriteByte('[')
 
-	switch column.BaseType {
-	case dbtypes.PgBigint:
-		fallthrough
-	case dbtypes.PgInteger:
-		return append(append([]byte("["), tupleData.Value[1:len(tupleData.Value)-1]...), ']')
-	default:
-		var res bytes.Buffer
-
-		val := pgtype.TextArray{}
-		if err := val.DecodeText(nil, tupleData.Value); err != nil {
-			panic(err)
-		}
-
-		res.Grow(len(tupleData.Value))
-
-		first := true
-		res.WriteByte('[')
-		for _, val := range val.Elements {
-			if !first {
-				res.WriteByte(',')
+		switch column.BaseType {
+		case dbtypes.PgBigint:
+			fallthrough
+		case dbtypes.PgInteger:
+			buf.Write(tupleData.Value[1 : len(tupleData.Value)-1])
+		default:
+			val := pgtype.TextArray{}
+			if err := val.DecodeText(nil, tupleData.Value); err != nil {
+				panic(err)
 			}
 
-			first = false
+			first := true
+			for _, val := range val.Elements {
+				if !first {
+					buf.WriteByte(',')
+				}
 
-			if val.Status == pgtype.Null {
-				res.WriteString(null)
-			} else {
-				res.WriteByte('\'')
-				res.WriteString(escaper.Replace(val.String))
-				res.WriteByte('\'')
+				first = false
+
+				if val.Status == pgtype.Null {
+					buf.WriteString(null)
+				} else {
+					buf.WriteByte('\'')
+					buf.WriteString(escaper.Replace(val.String))
+					buf.WriteByte('\'')
+				}
 			}
 		}
-		res.WriteByte(']')
-		return res.Bytes()
+		buf.WriteByte(']')
 	}
 }

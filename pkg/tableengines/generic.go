@@ -283,28 +283,27 @@ func (t *genericTable) FlushToMainTable() error {
 }
 
 func (t *genericTable) convertRow(row message.Row) chTuple {
-	res := make([]byte, 0)
+	var buf bytes.Buffer
 
 	for colId, col := range t.tupleColumns {
 		if _, ok := t.columnMapping[col.Name]; !ok {
 			continue
 		}
 
-		value := chutils.ConvertColumn(t.cfg.PgColumns[col.Name], row[colId], t.cfg.ColumnProperties[col.Name])
 		if colId > 0 {
-			res = append(res, columnDelimiter)
+			buf.WriteByte(columnDelimiter)
 		}
-		res = append(res, value...)
+		chutils.ConvertColumn(&buf, t.cfg.PgColumns[col.Name], row[colId], t.cfg.ColumnProperties[col.Name])
 	}
 
 	if t.cfg.GenerationColumn != "" {
-		if len(res) > 0 {
-			res = append(res, columnDelimiter)
+		if buf.Len() > 0 {
+			buf.WriteByte(columnDelimiter)
 		}
-		res = append(res, []byte(strconv.FormatUint(*t.generationID, 10))...)
+		buf.WriteString(strconv.FormatUint(*t.generationID, 10))
 	}
 
-	return res
+	return buf.Bytes()
 }
 
 // Truncate truncates main and buffer(if used) tables

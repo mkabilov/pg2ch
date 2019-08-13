@@ -13,6 +13,13 @@ tables:
         init_sync_skip_truncate: true
         sign_column: sign
 
+    pg3:
+        main_table: ch3
+        sync_aux_table: ch3_aux
+        engine: CollapsingMergeTree
+        init_sync_skip_truncate: true
+        sign_column: sign
+
 inactivity_merge_timeout: '1s'
 
 clickhouse:
@@ -28,4 +35,4 @@ postgres:
     publication_name: pg2ch_pub
 
 db_path: /tmp/db
-loglevel: debug
+loglevel: error

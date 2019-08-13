@@ -2,12 +2,6 @@ package tests
 
 import (
 	"fmt"
-	"github.com/ildus/pqt"
-	"github.com/mkabilov/pg2ch/pkg/config"
-	"github.com/mkabilov/pg2ch/pkg/replicator"
-	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
-	"github.com/stretchr/testify/assert"
-
 	"io/ioutil"
 	"log"
 	"os"
@@ -15,6 +9,13 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/ildus/pqt"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/mkabilov/pg2ch/pkg/config"
+	"github.com/mkabilov/pg2ch/pkg/replicator"
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 )
 
 const (
@@ -27,16 +28,34 @@ begin
 		create role postgres superuser login;
 	end if;
 end $$;
-create table pg1(id bigserial, a int, b smallint, c bigint, d text, f1 float, f2 double precision, bo bool, num numeric(10, 2), ch varchar(10));
+create extension istore;
+create table pg1(id bigserial, a int, b smallint, c bigint, d text, f1 float,
+	f2 double precision, bo bool, num numeric(10, 2), ch varchar(10));
 alter table pg1 replica identity full;
 create table pg2(id bigserial, a int[], b bigint[], c text[]);
 alter table pg2 replica identity full;
-insert into pg1(a,b,c,d,f1,f2,bo,num,ch) select i, i + 1, i + 2, i::text, i + 1.1, i + 2.1, true, i + 3, (i+4)::text from generate_series(1, 10000) i;
-insert into pg2(a, b, c) select array_fill(i, array[3]), array_fill(i + 1, array[3]), array_fill(i::text, array[3]) from generate_series(1, 10000) i;
+create table pg3(id bigserial, a istore, b bigistore);
+alter table pg3 replica identity full;
+insert into pg1(a,b,c,d,f1,f2,bo,num,ch) select i, i + 1, i + 2, i::text, i + 1.1,
+	i + 2.1, true, i + 3, (i+4)::text
+from generate_series(1, 10000) i;
+insert into pg2(a, b, c) select array_fill(i, array[3]), array_fill(i + 1, array[3]),
+	array_fill(i::text, array[3])
+from generate_series(1, 10000) i;
+insert into pg3(a, b) select
+	istore(array_fill(i, array[3]), array_fill(i + 1, array[3])),
+	bigistore(array_fill(i + 2, array[3]), array_fill(i + 3, array[3]))
+from generate_series(1, 10000) i;
 `
 	addsql = `
-insert into pg1(a,b,c,d,f1,f2,bo,num,ch) select i, i + 1, i + 2, i::text, i + 1.1, i + 2.1, true, i + 3, (i+4)::text from generate_series(1, 100) i;
-insert into pg2(a, b, c) select array_fill(i, array[3]), array_fill(i + 1, array[3]), array_fill(i::text, array[3]) from generate_series(1, 100) i;
+insert into pg1(a,b,c,d,f1,f2,bo,num,ch) select i, i + 1, i + 2, i::text,
+	i + 1.1, i + 2.1, true, i + 3, (i+4)::text from generate_series(1, 100) i;
+insert into pg2(a, b, c) select array_fill(i, array[3]), array_fill(i + 1, array[3]),
+	array_fill(i::text, array[3]) from generate_series(1, 100) i;
+insert into pg3(a, b) select
+	istore(array_fill(i, array[1]), array_fill(i + 1, array[1])),
+	bigistore(array_fill(i + 2, array[1]), array_fill(i + 3, array[1]))
+from generate_series(1, 100) i;
 `
 	testConfigFile = "./test.yaml"
 )
@@ -90,6 +109,24 @@ var (
 			a Array(Int32),
 			b Array(Int64),
 			c Array(String),
+			sign Int8,
+			row_id UInt64,
+			lsn UInt64
+		) engine=CollapsingMergeTree(sign) order by id;`,
+		`create table pg2ch_test.ch3(
+			id UInt64,
+			a_keys Array(Int32),
+			a_values Array(Int32),
+			b_keys Array(Int32),
+			b_values Array(Int64),
+			sign Int8
+		 ) engine=CollapsingMergeTree(sign) order by id;`,
+		`create table pg2ch_test.ch3_aux(
+			id UInt64,
+			a_keys Array(Int32),
+			a_values Array(Int32),
+			b_keys Array(Int32),
+			b_values Array(Int64),
 			sign Int8,
 			row_id UInt64,
 			lsn UInt64
@@ -204,7 +241,6 @@ max_logical_replication_workers = 10
 			t.Fatal("could not start replicator: ", err)
 		}
 		stopCh <- true
-		log.Println("number of goroutines", runtime.NumGoroutine())
 	}()
 
 	go func() {
@@ -227,8 +263,13 @@ max_logical_replication_workers = 10
 			t.Fatal("count shoud be equal to 20000")
 		}
 
+		count = ch.getCount(t, "select count(*) from pg2ch_test.ch3")
+		if count != 20000 {
+			t.Fatal("count shoud be equal to 20000")
+		}
+
 		rows := ch.safeQuery(t, "select * from pg2ch_test.ch1 order by id desc limit 10")
-		fmt.Println(rows)
+		assert.Equal(t, rows[0], []string{"20000", "100", "101", "102", "100", "101.1", "102.1", "1", "103.00", "104", "1"}, "row 0")
 
 		rows = ch.safeQuery(t, "select * from pg2ch_test.ch2 order by id desc limit 10")
 		assert.Equal(t, rows[0][0], "20000", "row 0")
@@ -242,6 +283,9 @@ max_logical_replication_workers = 10
 		assert.Equal(t, rows[1][2], "[100,100,100]", "row 1")
 		assert.Equal(t, rows[1][3], "['99','99','99']", "row 1")
 		assert.Equal(t, rows[1][4], "1", "row 0")
+
+		rows = ch.safeQuery(t, "select * from pg2ch_test.ch3 order by id desc limit 10")
+		assert.Equal(t, rows[0], []string{"20000", "[100]", "[101]", "[102]", "[103]", "1"})
 
 		repl.Finish()
 	}()
