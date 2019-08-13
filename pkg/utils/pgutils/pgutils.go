@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"unicode/utf8"
 
@@ -67,81 +66,57 @@ func QuoteLiteral(str string) string {
 	return `'` + res + `'`
 }
 
-func ParseIstore(str string) (keys, values []int, err error) {
-	keys = make([]int, 0)
-	values = make([]int, 0)
-	for _, pair := range strings.Split(str, ",") {
-		var key, value int
-		n, err := fmt.Sscanf(strings.TrimLeft(pair, " "), `"%d"=>"%d"`, &key, &value)
-		if err != nil || n != 2 {
-			return nil, nil, fmt.Errorf("could not parse istore: %v(%d)", err, n)
-		}
-
-		keys = append(keys, key)
-		values = append(values, value)
-	}
-
-	return
-}
-
 func IstoreToArrays(str []byte) []byte {
-	keysBuf := bytesBufPool.Get().(*bytes.Buffer)
+	resultBuf := bytesBufPool.Get().(*bytes.Buffer)
 	valuesBuf := bytesBufPool.Get().(*bytes.Buffer)
-	tmpStr := bytesBufPool.Get().(*bytes.Buffer)
 	defer func() {
-		keysBuf.Reset()
-		bytesBufPool.Put(keysBuf)
+		resultBuf.Reset()
+		bytesBufPool.Put(resultBuf)
 
 		valuesBuf.Reset()
 		bytesBufPool.Put(valuesBuf)
-
-		tmpStr.Reset()
-		bytesBufPool.Put(tmpStr)
 	}()
 
-	keysBuf.WriteByte('[')
+	resultBuf.WriteByte('[')
 	valuesBuf.WriteByte('[')
 
-	i := 0
-	isKey := true
-	isNum := false
+	first := true
+	counter := 0
+	isKey := false
 	for _, c := range str {
 		switch c {
 		case '"':
-			if isNum {
-				if isKey {
-					if i > 1 {
-						keysBuf.WriteByte(',')
-					}
-					keysBuf.Write(tmpStr.Bytes())
-				} else {
-					if i > 1 {
+			if counter%2 == 0 {
+				isKey = !isKey
+				if !first {
+					if isKey {
+						resultBuf.WriteByte(',')
+					} else {
 						valuesBuf.WriteByte(',')
 					}
-					valuesBuf.Write(tmpStr.Bytes())
-					isKey = true
-				}
-			} else {
-				tmpStr.Reset()
-				if isKey {
-					i++
 				}
 			}
-			isNum = !isNum
+			counter++
+			if counter == 4 {
+				first = false
+			}
 		case '=':
-			isKey = false
 		case '>':
 		case ' ':
 		case ',':
 		default:
-			tmpStr.WriteByte(c)
+			if isKey {
+				resultBuf.WriteByte(c)
+			} else {
+				valuesBuf.WriteByte(c)
+			}
 		}
 	}
-	keysBuf.WriteString("]\t")
-	keysBuf.Write(valuesBuf.Bytes())
-	keysBuf.WriteByte(']')
+	resultBuf.WriteString("]\t")
+	resultBuf.Write(valuesBuf.Bytes())
+	resultBuf.WriteByte(']')
 
-	return keysBuf.Bytes()
+	return resultBuf.Bytes()
 }
 
 //TODO check istore key value
