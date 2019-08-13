@@ -411,7 +411,7 @@ func (c PgColumn) IsTime() bool {
 
 func (c Config) Print() {
 	fmt.Printf("inactivity flush timeout: %v\n", c.InactivityFlushTimeout)
-	fmt.Printf("logging level: %t\n", c.LogLevel.String())
+	fmt.Printf("logging level: %s\n", c.LogLevel)
 
 	for tbl, tblCfg := range c.Tables {
 		fmt.Printf("%s: flush threshold: %v buffer threshold: %v\n",

@@ -319,7 +319,7 @@ func (p *ConnPool) createConnection() (*Conn, error) {
 func (p *ConnPool) createConnectionUnlocked() (*Conn, error) {
 	p.inProgressConnects++
 	p.cond.L.Unlock()
-	c, err := connect(p.config, p.connInfo.DeepCopy())
+	c, err := Connect(p.config)
 	p.cond.L.Lock()
 	p.inProgressConnects--
 
