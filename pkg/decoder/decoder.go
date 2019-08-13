@@ -71,18 +71,18 @@ func (d *decoder) rowInfo(char byte) bool {
 	return false
 }
 
-func (d *decoder) tupledata() []*message.Tuple {
+func (d *decoder) tupleData() []*message.Tuple {
 	size := int(d.uint16())
 	data := make([]*message.Tuple, size)
 	for i := 0; i < size; i++ {
 		switch d.buf.Next(1)[0] {
+		case 't':
+			vsize := int(d.order.Uint32(d.buf.Next(4)))
+			data[i] = &message.Tuple{Kind: message.TupleText, Value: d.buf.Next(vsize)}
 		case 'n':
 			data[i] = &message.Tuple{Kind: message.TupleNull, Value: []byte{}}
 		case 'u':
 			data[i] = &message.Tuple{Kind: message.TupleUnchanged, Value: []byte{}}
-		case 't':
-			vsize := int(d.order.Uint32(d.buf.Next(4)))
-			data[i] = &message.Tuple{Kind: message.TupleText, Value: d.buf.Next(vsize)}
 		}
 	}
 
@@ -156,7 +156,7 @@ func Parse(src []byte) (message.Message, error) {
 
 		m.RelationOID = d.oid()
 		m.IsNew = d.uint8() == 'N'
-		m.NewRow = d.tupledata()
+		m.NewRow = d.tupleData()
 
 		return m, nil
 	case UpdateMsgType:
@@ -166,10 +166,10 @@ func Parse(src []byte) (message.Message, error) {
 		m.IsKey = d.rowInfo('K')
 		m.IsOld = d.rowInfo('O')
 		if m.IsKey || m.IsOld {
-			m.OldRow = d.tupledata()
+			m.OldRow = d.tupleData()
 		}
 		m.IsNew = d.uint8() == 'N'
-		m.NewRow = d.tupledata()
+		m.NewRow = d.tupleData()
 
 		return m, nil
 	case DeleteMsgType:
@@ -178,7 +178,7 @@ func Parse(src []byte) (message.Message, error) {
 		m.RelationOID = d.oid()
 		m.IsKey = d.rowInfo('K')
 		m.IsOld = d.rowInfo('O')
-		m.OldRow = d.tupledata()
+		m.OldRow = d.tupleData()
 
 		return m, nil
 	case TruncateMsgType:

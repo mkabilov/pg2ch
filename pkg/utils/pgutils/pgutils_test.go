@@ -66,6 +66,12 @@ var (
 				&message.Tuple{Kind: message.TupleText, Value: []byte("Hello")},
 			},
 		},
+		{
+			row: []byte(`\110\145\154\154\157` + "\n"),
+			expected: message.Row{
+				&message.Tuple{Kind: message.TupleText, Value: []byte("Hello")},
+			},
+		},
 	}
 )
 

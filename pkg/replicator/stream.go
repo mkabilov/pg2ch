@@ -1,7 +1,6 @@
 package replicator
 
 import (
-	"bytes"
 	"fmt"
 	"time"
 
@@ -158,7 +157,7 @@ func (r *Replicator) processRelation(msg message.Relation) error {
 
 	tblName := r.oidName[msg.OID]
 	if relMsg, ok := r.tblRelMsgs[tblName]; ok {
-		if bytes.Compare(relMsg.Raw, msg.Raw) != 0 {
+		if !relMsg.Equal(&msg) {
 			r.logger.Fatalf("table or structure of %s table has been changed", tblName)
 		}
 	}

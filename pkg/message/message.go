@@ -84,14 +84,12 @@ type Tuple struct {
 }
 
 type Begin struct {
-	Raw       []byte
 	FinalLSN  dbtypes.LSN // LSN of the record that lead to this xact to be committed
 	Timestamp time.Time   // Commit timestamp of the transaction
 	XID       int32       // Xid of the transaction.
 }
 
 type Commit struct {
-	Raw            []byte
 	Flags          uint8       // Flags; currently unused (must be 0)
 	LSN            dbtypes.LSN // The LastLSN of the commit.
 	TransactionLSN dbtypes.LSN // LSN pointing to the end of the commit record + 1
@@ -99,7 +97,6 @@ type Commit struct {
 }
 
 type Origin struct {
-	Raw  []byte
 	LSN  dbtypes.LSN // The last LSN of the commit on the origin server.
 	Name string
 }
@@ -107,14 +104,12 @@ type Origin struct {
 type Relation struct {
 	NamespacedName `yaml:"NamespacedName"`
 
-	Raw             []byte          `yaml:"-"`
 	OID             dbtypes.OID     `yaml:"OID"`             // OID of the relation.
 	ReplicaIdentity ReplicaIdentity `yaml:"ReplicaIdentity"` // Replica identity
 	Columns         []Column        `yaml:"Columns"`         // Columns
 }
 
 type Insert struct {
-	Raw         []byte
 	RelationOID dbtypes.OID // OID of the relation corresponding to the OID in the relation message.
 	IsNew       bool        // Identifies tuple as a new tuple.
 
@@ -122,7 +117,6 @@ type Insert struct {
 }
 
 type Update struct {
-	Raw         []byte
 	RelationOID dbtypes.OID // OID of the relation corresponding to the OID in the relation message.
 	IsKey       bool        // OldRow contains columns which are part of REPLICA IDENTITY index.
 	IsOld       bool        // OldRow contains old tuple in case of REPLICA IDENTITY set to FULL
@@ -133,7 +127,6 @@ type Update struct {
 }
 
 type Delete struct {
-	Raw         []byte
 	RelationOID dbtypes.OID // OID of the relation corresponding to the OID in the relation message.
 	IsKey       bool        // OldRow contains columns which are part of REPLICA IDENTITY index.
 	IsOld       bool        // OldRow contains old tuple in case of REPLICA IDENTITY set to FULL
@@ -142,7 +135,6 @@ type Delete struct {
 }
 
 type Truncate struct {
-	Raw             []byte
 	Cascade         bool
 	RestartIdentity bool
 	RelationOIDs    []dbtypes.OID
@@ -151,7 +143,6 @@ type Truncate struct {
 type Type struct {
 	NamespacedName
 
-	Raw []byte
 	OID dbtypes.OID // OID of the data type
 }
 
@@ -409,4 +400,41 @@ func (n NamespacedName) String() string {
 
 func (n NamespacedName) Sanitize() string {
 	return pgx.Identifier{n.Namespace, n.Name}.Sanitize()
+}
+
+func (r *Relation) Equal(rel2 *Relation) bool {
+	if r.OID != rel2.OID {
+		return false
+	}
+	if r.Name != rel2.Name || r.Namespace != rel2.Namespace {
+		return false
+	}
+
+	if r.ReplicaIdentity != rel2.ReplicaIdentity {
+		return false
+	}
+
+	if len(r.Columns) != len(rel2.Columns) {
+		return false
+	}
+
+	for colID := range r.Columns {
+		if r.Columns[colID].Name != rel2.Columns[colID].Name {
+			return false
+		}
+
+		if r.Columns[colID].IsKey != rel2.Columns[colID].IsKey {
+			return false
+		}
+
+		if r.Columns[colID].Mode != rel2.Columns[colID].Mode {
+			return false
+		}
+
+		if r.Columns[colID].TypeOID != rel2.Columns[colID].TypeOID {
+			return false
+		}
+	}
+
+	return true
 }
