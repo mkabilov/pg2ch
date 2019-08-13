@@ -369,17 +369,36 @@ func (t *genericTable) compareRows(a, b message.Row) (bool, bool) {
 
 func appendField(str []byte, fields ...[]byte) []byte {
 	if len(str) == 0 {
-		res := make([]byte, 0)
+		finalLen := 0
 		for _, v := range fields {
-			res = append(res, v...)
+			finalLen += len(v)
+		}
+		finalLen += len(fields) - 1
+		res := make([]byte, finalLen)
+
+		p := 0
+		for i, v := range fields {
+			if i > 0 {
+				res[p-1] = '\t'
+			}
+			copy(res[p:], v)
+			p += 1 + len(v)
 		}
 
 		return res
 	} else {
-		res := make([]byte, len(str))
-		copy(res, str)
+		finalLen := len(str)
 		for _, v := range fields {
-			res = append(res, append(columnDelimiterStr, v...)...)
+			finalLen += 1 + len(v)
+		}
+		res := make([]byte, finalLen)
+		copy(res, str)
+
+		p := len(str) + 1
+		for _, v := range fields {
+			res[p-1] = '\t'
+			copy(res[p:], v)
+			p += 1 + len(v)
 		}
 
 		return res
