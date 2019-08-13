@@ -71,18 +71,18 @@ func (d *decoder) rowInfo(char byte) bool {
 	return false
 }
 
-func (d *decoder) tupledata() []message.Tuple {
+func (d *decoder) tupledata() []*message.Tuple {
 	size := int(d.uint16())
-	data := make([]message.Tuple, size)
+	data := make([]*message.Tuple, size)
 	for i := 0; i < size; i++ {
 		switch d.buf.Next(1)[0] {
 		case 'n':
-			data[i] = message.Tuple{Kind: message.TupleNull, Value: []byte{}}
+			data[i] = &message.Tuple{Kind: message.TupleNull, Value: []byte{}}
 		case 'u':
-			data[i] = message.Tuple{Kind: message.TupleUnchanged, Value: []byte{}}
+			data[i] = &message.Tuple{Kind: message.TupleUnchanged, Value: []byte{}}
 		case 't':
 			vsize := int(d.order.Uint32(d.buf.Next(4)))
-			data[i] = message.Tuple{Kind: message.TupleText, Value: d.buf.Next(vsize)}
+			data[i] = &message.Tuple{Kind: message.TupleText, Value: d.buf.Next(vsize)}
 		}
 	}
 

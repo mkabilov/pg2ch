@@ -108,7 +108,7 @@ func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
 	return chType, nil
 }
 
-func convertBaseType(baseType string, tupleData message.Tuple, colProp config.ColumnProperty) []byte {
+func convertBaseType(baseType string, tupleData *message.Tuple, colProp config.ColumnProperty) []byte {
 	switch baseType {
 	case dbtypes.PgAdjustIstore:
 		fallthrough
@@ -175,7 +175,7 @@ func convertBaseType(baseType string, tupleData message.Tuple, colProp config.Co
 	return tupleData.Value
 }
 
-func ConvertColumn(column config.PgColumn, tupleData message.Tuple, colProp config.ColumnProperty) []byte {
+func ConvertColumn(column config.PgColumn, tupleData *message.Tuple, colProp config.ColumnProperty) []byte {
 	if !column.IsArray {
 		return convertBaseType(column.BaseType, tupleData, colProp)
 	}

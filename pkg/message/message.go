@@ -60,7 +60,7 @@ var (
 	}
 )
 
-type Row []Tuple // set of columns
+type Row []*Tuple // set of columns
 
 type Message interface {
 	fmt.Stringer

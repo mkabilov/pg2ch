@@ -265,7 +265,7 @@ func DecodeCopyToTuples(in []byte) (message.Row, error) {
 			t := make([]byte, colBuf.Len())
 			copy(t, colBuf.Bytes())
 
-			result = append(result, message.Tuple{Kind: tupleKind, Value: t})
+			result = append(result, &message.Tuple{Kind: tupleKind, Value: t})
 			tupleKind = message.TupleText
 			colBuf.Reset()
 			continue
@@ -273,7 +273,7 @@ func DecodeCopyToTuples(in []byte) (message.Row, error) {
 			t := make([]byte, colBuf.Len())
 			copy(t, colBuf.Bytes())
 
-			result = append(result, message.Tuple{Kind: tupleKind, Value: t})
+			result = append(result, &message.Tuple{Kind: tupleKind, Value: t})
 			return result, nil
 		} else if in[i] != '\\' {
 			colBuf.WriteByte(in[i])
