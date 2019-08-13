@@ -2,45 +2,57 @@
 
 
 [[projects]]
+  digest = "1:ffe9824d294da03b391f44e1ae8281281b4afc1bdaa9588c9097785e3af10cec"
   name = "github.com/davecgh/go-spew"
   packages = ["spew"]
+  pruneopts = "UT"
   revision = "8991bc29aa16c548c550c7ff78260e27b9ab7c73"
   version = "v1.1.1"
 
 [[projects]]
+  digest = "1:34fb8c42ce1f1f0c643a6f38a0bb94f1b1d36fb9081f68002ff6116b4608e2e6"
   name = "github.com/djherbis/buffer"
   packages = [
     "limio",
-    "wrapio"
+    "wrapio",
   ]
+  pruneopts = "UT"
   revision = "4972e2bf4a27dbd7c43140c959b85e8c1d2f5536"
   version = "v1.0"
 
 [[projects]]
+  digest = "1:0bfbe13936953a98ae3cfe8ed6670d396ad81edf069a806d2f6515d7bb6950df"
   name = "github.com/google/btree"
   packages = ["."]
+  pruneopts = "UT"
   revision = "4030bb1f1f0c35b30ca7009e9ebd06849dd45306"
   version = "v1.0.0"
 
 [[projects]]
-  branch = "master"
+  digest = "1:a1038ef593beb4771c8f0f9c26e8b00410acd800af5c6864651d9bf160ea1813"
   name = "github.com/hpcloud/tail"
   packages = [
     ".",
     "ratelimiter",
     "util",
     "watch",
-    "winfile"
+    "winfile",
   ]
-  revision = "a1dbeea552b7c8df4b542c66073e393de198a800"
+  pruneopts = "UT"
+  revision = "a30252cb686a21eb2d0b98132633053ec2f7f1e5"
+  version = "v1.0.0"
 
 [[projects]]
   branch = "master"
+  digest = "1:4b1760e946708787f4208b01aef989b793629323bc9efbc4db746ed5c7ed58d2"
   name = "github.com/ildus/pqt"
   packages = ["."]
+  pruneopts = "UT"
   revision = "3770a86f5e4793375e261ef12f0b67a58325b4c0"
 
 [[projects]]
+  branch = "master"
+  digest = "1:f58b8bcf5268648964d8c55287fae363f3acdd69de460bf55e74864722c1f707"
   name = "github.com/jackc/pgx"
   packages = [
     ".",
@@ -49,70 +61,89 @@
     "log/zapadapter",
     "pgio",
     "pgproto3",
-    "pgtype"
+    "pgtype",
   ]
-  revision = "a1d6202434aa40c3624688f6c2cacbc27eef5472"
-  version = "v3.5.0"
+  pruneopts = "UT"
+  revision = "719800394dbe207c695fa782b0f960b488485eb0"
 
 [[projects]]
+  digest = "1:12cb143f2148bf54bcd9fe622abac17325e85eeb1d84b8ec6caf1c80232108fd"
   name = "github.com/lib/pq"
   packages = [
     ".",
     "oid",
-    "scram"
+    "scram",
   ]
+  pruneopts = "UT"
   revision = "3427c32cb71afc948325f299f040e53c1dd78979"
   version = "v1.2.0"
 
 [[projects]]
   branch = "master"
+  digest = "1:89da0f0574bc94cfd0ac8b59af67bf76cdd110d503df2721006b9f0492394333"
   name = "github.com/petar/GoLLRB"
   packages = ["llrb"]
+  pruneopts = "UT"
   revision = "33fb24c13b99c46c93183c291836c573ac382536"
 
 [[projects]]
+  digest = "1:a8c2725121694dfbf6d552fb86fe6b46e3e7135ea05db580c28695b916162aad"
   name = "github.com/peterbourgon/diskv"
   packages = ["."]
+  pruneopts = "UT"
   revision = "0be1b92a6df0e4f5cb0a5d15fb7f643d0ad93ce6"
   version = "v3.0.0"
 
 [[projects]]
+  digest = "1:cf31692c14422fa27c83a05292eb5cbe0fb2775972e8f1f8446a71549bd8980b"
   name = "github.com/pkg/errors"
   packages = ["."]
+  pruneopts = "UT"
   revision = "ba968bfe8b2f7e042a574c888954fccecfa385b4"
   version = "v0.8.1"
 
 [[projects]]
+  digest = "1:0028cb19b2e4c3112225cd871870f2d9cf49b9b4276531f03438a88e94be86fe"
   name = "github.com/pmezard/go-difflib"
   packages = ["difflib"]
+  pruneopts = "UT"
   revision = "792786c7400a136282c1664665ae0a8db921c6c2"
   version = "v1.0.0"
 
 [[projects]]
+  digest = "1:972c2427413d41a1e06ca4897e8528e5a1622894050e2f527b38ddf0f343f759"
   name = "github.com/stretchr/testify"
   packages = ["assert"]
+  pruneopts = "UT"
   revision = "ffdc059bfe9ce6a4e144ba849dbedead332c6053"
   version = "v1.3.0"
 
 [[projects]]
+  digest = "1:0b8d86f074869a0e1c6293773bfafea7515752d28b49921f8e3f889158c921de"
   name = "github.com/tidwall/redcon"
   packages = ["."]
+  pruneopts = "UT"
   revision = "c964c660adb68a16a0f890ceb01d25e05d0ab49e"
   version = "v1.0.0"
 
 [[projects]]
+  digest = "1:a5158647b553c61877aa9ae74f4015000294e47981e6b8b07525edcbb0747c81"
   name = "go.uber.org/atomic"
   packages = ["."]
-  revision = "4e336646b2ef9fc6e47be8e21594178f98e5ebcf"
-  version = "v1.2.0"
+  pruneopts = "UT"
+  revision = "df976f2515e274675050de7b3f42545de80594fd"
+  version = "v1.4.0"
 
 [[projects]]
+  digest = "1:60bf2a5e347af463c42ed31a493d817f8a72f102543060ed992754e689805d1a"
   name = "go.uber.org/multierr"
   packages = ["."]
+  pruneopts = "UT"
   revision = "3c4937480c32f4c13a875a1829af76c98ca3d40a"
   version = "v1.1.0"
 
 [[projects]]
+  digest = "1:676160e6a4722b08e0e26b11521d575c2cb2b6f0c679e1ee6178c5d8dee51e5e"
   name = "go.uber.org/zap"
   packages = [
     ".",
@@ -120,24 +151,30 @@
     "internal/bufferpool",
     "internal/color",
     "internal/exit",
-    "zapcore"
+    "zapcore",
   ]
+  pruneopts = "UT"
   revision = "27376062155ad36be76b0f12cf1572a221d3a48c"
   version = "v1.10.0"
 
 [[projects]]
   branch = "master"
+  digest = "1:f92f6956e4059f6a3efc14924d2dd58ba90da25cc57fe07ae3779ef2f5e0c5f2"
   name = "golang.org/x/crypto"
   packages = ["pbkdf2"]
+  pruneopts = "UT"
   revision = "4def268fd1a49955bfb3dda92fe3db4f924f2285"
 
 [[projects]]
   branch = "master"
+  digest = "1:47844666be86089349a441f5f0ece22f42a87a8cb8c9a31294c593f43209ad19"
   name = "golang.org/x/sys"
   packages = ["unix"]
+  pruneopts = "UT"
   revision = "fde4db37ae7ad8191b03d30d27f258b5291ae4e3"
 
 [[projects]]
+  digest = "1:5f1559c4cee44069f81517430ebba19589869f3d4d4648213a4d5ddd199b11d8"
   name = "golang.org/x/text"
   packages = [
     "cases",
@@ -160,43 +197,69 @@
     "unicode/cldr",
     "unicode/norm",
     "unicode/rangetable",
-    "width"
+    "width",
   ]
+  pruneopts = "UT"
   revision = "342b2e1fbaa52c93f31447ad2c6abc048c63e475"
   version = "v0.3.2"
 
 [[projects]]
+  digest = "1:ad6e3bb5845b0543aa412fb38f0f1c6413ca168b38452e0c5fb234de04028a04"
   name = "gopkg.in/djherbis/buffer.v1"
   packages = ["."]
+  pruneopts = "UT"
   revision = "4972e2bf4a27dbd7c43140c959b85e8c1d2f5536"
   version = "v1.0"
 
 [[projects]]
+  digest = "1:5aebed51f26a49cb77a0c34d1328a0d29839e7a1204b14ff8e26a3df8ec61736"
   name = "gopkg.in/djherbis/nio.v2"
   packages = ["."]
+  pruneopts = "UT"
   revision = "824ca9017eeb2a422fdda7ae9dba05d3ab019dfa"
   version = "v2.0.3"
 
 [[projects]]
-  name = "gopkg.in/fsnotify/fsnotify.v1"
+  digest = "1:abeb38ade3f32a92943e5be54f55ed6d6e3b6602761d74b4aab4c9dd45c18abd"
+  name = "gopkg.in/fsnotify.v1"
   packages = ["."]
+  pruneopts = "UT"
   revision = "c2828203cd70a50dcccfb2761f8b1f8ceef9a8e9"
+  source = "https://github.com/fsnotify/fsnotify/archive/v1.4.7.tar.gz"
   version = "v1.4.7"
 
 [[projects]]
+  branch = "v1"
+  digest = "1:0caa92e17bc0b65a98c63e5bc76a9e844cd5e56493f8fdbb28fad101a16254d9"
   name = "gopkg.in/tomb.v1"
   packages = ["."]
-  revision = "c131134a1947e9afd9cecfe11f4c6dff0732ae58"
+  pruneopts = "UT"
+  revision = "dd632973f1e7218eb1089048e0798ec9ae7dceb8"
 
 [[projects]]
+  digest = "1:4d2e5a73dc1500038e504a8d78b986630e3626dc027bc030ba5c75da257cdb96"
   name = "gopkg.in/yaml.v2"
   packages = ["."]
+  pruneopts = "UT"
   revision = "51d6538a90f86fe93ac480b35f37b2be17fef232"
   version = "v2.2.2"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "c00db5324cdad45df56797be05d9c03c832b3542f1edba5ba81e4a36982789e0"
+  input-imports = [
+    "github.com/ildus/pqt",
+    "github.com/jackc/pgx",
+    "github.com/jackc/pgx/log/zapadapter",
+    "github.com/jackc/pgx/pgtype",
+    "github.com/peterbourgon/diskv",
+    "github.com/stretchr/testify/assert",
+    "github.com/tidwall/redcon",
+    "go.uber.org/zap",
+    "go.uber.org/zap/zapcore",
+    "gopkg.in/djherbis/buffer.v1",
+    "gopkg.in/djherbis/nio.v2",
+    "gopkg.in/yaml.v2",
+  ]
   solver-name = "gps-cdcl"
   solver-version = 1

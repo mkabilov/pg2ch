@@ -20,30 +20,36 @@
 
 package atomic
 
-// String is an atomic type-safe wrapper around Value for strings.
-type String struct{ v Value }
+// Error is an atomic type-safe wrapper around Value for errors
+type Error struct{ v Value }
 
-// NewString creates a String.
-func NewString(str string) *String {
-	s := &String{}
-	if str != "" {
-		s.Store(str)
+// errorHolder is non-nil holder for error object.
+// atomic.Value panics on saving nil object, so err object needs to be
+// wrapped with valid object first.
+type errorHolder struct{ err error }
+
+// NewError creates new atomic error object
+func NewError(err error) *Error {
+	e := &Error{}
+	if err != nil {
+		e.Store(err)
 	}
-	return s
+	return e
 }
 
-// Load atomically loads the wrapped string.
-func (s *String) Load() string {
-	v := s.v.Load()
+// Load atomically loads the wrapped error
+func (e *Error) Load() error {
+	v := e.v.Load()
 	if v == nil {
-		return ""
+		return nil
 	}
-	return v.(string)
+
+	eh := v.(errorHolder)
+	return eh.err
 }
 
-// Store atomically stores the passed string.
-// Note: Converting the string to an interface{} to store in the Value
-// requires an allocation.
-func (s *String) Store(str string) {
-	s.v.Store(str)
+// Store atomically stores error.
+// NOTE: a holder object is allocated on each Store call.
+func (e *Error) Store(err error) {
+	e.v.Store(errorHolder{err: err})
 }
