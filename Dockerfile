@@ -3,7 +3,7 @@ FROM postgres:${PG_VERSION}-alpine
 
 RUN echo 'http://dl-3.alpinelinux.org/alpine/edge/main' > /etc/apk/repositories; \
     echo 'http://dl-3.alpinelinux.org/alpine/edge/community' >> /etc/apk/repositories; \
-	apk --no-cache add git go musl-dev gcc;
+	apk --no-cache add git go musl-dev gcc openssl-dev make;
 
 ENV LANG=C.UTF-8 PGDATA=/pg/data
 ENV SRC="/pg/go/src/github.com/mkabilov/pg2ch"
