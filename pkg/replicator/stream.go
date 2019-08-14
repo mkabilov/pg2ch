@@ -147,7 +147,7 @@ func (r *Replicator) processCommit() error {
 	return nil
 }
 
-func (r *Replicator) processRelation(msg message.Relation) error {
+func (r *Replicator) processRelation(msg *message.Relation) error {
 	if chTbl, err := r.getTable(msg.OID); err != nil {
 		return err
 	} else if chTbl == nil {
@@ -157,7 +157,7 @@ func (r *Replicator) processRelation(msg message.Relation) error {
 
 	tblName := r.oidName[msg.OID]
 	if relMsg, ok := r.tblRelMsgs[tblName]; ok {
-		if !relMsg.Equal(&msg) {
+		if !relMsg.Equal(msg) {
 			r.logger.Fatalf("table or structure of %s table has been changed", tblName)
 		}
 	}
@@ -165,7 +165,7 @@ func (r *Replicator) processRelation(msg message.Relation) error {
 	return nil
 }
 
-func (r *Replicator) processInsert(msg message.Insert) error {
+func (r *Replicator) processInsert(msg *message.Insert) error {
 	chTbl, err := r.getTable(msg.RelationOID)
 	if err != nil {
 		return err
@@ -184,7 +184,7 @@ func (r *Replicator) processInsert(msg message.Insert) error {
 	return nil
 }
 
-func (r *Replicator) processUpdate(msg message.Update) error {
+func (r *Replicator) processUpdate(msg *message.Update) error {
 	chTbl, err := r.getTable(msg.RelationOID)
 	if err != nil {
 		return err
@@ -203,7 +203,7 @@ func (r *Replicator) processUpdate(msg message.Update) error {
 	return nil
 }
 
-func (r *Replicator) processDelete(msg message.Delete) error {
+func (r *Replicator) processDelete(msg *message.Delete) error {
 	chTbl, err := r.getTable(msg.RelationOID)
 	if err != nil {
 		return err
@@ -222,7 +222,7 @@ func (r *Replicator) processDelete(msg message.Delete) error {
 	return nil
 }
 
-func (r *Replicator) processTruncate(msg message.Truncate) error {
+func (r *Replicator) processTruncate(msg *message.Truncate) error {
 	for _, oid := range msg.RelationOIDs {
 		if chTbl, err := r.getTable(oid); err != nil {
 			return err
@@ -250,7 +250,7 @@ func (r *Replicator) HandleMessage(lsn dbtypes.LSN, msg message.Message) error {
 	}
 
 	switch v := msg.(type) {
-	case message.Begin:
+	case *message.Begin:
 		if r.curState.Load() == stateShuttingDown {
 			r.logger.Debugf("shutting down. discarding %T message", msg)
 			r.txFinalLSN = dbtypes.InvalidLSN
@@ -258,20 +258,20 @@ func (r *Replicator) HandleMessage(lsn dbtypes.LSN, msg message.Message) error {
 		}
 
 		return r.processBegin(v.FinalLSN)
-	case message.Commit:
+	case *message.Commit:
 		return r.processCommit()
-	case message.Relation:
+	case *message.Relation:
 		return r.processRelation(v)
-	case message.Insert:
+	case *message.Insert:
 		return r.processInsert(v)
-	case message.Update:
+	case *message.Update:
 		return r.processUpdate(v)
-	case message.Delete:
+	case *message.Delete:
 		return r.processDelete(v)
-	case message.Type:
-		r.logger.Debugf("incoming type message: %v", msg)
+	case *message.Type:
+		r.logger.Debugf("incoming type message: %v", *v)
 		return nil
-	case message.Truncate:
+	case *message.Truncate:
 		return r.processTruncate(v)
 	default:
 		return nil

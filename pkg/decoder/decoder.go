@@ -110,7 +110,7 @@ func Parse(src []byte) (message.Message, error) {
 	d := &decoder{order: binary.BigEndian, buf: bytes.NewBuffer(src[1:])}
 	switch msgType {
 	case BeginMsgType:
-		m := message.Begin{}
+		m := &message.Begin{}
 
 		m.FinalLSN = d.lsn()
 		m.Timestamp = d.timestamp()
@@ -118,7 +118,7 @@ func Parse(src []byte) (message.Message, error) {
 
 		return m, nil
 	case CommitMsgType:
-		m := message.Commit{}
+		m := &message.Commit{}
 
 		m.Flags = d.uint8()
 		m.LSN = d.lsn()
@@ -127,14 +127,14 @@ func Parse(src []byte) (message.Message, error) {
 
 		return m, nil
 	case OriginMsgType:
-		m := message.Origin{}
+		m := &message.Origin{}
 
 		m.LSN = d.lsn()
 		m.Name = d.string()
 
 		return m, nil
 	case RelationMsgType:
-		m := message.Relation{}
+		m := &message.Relation{}
 
 		m.OID = d.oid()
 		m.Namespace = d.string()
@@ -144,7 +144,7 @@ func Parse(src []byte) (message.Message, error) {
 
 		return m, nil
 	case TypeMsgType:
-		m := message.Type{}
+		m := &message.Type{}
 
 		m.OID = d.oid()
 		m.Namespace = d.string()
@@ -152,7 +152,7 @@ func Parse(src []byte) (message.Message, error) {
 
 		return m, nil
 	case InsertMsgType:
-		m := message.Insert{}
+		m := &message.Insert{}
 
 		m.RelationOID = d.oid()
 		m.IsNew = d.uint8() == 'N'
@@ -160,7 +160,7 @@ func Parse(src []byte) (message.Message, error) {
 
 		return m, nil
 	case UpdateMsgType:
-		m := message.Update{}
+		m := &message.Update{}
 
 		m.RelationOID = d.oid()
 		m.IsKey = d.rowInfo('K')
@@ -173,7 +173,7 @@ func Parse(src []byte) (message.Message, error) {
 
 		return m, nil
 	case DeleteMsgType:
-		m := message.Delete{}
+		m := &message.Delete{}
 
 		m.RelationOID = d.oid()
 		m.IsKey = d.rowInfo('K')
@@ -182,7 +182,7 @@ func Parse(src []byte) (message.Message, error) {
 
 		return m, nil
 	case TruncateMsgType:
-		m := message.Truncate{}
+		m := &message.Truncate{}
 
 		relationsCnt := int(d.uint32())
 		options := d.uint8()
