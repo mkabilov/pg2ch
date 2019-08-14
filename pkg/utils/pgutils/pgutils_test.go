@@ -77,8 +77,9 @@ var (
 
 func TestIstoreToArrays(t *testing.T) {
 	for i, tt := range istoreToArrayTest {
-		got := IstoreToArrays(tt.istore)
-		if bytes.Compare(got, tt.expected) != 0 {
+		got := &bytes.Buffer{}
+		IstoreToArrays(got, tt.istore)
+		if bytes.Compare(got.Bytes(), tt.expected) != 0 {
 			t.Fatalf("%d: Expected: %v, got: %v", i, tt.expected, got)
 		}
 	}
@@ -86,7 +87,8 @@ func TestIstoreToArrays(t *testing.T) {
 
 func BenchmarkIstoreToArrays(b *testing.B) {
 	for n := 0; n < b.N; n++ {
-		IstoreToArrays(istoreToArrayTest[1].istore)
+		buf := &bytes.Buffer{}
+		IstoreToArrays(buf, istoreToArrayTest[1].istore)
 	}
 }
 

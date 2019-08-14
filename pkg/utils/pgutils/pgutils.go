@@ -66,18 +66,14 @@ func QuoteLiteral(str string) string {
 	return `'` + res + `'`
 }
 
-func IstoreToArrays(str []byte) []byte {
-	resultBuf := bytesBufPool.Get().(*bytes.Buffer)
+func IstoreToArrays(buf *bytes.Buffer, str []byte) []byte {
 	valuesBuf := bytesBufPool.Get().(*bytes.Buffer)
 	defer func() {
-		resultBuf.Reset()
-		bytesBufPool.Put(resultBuf)
-
 		valuesBuf.Reset()
 		bytesBufPool.Put(valuesBuf)
 	}()
 
-	resultBuf.WriteByte('[')
+	buf.WriteByte('[')
 	valuesBuf.WriteByte('[')
 
 	first := true
@@ -90,7 +86,7 @@ func IstoreToArrays(str []byte) []byte {
 				isKey = !isKey
 				if !first {
 					if isKey {
-						resultBuf.WriteByte(',')
+						buf.WriteByte(',')
 					} else {
 						valuesBuf.WriteByte(',')
 					}
@@ -106,17 +102,17 @@ func IstoreToArrays(str []byte) []byte {
 		case ',':
 		default:
 			if isKey {
-				resultBuf.WriteByte(c)
+				buf.WriteByte(c)
 			} else {
 				valuesBuf.WriteByte(c)
 			}
 		}
 	}
-	resultBuf.WriteString("]\t")
-	resultBuf.Write(valuesBuf.Bytes())
-	resultBuf.WriteByte(']')
+	buf.WriteString("]\t")
+	buf.Write(valuesBuf.Bytes())
+	buf.WriteByte(']')
 
-	return resultBuf.Bytes()
+	return buf.Bytes()
 }
 
 //TODO check istore key value

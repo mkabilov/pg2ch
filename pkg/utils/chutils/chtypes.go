@@ -143,7 +143,7 @@ func convertBaseType(buf *bytes.Buffer, baseType string, tupleData *message.Tupl
 			if tupleData.Kind == message.TupleNull {
 				w = istoreNull
 			} else {
-				buf.Write(pgutils.IstoreToArrays(tupleData.Value))
+				pgutils.IstoreToArrays(buf, tupleData.Value)
 				return
 			}
 		}
