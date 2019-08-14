@@ -99,14 +99,8 @@ func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage
 
 		if tblCfg.PgColumns[pgCol.Name].IsIstore() {
 			if columnCfg, ok := tblCfg.ColumnProperties[pgCol.Name]; ok {
-				if columnCfg.FlattenIstore {
-					for i := columnCfg.FlattenIstoreMin; i <= columnCfg.FlattenIstoreMax; i++ {
-						t.chUsedColumns = append(t.chUsedColumns, fmt.Sprintf("%s_%d", chCol.Name, i))
-					}
-				} else {
-					t.chUsedColumns = append(t.chUsedColumns, fmt.Sprintf("%s_%s", chCol.Name, columnCfg.IstoreKeysSuffix))
-					t.chUsedColumns = append(t.chUsedColumns, fmt.Sprintf("%s_%s", chCol.Name, columnCfg.IstoreValuesSuffix))
-				}
+				t.chUsedColumns = append(t.chUsedColumns, fmt.Sprintf("%s_%s", chCol.Name, columnCfg.IstoreKeysSuffix))
+				t.chUsedColumns = append(t.chUsedColumns, fmt.Sprintf("%s_%s", chCol.Name, columnCfg.IstoreValuesSuffix))
 			}
 		} else {
 			t.chUsedColumns = append(t.chUsedColumns, chCol.Name)

@@ -126,26 +126,11 @@ func convertBaseType(buf *bytes.Buffer, baseType string, tupleData *message.Tupl
 	case dbtypes.PgAdjustIstore:
 		fallthrough
 	case dbtypes.PgAdjustBigIstore:
-		if colProp.FlattenIstore {
-			if tupleData.Kind == message.TupleNull {
-				for i := 0; i < colProp.FlattenIstoreMax-colProp.FlattenIstoreMin+1; i++ {
-					if i > 0 {
-						buf.WriteByte('\t')
-					}
-					buf.Write(nullStr)
-				}
-				return
-			} else {
-				buf.Write(pgutils.IstoreValues(tupleData.Value, colProp.FlattenIstoreMin, colProp.FlattenIstoreMax))
-				return
-			}
+		if tupleData.Kind == message.TupleNull {
+			w = istoreNull
 		} else {
-			if tupleData.Kind == message.TupleNull {
-				w = istoreNull
-			} else {
-				pgutils.IstoreToArrays(buf, tupleData.Value)
-				return
-			}
+			pgutils.IstoreToArrays(buf, tupleData.Value)
+			return
 		}
 	case dbtypes.PgAdjustAjBool:
 		fallthrough

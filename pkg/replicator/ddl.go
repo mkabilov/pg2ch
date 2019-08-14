@@ -73,10 +73,6 @@ func (r *Replicator) GenerateChDDL() error {
 
 			if hasColumnCfg {
 				switch {
-				case columnCfg.FlattenIstore:
-					for i := columnCfg.FlattenIstoreMin; i <= columnCfg.FlattenIstoreMax; i++ {
-						chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%d %s", chColName, i, chColType))
-					}
 				case columnCfg.IstoreKeysSuffix != "":
 					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%s Array(Int32)", chColName, columnCfg.IstoreKeysSuffix))
 					if pgCol.BaseType == dbtypes.PgAdjustBigIstore {

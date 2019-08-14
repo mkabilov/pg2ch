@@ -81,9 +81,6 @@ type coalesceValue []byte
 
 // ColumnProperty describes column properties
 type ColumnProperty struct {
-	FlattenIstore      bool          `yaml:"flatten_istore"`
-	FlattenIstoreMin   int           `yaml:"flatten_istore_min"`
-	FlattenIstoreMax   int           `yaml:"flatten_istore_max"`
 	IstoreKeysSuffix   string        `yaml:"istore_keys_suffix"`
 	IstoreValuesSuffix string        `yaml:"istore_values_suffix"`
 	Coalesce           coalesceValue `yaml:"coalesce"`
