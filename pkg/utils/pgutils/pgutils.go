@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
-	"strconv"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx"
 
@@ -115,118 +113,6 @@ func IstoreToArrays(buf *bytes.Buffer, str []byte) []byte {
 	return buf.Bytes()
 }
 
-//TODO check istore key value
-func IstoreValues(str []byte, min, max int) []byte {
-	tmpStr := *bytesBufPool.Get().(*bytes.Buffer)
-	defer func() {
-		tmpStr.Reset()
-		bytesBufPool.Put(&tmpStr)
-	}()
-
-	values := make([][]byte, max-min+1)
-
-	isKey := true
-	isNum := false
-	curKey := 0
-	for _, c := range str {
-		switch c {
-		case '"':
-			if isNum {
-				if isKey {
-					curKey, _ = strconv.Atoi(tmpStr.String())
-				} else {
-					if curKey <= max {
-						values[curKey-min] = make([]byte, tmpStr.Len())
-						copy(values[curKey-min], tmpStr.Bytes())
-					}
-					isKey = true
-				}
-			} else {
-				tmpStr.Reset()
-			}
-			isNum = !isNum
-		case '=':
-			isKey = false
-		case '>':
-		case ' ':
-		case ',':
-		default:
-			tmpStr.WriteByte(c)
-		}
-	}
-	res := make([]byte, 0)
-	for i, v := range values {
-		if i > 0 {
-			res = append(res, '\t')
-		}
-		if v == nil {
-			res = append(res, `\N`...)
-		} else {
-			res = append(res, v...)
-		}
-	}
-
-	return res
-}
-
-func Quote(str string) string {
-	colBuf := *bytesBufPool.Get().(*bytes.Buffer)
-	defer func() {
-		colBuf.Reset()
-		bytesBufPool.Put(&colBuf)
-	}()
-
-	var runeTmp [utf8.UTFMax]byte
-
-	for _, r := range []rune(str) {
-		if strconv.IsPrint(r) {
-			n := utf8.EncodeRune(runeTmp[:], r)
-			colBuf.Write(runeTmp[:n])
-			continue
-		}
-
-		switch r {
-		case '\a':
-			colBuf.WriteString(`\a`)
-		case '\b':
-			colBuf.WriteString(`\b`)
-		case '\f':
-			colBuf.WriteString(`\f`)
-		case '\n':
-			colBuf.WriteString(`\n`)
-		case '\r':
-			colBuf.WriteString(`\r`)
-		case '\t':
-			colBuf.WriteString(`\t`)
-		case '\v':
-			colBuf.WriteString(`\v`)
-		default:
-			switch {
-			case r < ' ':
-				colBuf.WriteString(`\x`)
-				colBuf.WriteByte(lowerhex[byte(r)>>4])
-				colBuf.WriteByte(lowerhex[byte(r)&0xF])
-			case r > utf8.MaxRune:
-				r = 0xFFFD
-				fallthrough
-			case r < 0x10000:
-				colBuf.WriteString(`\u`)
-				for s := 12; s >= 0; s -= 4 {
-					colBuf.WriteByte(lowerhex[r>>uint(s)&0xF])
-				}
-			default:
-				colBuf.WriteString(`\U`)
-				for s := 28; s >= 0; s -= 4 {
-					colBuf.WriteByte(lowerhex[r>>uint(s)&0xF])
-				}
-			}
-		}
-
-	}
-
-	return colBuf.String()
-}
-
 func decodeDigit(c byte, onlyOctal bool) (byte, bool) {
 	switch {
 	case c >= '0' && c <= '7':
@@ -250,10 +136,10 @@ func DecodeCopyToTuples(in []byte) (message.Row, error) {
 	result := make(message.Row, 0)
 
 	tupleKind := message.TupleText
-	colBuf := *bytesBufPool.Get().(*bytes.Buffer)
+	colBuf := bytesBufPool.Get().(*bytes.Buffer)
 	defer func() {
 		colBuf.Reset()
-		bytesBufPool.Put(&colBuf)
+		bytesBufPool.Put(colBuf)
 	}()
 
 	for i, n := 0, len(in); i < n; i++ {

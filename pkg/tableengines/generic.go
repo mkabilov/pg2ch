@@ -29,10 +29,9 @@ const (
 )
 
 var (
-	zeroStr            = []byte("0")
-	oneStr             = []byte("1")
-	minusOneStr        = []byte("-1")
-	columnDelimiterStr = []byte("\t")
+	zeroStr     = []byte("0")
+	oneStr      = []byte("1")
+	minusOneStr = []byte("-1")
 )
 
 type chTuple []byte
@@ -278,6 +277,14 @@ func (t *genericTable) FlushToMainTable() error {
 
 func (t *genericTable) convertRow(row message.Row) chTuple {
 	var buf bytes.Buffer
+	bufSize := 0
+	for _, v := range row {
+		bufSize += len(v.Value) + 1 // and delimiter
+	}
+	if t.cfg.GenerationColumn != "" {
+		bufSize += 9 // for generationID + delimiter
+	}
+	buf.Grow(bufSize)
 
 	for colId, col := range t.tupleColumns {
 		if _, ok := t.columnMapping[col.Name]; !ok {

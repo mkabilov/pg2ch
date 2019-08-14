@@ -28,6 +28,10 @@ var (
 			istore:   []byte(`"-1"=>"-2"`),
 			expected: []byte("[-1]\t[-2]"),
 		},
+		{
+			istore:   []byte(`"-1"=>"-2","0"=>"0","42"=>"40"`),
+			expected: []byte("[-1,0,42]\t[-2,0,40]"),
+		},
 	}
 
 	decodeTuplesTest = []struct {
