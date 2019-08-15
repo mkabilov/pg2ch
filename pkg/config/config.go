@@ -128,6 +128,7 @@ type Config struct {
 	Tables                 map[PgTableName]*Table `yaml:"tables"`
 	InactivityFlushTimeout time.Duration          `yaml:"inactivity_flush_timeout"`
 	PersStoragePath        string                 `yaml:"db_path"`
+	PersStorageType        string                 `yaml:"db_type"`
 	RedisBind              string                 `yaml:"redis_bind"`
 	PprofBind              string                 `yaml:"pprof_bind"`
 	SyncWorkers            int                    `yaml:"sync_workers"`
@@ -269,11 +270,11 @@ func New(filepath string) (*Config, error) {
 		return nil, fmt.Errorf("could not decode yaml: %v", err)
 	}
 
-	if cfg.Postgres.PublicationName == "" {
+	if len(cfg.Postgres.PublicationName) == 0 {
 		return nil, fmt.Errorf("publication name is not specified")
 	}
 
-	if cfg.Postgres.ReplicationSlotName == "" {
+	if len(cfg.Postgres.ReplicationSlotName) == 0 {
 		return nil, fmt.Errorf("replication slot name is not specified")
 	}
 
@@ -285,7 +286,7 @@ func New(filepath string) (*Config, error) {
 		cfg.Postgres.Port = DefaultPostgresPort
 	}
 
-	if cfg.Postgres.Host == "" {
+	if len(cfg.Postgres.Host) == 0 {
 		cfg.Postgres.Host = defaultPostgresHost
 	}
 
@@ -293,12 +294,16 @@ func New(filepath string) (*Config, error) {
 		cfg.ClickHouse.Port = defaultClickHousePort
 	}
 
-	if cfg.ClickHouse.Host == "" {
+	if len(cfg.ClickHouse.Host) == 0 {
 		cfg.ClickHouse.Host = defaultClickHouseHost
 	}
 
-	if cfg.PersStoragePath == "" {
+	if len(cfg.PersStoragePath) == 0 {
 		return nil, fmt.Errorf("db_filepath is not set")
+	}
+
+	if len(cfg.PersStorageType) == 0 {
+		cfg.PersStorageType = "diskv"
 	}
 
 	if cfg.SyncWorkers == 0 {

@@ -25,35 +25,17 @@ func (r *Replicator) startRedisServer() {
 				}
 			case "lsn":
 				conn.WriteString(fmt.Sprintf("last final LSN: %v", r.consumer.CurrentLSN().String()))
-			case "set":
-				if len(cmd.Args) != 3 {
-					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-					return
-				}
-				key := string(cmd.Args[1])
-				value := cmd.Args[2]
-
-				if strings.HasPrefix(key, config.TableLSNKeyPrefix) {
-					conn.WriteString(fmt.Sprintf("ERR: %s", forbiddenError))
-					return
-				}
-
-				if err := r.persStorage.Write(key, value); err != nil {
-					conn.WriteString(fmt.Sprintf("ERR: %s", err))
-				} else {
-					conn.WriteString("OK")
-				}
 			case "get":
 				if len(cmd.Args) != 2 {
 					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 					return
 				}
 				key := config.TableLSNKeyPrefix + string(cmd.Args[1])
-				value, err := r.persStorage.Read(key)
+				lsn, err := r.persStorage.ReadLSN(key)
 				if err != nil {
 					conn.WriteNull()
 				} else {
-					conn.WriteBulk(value)
+					conn.WriteString(lsn.String())
 				}
 			case "keys":
 				for key := range r.persStorage.Keys(nil) {

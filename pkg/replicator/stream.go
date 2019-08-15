@@ -47,7 +47,10 @@ func (r *Replicator) getTable(oid dbtypes.OID) (chTbl clickHouseTable, err error
 	}
 
 	if tblKey := tblName.KeyName(); r.persStorage.Has(tblKey) {
-		if err := tblLSN.Parse(r.persStorage.ReadString(tblKey)); err != nil {
+		var err error
+		tblLSN, err = r.persStorage.ReadLSN(tblKey)
+
+		if err != nil {
 			r.logger.Warnf("incorrect lsn stored for %q table: %v", tblName, err)
 		}
 	}
@@ -71,7 +74,7 @@ func (r *Replicator) getTable(oid dbtypes.OID) (chTbl clickHouseTable, err error
 
 func (r *Replicator) incrementGeneration() {
 	r.generationID++
-	if err := r.persStorage.WriteString(generationIDKey, fmt.Sprintf("%v", r.generationID)); err != nil {
+	if err := r.persStorage.WriteUint(generationIDKey, r.generationID); err != nil {
 		r.logger.Warnf("could not save generation id: %v", err)
 	}
 }

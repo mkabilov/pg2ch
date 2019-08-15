@@ -98,8 +98,11 @@ func (r *Replicator) GetTablesToSync() ([]config.PgTableName, error) {
 			continue
 		}
 
-		if r.persStorage.Has(tblName.KeyName()) && r.persStorage.ReadString(tblName.KeyName()) != dbtypes.InvalidLSN.String() {
-			continue
+		if r.persStorage.Has(tblName.KeyName()) {
+			lsn, _ := r.persStorage.ReadLSN(tblName.KeyName())
+			if lsn != dbtypes.InvalidLSN {
+				continue
+			}
 		}
 
 		syncTables = append(syncTables, tblName)

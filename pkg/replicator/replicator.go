@@ -7,13 +7,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"sync"
 	"syscall"
 
 	"github.com/jackc/pgx"
 	"github.com/jackc/pgx/log/zapadapter"
-	"github.com/peterbourgon/diskv"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
@@ -23,6 +21,7 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/tableengines"
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
+	"github.com/mkabilov/pg2ch/pkg/utils/kvstorage"
 )
 
 const (
@@ -57,7 +56,7 @@ type Replicator struct {
 	chConn        *chutils.CHConn
 	pgDeltaConn   *pgx.Conn
 	pgxConnConfig pgx.ConnConfig
-	persStorage   *diskv.Diskv
+	persStorage   kvstorage.KVStorage
 	pprofHttp     *http.Server
 
 	chTables map[config.PgTableName]clickHouseTable
@@ -145,10 +144,7 @@ func (r *Replicator) readSlotLSN() (dbtypes.LSN, error) {
 }
 
 func (r *Replicator) Init() error {
-	r.persStorage = diskv.New(diskv.Options{
-		BasePath:     r.cfg.PersStoragePath,
-		CacheSizeMax: 100 * 1024 * 1024, // 100MB
-	})
+	r.persStorage = kvstorage.New(r.cfg.PersStorageType, r.cfg.PersStoragePath)
 
 	err := r.pgConnect()
 	if err != nil {
@@ -333,16 +329,17 @@ func (r *Replicator) initTables() error {
 }
 
 func (r *Replicator) readGenerationID() error {
+	var err error
+
 	if !r.persStorage.Has(generationIDKey) {
 		return nil
 	}
 
-	genID, err := strconv.ParseUint(r.persStorage.ReadString(generationIDKey), 10, 32)
+	r.generationID, err = r.persStorage.ReadUint(generationIDKey)
 	if err != nil {
 		r.logger.Warnf("incorrect value for generation_id in the persistent storage: %v", err)
 	}
 
-	r.generationID = genID
 	r.logger.Debugf("generation ID: %v", r.generationID)
 
 	return nil

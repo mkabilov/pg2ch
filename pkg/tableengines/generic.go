@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/peterbourgon/diskv"
 	"go.uber.org/zap"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
@@ -18,6 +17,7 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils/bulkupload"
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils/chload"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
+	"github.com/mkabilov/pg2ch/pkg/utils/kvstorage"
 )
 
 // Generic table is a "parent" struct for all the table engines
@@ -65,13 +65,13 @@ type genericTable struct {
 
 	bulkUploader    bulkupload.BulkUploader
 	syncSnapshotLSN dbtypes.LSN // LSN of the initial copy snapshot, protected via table mutex
-	persStorage     *diskv.Diskv
+	persStorage     kvstorage.KVStorage
 	logger          *zap.SugaredLogger
 
 	txFinalLSN dbtypes.LSN
 }
 
-func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage *diskv.Diskv,
+func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage kvstorage.KVStorage,
 	conn *chutils.CHConn, tblCfg *config.Table, genID *uint64) genericTable {
 	t := genericTable{
 		Mutex:         &sync.Mutex{},
@@ -227,10 +227,7 @@ func (t *genericTable) attemptFlushTblBuffer() error {
 func (t *genericTable) saveLSN(lsn dbtypes.LSN) error {
 	t.logger.Debugf("lsn %s saved", lsn)
 
-	return t.persStorage.WriteStream(
-		t.cfg.PgTableName.KeyName(),
-		bytes.NewReader(lsn.FormattedBytes()),
-		true)
+	return t.persStorage.WriteLSN(t.cfg.PgTableName.KeyName(), lsn)
 }
 
 func (t *genericTable) flush() error {

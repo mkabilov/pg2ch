@@ -199,8 +199,9 @@ func (r *Replicator) minLSN() dbtypes.LSN {
 			continue
 		}
 
-		if err := lsn.Parse(r.persStorage.ReadString(key)); err != nil {
-			r.logger.Warnf("could not parse lsn for %q key: %v", key, err)
+		lsn, err := r.persStorage.ReadLSN(key)
+		if err != nil {
+			r.logger.Warnf("could not read lsn for %q key: %v", key, err)
 			continue
 		}
 
