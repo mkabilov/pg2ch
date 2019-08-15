@@ -47,6 +47,8 @@ func (t *genericTable) InitSync() error {
 	return nil
 }
 
+// Sync the table. Saves PostgreSQL snapshot LSN and loads the buffered data
+// after this snapshot to the table.
 func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, w io.Writer) error {
 	t.syncSnapshotLSN = snapshotLSN
 

@@ -56,6 +56,7 @@ func (c *BulkUpload) BulkUpload(tableName config.ChTableName, columns []string) 
 	return c.conn.PerformInsert(tableName, columns, c.pipeReader)
 }
 
+//Prepare pipes
 func (c *BulkUpload) Start() error {
 	var err error
 

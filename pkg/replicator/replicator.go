@@ -196,6 +196,13 @@ func (r *Replicator) Run() error {
 	r.consumer = consumer.New(consumerCtx, r.logger, r.errCh, r.pgxConnConfig,
 		r.cfg.Postgres.ReplicationSlotName, r.cfg.Postgres.PublicationName, r.txFinalLSN)
 
+	// we can exit from this function before proper canceling, take care of it
+	defer func() {
+		if r.consumer != nil {
+			consumerCancel()
+		}
+	}()
+
 	tablesToSync, err := r.GetTablesToSync()
 	if err != nil {
 		return fmt.Errorf("could not get tables to sync: %v", err)
@@ -245,6 +252,7 @@ func (r *Replicator) Run() error {
 	consumerCancel()
 	r.logger.Debugf("waiting for consumer to finish")
 	r.consumer.Wait()
+	r.consumer = nil
 
 	r.cancel()
 	r.logger.Debugf("waiting for go routintes to finish")
