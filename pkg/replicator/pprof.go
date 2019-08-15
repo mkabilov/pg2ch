@@ -8,7 +8,7 @@ import (
 func (r *Replicator) startPprof() {
 	defer r.wg.Done()
 	mux := http.NewServeMux()
-	r.logger.Debugf("starting pprof server")
+	r.logger.Debugf("starting pprof server: %v", r.cfg.PprofBind)
 
 	mux.Handle("/debug/pprof/", http.HandlerFunc(pprof.Index))
 	mux.Handle("/debug/pprof/cmdline", http.HandlerFunc(pprof.Cmdline))

@@ -97,8 +97,10 @@ func BenchmarkIstoreToArrays(b *testing.B) {
 }
 
 func TestDecodeCopyToTuples(t *testing.T) {
+	var buf bytes.Buffer
+
 	for i, tt := range decodeTuplesTest {
-		got, err := DecodeCopyToTuples(tt.row)
+		got, err := DecodeCopyToTuples(&buf, tt.row)
 		if err != nil {
 			t.Fatalf("%d: Unexpected error: %v", i, err)
 		}

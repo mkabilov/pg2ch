@@ -58,7 +58,8 @@ type genericTable struct {
 
 	inSync            bool // protected via table mutex
 	syncedRows        uint64
-	rowsToSync        uint64
+	liveTuples        uint64
+	syncBuf           *bytes.Buffer
 	syncLastBatchTime time.Time //to calculate rate
 	auxTblRowID       uint64
 
@@ -74,6 +75,7 @@ func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage
 	conn *chutils.CHConn, tblCfg *config.Table, genID *uint64) genericTable {
 	t := genericTable{
 		Mutex:         &sync.Mutex{},
+		syncBuf:       &bytes.Buffer{},
 		ctx:           ctx,
 		chLoader:      chload.New(conn),
 		cfg:           tblCfg,

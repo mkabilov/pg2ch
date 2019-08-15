@@ -18,7 +18,7 @@ const (
 )
 
 func (t *genericTable) genSyncWrite(p []byte) error {
-	row, err := pgutils.DecodeCopyToTuples(p)
+	row, err := pgutils.DecodeCopyToTuples(t.syncBuf, p)
 	if err != nil {
 		return fmt.Errorf("could not parse copy string: %v", err)
 	}
@@ -55,13 +55,13 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, w io.Write
 	if tblLiveTuples, err := pgutils.PgStatLiveTuples(pgTx, t.cfg.PgTableName); err != nil {
 		t.logger.Warnf("genSync: could not get approximate number of rows: %v", err)
 	} else {
-		t.rowsToSync = tblLiveTuples
+		t.liveTuples = tblLiveTuples
 	}
 
 	t.logger.Infow("genSync: copy from postgresql to clickhouse table started",
 		"postgres", t.cfg.PgTableName.String(),
 		"clickhouse", t.cfg.ChMainTable,
-		"rows", t.rowsToSync,
+		"rows", t.liveTuples,
 		"snapshotLSN", snapshotLSN.Dec())
 	t.syncedRows = 0
 
@@ -132,6 +132,7 @@ func (t *genericTable) postSync() error {
 	if err := t.saveLSN(); err != nil {
 		return fmt.Errorf("could not save lsn to file: %v", err)
 	}
+	t.syncBuf = nil
 
 	return nil
 }
@@ -143,11 +144,11 @@ func (t *genericTable) printSyncProgress() {
 			left uint64
 		)
 		speed := float64(syncProgressBatch) / time.Since(t.syncLastBatchTime).Seconds()
-		if t.rowsToSync >= t.syncedRows {
-			left = t.rowsToSync - t.syncedRows
+		if t.liveTuples >= t.syncedRows {
+			left = t.liveTuples - t.syncedRows
 		}
 
-		if t.syncedRows < t.rowsToSync {
+		if t.syncedRows < t.liveTuples {
 			eta = time.Second * time.Duration(left/uint64(speed))
 		}
 

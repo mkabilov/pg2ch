@@ -132,16 +132,11 @@ func decodeOctDigit(c byte) (byte, bool) { return decodeDigit(c, true) }
 func decodeHexDigit(c byte) (byte, bool) { return decodeDigit(c, false) }
 
 // DecodeCopyToTuples decodes line from the text pg copy command into a array of tuples
-func DecodeCopyToTuples(in []byte) (message.Row, error) {
+func DecodeCopyToTuples(colBuf *bytes.Buffer, in []byte) (message.Row, error) {
+	colBuf.Reset()
 	result := make(message.Row, 0)
 
 	tupleKind := message.TupleText
-	colBuf := bytesBufPool.Get().(*bytes.Buffer)
-	defer func() {
-		colBuf.Reset()
-		bytesBufPool.Put(colBuf)
-	}()
-
 	for i, n := 0, len(in); i < n; i++ {
 		if in[i] == '\t' {
 			t := make([]byte, colBuf.Len())
