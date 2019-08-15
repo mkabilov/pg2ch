@@ -224,12 +224,12 @@ func (t *genericTable) attemptFlushTblBuffer() error {
 	return nil
 }
 
-func (t *genericTable) saveLSN() error {
-	t.logger.Debugf("lsn %s saved", t.txFinalLSN)
+func (t *genericTable) saveLSN(lsn dbtypes.LSN) error {
+	t.logger.Debugf("lsn %s saved", lsn)
 
 	return t.persStorage.WriteStream(
 		t.cfg.PgTableName.KeyName(),
-		bytes.NewReader(t.txFinalLSN.FormattedBytes()),
+		bytes.NewReader(lsn.FormattedBytes()),
 		true)
 }
 
@@ -242,7 +242,7 @@ func (t *genericTable) flush() error {
 	if t.cfg.ChBufferTable.IsEmpty() || t.memBufferFlushCnt == 0 {
 		t.logger.Debugf("Flush to main table: nothing to flush")
 		if !t.inSync {
-			if err := t.saveLSN(); err != nil {
+			if err := t.saveLSN(t.txFinalLSN); err != nil {
 				return fmt.Errorf("could not save lsn to file: %v", err)
 			}
 		}
@@ -259,7 +259,7 @@ func (t *genericTable) flush() error {
 	}
 
 	if !t.inSync {
-		if err := t.saveLSN(); err != nil {
+		if err := t.saveLSN(t.txFinalLSN); err != nil {
 			return fmt.Errorf("could not save lsn to file: %v", err)
 		}
 	}

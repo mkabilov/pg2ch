@@ -104,7 +104,10 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, w io.Write
 func (t *genericTable) postSync() error {
 	t.Lock()
 	defer t.Unlock()
-	defer func() { t.inSync = false }()
+	defer func() {
+		t.inSync = false
+		t.syncBuf = nil
+	}()
 
 	if err := t.flushMemBuffer(); err != nil {
 		return fmt.Errorf("could not flush buffer: %v", err)
@@ -129,10 +132,9 @@ func (t *genericTable) postSync() error {
 		}
 	}
 
-	if err := t.saveLSN(); err != nil {
+	if err := t.saveLSN(t.syncSnapshotLSN); err != nil {
 		return fmt.Errorf("could not save lsn to file: %v", err)
 	}
-	t.syncBuf = nil
 
 	return nil
 }
