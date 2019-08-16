@@ -88,12 +88,14 @@ func (r *Replicator) setReplicaIdentity(pgTableNames []config.PgTableName) error
 				r.logger.Infof("full replica identity is set for %v table", tableName)
 				processedTables++
 				pgTableNames[i] = processedTblName
+				if err := tx.Commit(); err != nil {
+					return fmt.Errorf("could not commit tx: %v", err)
+				}
 			} else {
 				r.logger.Infof("could not set replica identity for %v table: %v", tableName, err)
-			}
-
-			if err := tx.Commit(); err != nil {
-				return fmt.Errorf("could not commit tx: %v", err)
+				if err := tx.Rollback(); err != nil {
+					return fmt.Errorf("could not rollback tx: %v", err)
+				}
 			}
 		}
 	}
@@ -127,12 +129,14 @@ func (r *Replicator) addToPublication(pgTableNames []config.PgTableName) error {
 				r.logger.Infof("table %v added to %v publication", tableName, r.cfg.Postgres.PublicationName)
 				processedTables++
 				pgTableNames[i] = processedTblName
+				if err := tx.Commit(); err != nil {
+					return fmt.Errorf("could not commit tx: %v", err)
+				}
 			} else {
 				r.logger.Infof("could not add table %v to the publication: %v", tableName, err)
-			}
-
-			if err := tx.Commit(); err != nil {
-				return fmt.Errorf("could not commit tx: %v", err)
+				if err := tx.Rollback(); err != nil {
+					return fmt.Errorf("could not rollback tx: %v", err)
+				}
 			}
 		}
 	}
