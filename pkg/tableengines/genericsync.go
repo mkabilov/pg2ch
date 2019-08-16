@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx"
+	"gopkg.in/djherbis/buffer.v1"
 
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
@@ -61,11 +62,11 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, w io.Write
 	t.logger.Infow("genSync: copy from postgresql to clickhouse table started",
 		"postgres", t.cfg.PgTableName.String(),
 		"clickhouse", t.cfg.ChMainTable,
-		"rows", t.liveTuples,
+		"liveTuples", t.liveTuples,
 		"snapshotLSN", snapshotLSN.Dec())
 	t.syncedRows = 0
 
-	if err := t.bulkUploader.Start(); err != nil {
+	if err := t.bulkUploader.Init(buffer.New(10 * 1024 * 1024)); err != nil {
 		return fmt.Errorf("could not init bulkuploader: %v", err)
 	}
 

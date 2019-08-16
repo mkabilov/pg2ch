@@ -3,7 +3,6 @@ package bulkupload
 import (
 	"compress/gzip"
 	"fmt"
-	"sync"
 
 	"gopkg.in/djherbis/buffer.v1"
 	"gopkg.in/djherbis/nio.v2"
@@ -12,15 +11,8 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 )
 
-var (
-	bufPool = sync.Pool{
-		New: func() interface{} {
-			return buffer.New(1 * 1024 * 1024)
-		}}
-)
-
 type BulkUploader interface {
-	Start() error
+	Init(buffer.BufferAt) error
 	Finish() error
 	Write(p []byte) error
 	BulkUpload(name config.ChTableName, columns []string) error
@@ -31,7 +23,6 @@ type BulkUpload struct {
 	pipeWriter   *nio.PipeWriter
 	pipeReader   *nio.PipeReader
 	gzipWriter   *gzip.Writer
-	buf          buffer.Buffer
 	tableName    string
 	columns      []string
 	gzipBufBytes int
@@ -48,20 +39,14 @@ func New(conn *chutils.CHConn, gzipBufSize int) *BulkUpload {
 }
 
 func (c *BulkUpload) BulkUpload(tableName config.ChTableName, columns []string) error {
-	defer func() {
-		c.buf.Reset()
-		bufPool.Put(c.buf)
-	}()
-
 	return c.conn.PerformInsert(tableName, columns, c.pipeReader)
 }
 
 //Prepare pipes
-func (c *BulkUpload) Start() error {
+func (c *BulkUpload) Init(buf buffer.BufferAt) error {
 	var err error
 
-	c.buf = bufPool.Get().(buffer.Buffer)
-	c.pipeReader, c.pipeWriter = nio.Pipe(c.buf)
+	c.pipeReader, c.pipeWriter = nio.Pipe(buf)
 	c.gzipWriter, err = gzip.NewWriterLevel(c.pipeWriter, gzip.BestSpeed) // TODO: move gzip level to config
 	if err != nil {
 		return err
