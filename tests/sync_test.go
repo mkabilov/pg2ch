@@ -183,18 +183,29 @@ func (ch *CHLink) getCount(t *testing.T, query string) int {
 }
 
 func TestBasicSync(t *testing.T) {
-	db_path, err := ioutil.TempDir("", "pg2ch_test_dat")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer os.RemoveAll(db_path)
-
 	node := pqt.MakePostgresNode("master")
 	defer node.Stop()
 
 	config.DefaultPostgresPort = uint16(node.Port)
 	cfg, err := config.New(testConfigFile)
-	cfg.PersStoragePath = db_path
+	if cfg.PersStorageType == "diskv" {
+		db_path, err := ioutil.TempDir("", "pg2ch_diskv_dat")
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer os.RemoveAll(db_path)
+
+		cfg.PersStoragePath = db_path
+	} else if cfg.PersStorageType == "mmap" {
+		tmpfile, err := ioutil.TempFile("", "pg2ch_mmap_dat")
+		fmt.Println(tmpfile.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.PersStoragePath = tmpfile.Name()
+	} else {
+		t.Fatal("unknown db type")
+	}
 	ch.conn = chutils.MakeChConnection(&cfg.ClickHouse)
 
 	if err != nil {
@@ -237,6 +248,7 @@ max_logical_replication_workers = 10
 		repl = replicator.New(cfg)
 		err := repl.Run()
 		if err != nil {
+			stopCh <- true
 			t.Fatal("could not start replicator: ", err)
 		}
 		stopCh <- true

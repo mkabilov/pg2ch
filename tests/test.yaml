@@ -35,4 +35,5 @@ postgres:
     publication_name: pg2ch_pub
 
 db_path: /tmp/db
+db_type: diskv
 loglevel: error

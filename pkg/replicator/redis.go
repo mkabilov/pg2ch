@@ -38,7 +38,7 @@ func (r *Replicator) startRedisServer() {
 					conn.WriteString(lsn.String())
 				}
 			case "keys":
-				for key := range r.persStorage.Keys(nil) {
+				for _, key := range r.persStorage.Keys() {
 					if !strings.HasPrefix(key, config.TableLSNKeyPrefix) {
 						continue
 					}

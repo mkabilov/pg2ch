@@ -144,9 +144,13 @@ func (r *Replicator) readSlotLSN() (dbtypes.LSN, error) {
 }
 
 func (r *Replicator) Init() error {
-	r.persStorage = kvstorage.New(r.cfg.PersStorageType, r.cfg.PersStoragePath)
+	var err error
+	r.persStorage, err = kvstorage.New(r.cfg.PersStorageType, r.cfg.PersStoragePath)
+	if err != nil {
+		return err
+	}
 
-	err := r.pgDeltaConnect()
+	err = r.pgDeltaConnect()
 	if err != nil {
 		return fmt.Errorf("could not connect to postgresql: %v", err)
 	}
@@ -164,11 +168,11 @@ func (r *Replicator) Init() error {
 		}
 	}
 
-	if err := r.readGenerationID(); err != nil {
+	if err = r.readGenerationID(); err != nil {
 		return fmt.Errorf("could not get start lsn positions: %v", err)
 	}
 
-	if err := r.initTables(); err != nil {
+	if err = r.initTables(); err != nil {
 		return fmt.Errorf("could not init tables: %v", err)
 	}
 

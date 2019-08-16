@@ -12,18 +12,19 @@ type KVStorage interface {
 	WriteLSN(key string, lsn dbtypes.LSN) error
 	ReadUint(key string) (uint64, error)
 	WriteUint(key string, val uint64) error
-	Keys(cancel <-chan struct{}) <-chan string
+	Keys() []string
 	Erase(key string) error
 }
-type newStorageFunc = func(string) KVStorage
+type newStorageFunc = func(string) (KVStorage, error)
 
 var (
 	storages = make(map[string]newStorageFunc)
 )
 
-func New(stype string, location string) KVStorage {
+func New(stype string, location string) (storage KVStorage, err error) {
 	if f, ok := storages[stype]; ok {
-		return f(location)
+		storage, err = f(location)
+		return
 	}
 
 	panic(fmt.Sprintf("could not find %s type storage", stype))

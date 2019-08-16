@@ -14,12 +14,12 @@ type diskvStorage struct {
 	storage  *diskv.Diskv
 }
 
-func newDiskvStorage(location string) KVStorage {
+func newDiskvStorage(location string) (KVStorage, error) {
 	storage := diskv.New(diskv.Options{
 		BasePath:     location,
 		CacheSizeMax: 100 * 1024 * 1024, // 100MB
 	})
-	return &diskvStorage{storage: storage}
+	return &diskvStorage{storage: storage}, nil
 }
 
 func init() {
@@ -60,8 +60,12 @@ func (s *diskvStorage) WriteUint(key string, val uint64) error {
 	return s.storage.WriteString(key, fmt.Sprintf("%v", val))
 }
 
-func (d *diskvStorage) Keys(cancel <-chan struct{}) <-chan string {
-	return d.storage.Keys(cancel)
+func (d *diskvStorage) Keys() []string {
+	var result []string
+	for key := range d.storage.Keys(nil) {
+		result = append(result, key)
+	}
+	return result
 }
 
 func (d *diskvStorage) Erase(key string) error {

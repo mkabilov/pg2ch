@@ -189,7 +189,7 @@ func (r *Replicator) pgBegin(pgxConn *pgx.Conn) (*pgx.Tx, error) {
 func (r *Replicator) minLSN() dbtypes.LSN {
 	result := dbtypes.InvalidLSN
 
-	for key := range r.persStorage.Keys(nil) {
+	for _, key := range r.persStorage.Keys() {
 		var (
 			tblName config.PgTableName
 			lsn     dbtypes.LSN

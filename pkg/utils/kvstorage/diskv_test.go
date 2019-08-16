@@ -35,10 +35,7 @@ func testStorage(t *testing.T, storage kvstorage.KVStorage) {
 	assert.False(storage.Has("key1"))
 	storage.WriteUint("key3", 4000000)
 
-	var keys []string
-	for key := range storage.Keys(nil) {
-		keys = append(keys, key)
-	}
+	keys := storage.Keys()
 	sort.Strings(keys)
 	assert.Equal("key2", keys[0])
 	assert.Equal("key3", keys[1])
