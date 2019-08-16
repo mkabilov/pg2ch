@@ -146,11 +146,11 @@ func (r *Replicator) readSlotLSN() (dbtypes.LSN, error) {
 func (r *Replicator) Init() error {
 	r.persStorage = kvstorage.New(r.cfg.PersStorageType, r.cfg.PersStoragePath)
 
-	err := r.pgConnect()
+	err := r.pgDeltaConnect()
 	if err != nil {
 		return fmt.Errorf("could not connect to postgresql: %v", err)
 	}
-	defer r.pgDisconnect()
+	defer r.pgDeltaDisconnect()
 
 	if err := r.pgCheck(); err != nil {
 		return err

@@ -81,10 +81,10 @@ func (r *Replicator) GetTablesToSync() ([]config.PgTableName, error) {
 	var err error
 	syncTables := make([]config.PgTableName, 0)
 
-	if err := r.pgConnect(); err != nil {
+	if err := r.pgDeltaConnect(); err != nil {
 		return nil, fmt.Errorf("could not connect: %v", err)
 	}
-	defer r.pgDisconnect()
+	defer r.pgDeltaDisconnect()
 
 	tx, err := r.pgBegin(r.pgDeltaConn)
 	if err != nil {

@@ -15,7 +15,7 @@ var orderByCols = map[string]string{}
 //GenerateChDDL generates clickhouse table DDLs
 //TODO: refactor me
 func (r *Replicator) GenerateChDDL() error {
-	if err := r.pgConnect(); err != nil {
+	if err := r.pgDeltaConnect(); err != nil {
 		return fmt.Errorf("could not connect to pg: %v", err)
 	}
 

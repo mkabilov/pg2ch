@@ -22,7 +22,7 @@ func (r *Replicator) fetchTableOID(tblName config.PgTableName, tx *pgx.Tx) (dbty
 	return oid, nil
 }
 
-func (r *Replicator) pgConnect() error {
+func (r *Replicator) pgDeltaConnect() error {
 	var err error
 
 	r.pgDeltaConn, err = pgx.Connect(r.pgxConnConfig)
@@ -39,7 +39,7 @@ func (r *Replicator) pgConnect() error {
 	return nil
 }
 
-func (r *Replicator) pgDisconnect() {
+func (r *Replicator) pgDeltaDisconnect() {
 	if err := r.pgDeltaConn.Close(); err != nil {
 		r.logger.Warnf("could not close connection to postgresql: %v", err)
 	}
