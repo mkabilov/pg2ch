@@ -1,3 +1,5 @@
+// +build linux freebsd openbsd netbsd dragonfly darwin
+
 package kvstorage
 
 // #include <sys/file.h>
@@ -17,28 +19,65 @@ import (
 
 type mmapStorage struct {
 	lock     sync.RWMutex
-	fd       int
+	location string
 	data     []byte
 	size     int
 	indexMap map[string]int
 }
 
 var (
-	maxKeySize  = 248 /* 1 byte for size, and other part for text */
-	dataSize    = 8
-	blockSize   = maxKeySize + dataSize /* 256 */
-	minFileSize = 1024 * 5 * blockSize  /* about 5 thousands keys */
+	MinKeysCount = 100
+	blockSize    = 256
+	dataSize     = 8 // uint64
+	maxKeySize   = blockSize - dataSize
+	minFileSize  = MinKeysCount * blockSize
 )
+
+func openStorage(location string, fileSize int, flags int, truncate bool) (*os.File, error) {
+	file, err := os.OpenFile(location, flags, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("could not open storage file: %v", err)
+	}
+
+	retCode := C.flock(C.int(file.Fd()), C.LOCK_EX)
+	if retCode < 0 {
+		return nil, fmt.Errorf("could not lock database file: %s", location)
+	}
+
+	if truncate {
+		if err := file.Truncate(int64(fileSize)); err != nil {
+			return nil, fmt.Errorf("truncate on %s failed: %v", location, err)
+		}
+	}
+
+	retCode = C.flock(C.int(file.Fd()), C.LOCK_UN)
+	if retCode < 0 {
+		return nil, fmt.Errorf("could not unlock database file: %s", location)
+	}
+
+	return file, nil
+}
+
+func mapFile(file *os.File, fileSize int) ([]byte, error) {
+	var data, err = syscall.Mmap(int(file.Fd()), 0, fileSize,
+		syscall.PROT_WRITE|syscall.PROT_READ, syscall.MAP_SHARED)
+
+	if err != nil {
+		return nil, fmt.Errorf("could not map storage file: %v", err)
+	}
+	return data, nil
+}
 
 func newMmapStorage(location string) (KVStorage, error) {
 	var (
+		file     *os.File
 		fileSize      = minFileSize
 		isNew    bool = false
 	)
 
-	flags := syscall.O_RDWR | syscall.O_CLOEXEC
+	flags := os.O_RDWR | unix.O_CLOEXEC
 	if f, err := os.Stat(location); os.IsNotExist(err) {
-		flags |= syscall.O_CREAT
+		flags |= os.O_CREATE
 		isNew = true
 	} else if err != nil {
 		return nil, fmt.Errorf("could not stat file %s: %v", location, err)
@@ -50,25 +89,19 @@ func newMmapStorage(location string) (KVStorage, error) {
 		}
 	}
 
-	fd, err := syscall.Open(location, flags, syscall.S_IRWXU)
+	file, err := openStorage(location, fileSize, flags, isNew)
 	if err != nil {
-		return nil, fmt.Errorf("could not open database: %v", err)
+		return nil, err
+	}
+	// we can safely close after mapping
+	defer file.Close()
+
+	data, err := mapFile(file, fileSize)
+	if err != nil {
+		return nil, err
 	}
 
-	retCode := C.flock(C.int(fd), C.LOCK_EX)
-	if retCode < 0 {
-		return nil, fmt.Errorf("could not lock database file: %s", location)
-	}
-
-	if isNew {
-		if err := syscall.Ftruncate(fd, int64(fileSize)); err != nil {
-			return nil, fmt.Errorf("truncate on %s failed: %v", location, err)
-		}
-	}
-
-	var data []byte
 	indexMap := make(map[string]int)
-	data, err = syscall.Mmap(fd, 0, fileSize, syscall.PROT_WRITE|syscall.PROT_READ, syscall.MAP_SHARED)
 	if !isNew {
 		for pos := 0; pos < fileSize; pos += blockSize {
 			if data[pos] == 0x00 {
@@ -86,7 +119,7 @@ func newMmapStorage(location string) (KVStorage, error) {
 		unix.Msync(data, unix.MS_SYNC)
 	}
 	return &mmapStorage{
-		fd:       fd,
+		location: location,
 		data:     data,
 		size:     fileSize,
 		indexMap: indexMap,
@@ -125,8 +158,30 @@ func (s *mmapStorage) findFreePos() (int, error) {
 		}
 	}
 
-	/* TODO: extend file */
-	return 0, errors.New("could not find free position in storage")
+	err := syscall.Munmap(s.data)
+	if err != nil {
+		return 0, fmt.Errorf("could not unmap storage file: %s", err)
+	}
+
+	oldSize := s.size
+	s.size += minFileSize /* new portion of keys */
+	file, err := openStorage(s.location, s.size, syscall.O_RDWR, true)
+	if err != nil {
+		return 0, fmt.Errorf("could not extend file: %v", err)
+	}
+	defer file.Close()
+
+	s.data, err = mapFile(file, s.size)
+	if err != nil {
+		return 0, fmt.Errorf("could not map extended file: %v", err)
+	}
+
+	// fill with zeroes
+	for pos := oldSize; pos < s.size; pos += 1 {
+		s.data[pos] = 0x00
+	}
+	unix.Msync(s.data, unix.MS_SYNC)
+	return oldSize, nil
 }
 
 func (s *mmapStorage) WriteUint(key string, val uint64) error {
@@ -184,6 +239,18 @@ func (s *mmapStorage) Keys() []string {
 	return result
 }
 
+func (s *mmapStorage) Close() error {
+	err := syscall.Munmap(s.data)
+	if err != nil {
+		return fmt.Errorf("could not unmap storage file: %s", err)
+	}
+
+	s.indexMap = nil
+	s.data = nil
+
+	return nil
+}
+
 func init() {
 	Register("mmap", newMmapStorage)
 }
@@ -202,13 +269,12 @@ func errnoErr(e syscall.Errno) error {
 	return e
 }
 
-func msync(b []byte, blocklen int) (err error) {
-	var _p0 unsafe.Pointer
-	_p0 = unsafe.Pointer(&b[0])
+func msync(b []byte, blocklen int) error {
+	_p0 := unsafe.Pointer(&b[0])
 
 	_, _, e1 := syscall.Syscall(syscall.SYS_MSYNC, uintptr(_p0), uintptr(blocklen), unix.MS_SYNC)
 	if e1 != 0 {
-		err = errnoErr(e1)
+		return errnoErr(e1)
 	}
-	return
+	return nil
 }

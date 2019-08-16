@@ -14,6 +14,7 @@ type KVStorage interface {
 	WriteUint(key string, val uint64) error
 	Keys() []string
 	Erase(key string) error
+	Close() error
 }
 type newStorageFunc = func(string) (KVStorage, error)
 

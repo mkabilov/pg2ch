@@ -71,3 +71,8 @@ func (d *diskvStorage) Keys() []string {
 func (d *diskvStorage) Erase(key string) error {
 	return d.storage.Erase(key)
 }
+
+func (d *diskvStorage) Close() error {
+	d.storage = nil
+	return nil
+}
