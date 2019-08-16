@@ -61,5 +61,8 @@ func TestDiskv(t *testing.T) {
 	}
 	defer os.RemoveAll(db_path)
 
-	testStorage(t, kvstorage.New("diskv", db_path))
+	var storage kvstorage.KVStorage
+	storage, err = kvstorage.New("diskv", db_path)
+	assert.Nil(t, err)
+	testStorage(t, storage)
 }

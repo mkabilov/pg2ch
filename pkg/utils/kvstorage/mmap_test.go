@@ -15,5 +15,9 @@ func TestMmap(t *testing.T) {
 	}
 	defer os.Remove(tmpfile.Name())
 
-	testStorage(t, kvstorage.New("mmap", tmpfile.Name()))
+	var storage kvstorage.KVStorage
+	storage, err = kvstorage.New("mmap", tmpfile.Name())
+	if err != nil {
+		testStorage(t, storage)
+	}
 }

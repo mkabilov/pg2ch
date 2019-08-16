@@ -1,4 +1,3 @@
-// storage based on file maped to memory
 package kvstorage
 
 // #include <sys/file.h>
@@ -196,8 +195,6 @@ func errnoErr(e syscall.Errno) error {
 	case 0:
 		return nil
 	case unix.EAGAIN:
-		return unix.EAGAIN
-	case unix.EINVAL:
 		return syscall.EINVAL
 	case unix.ENOENT:
 		return syscall.ENOENT
