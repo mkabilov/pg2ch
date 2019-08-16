@@ -119,7 +119,7 @@ func (r *Replicator) addToPublication(pgTableNames []config.PgTableName) error {
 			if err != nil {
 				return fmt.Errorf("could not begin transaction: %v", err)
 			}
-			if _, err := tx.Exec("set statement_timeout = '5 s'"); err != nil {
+			if _, err := tx.Exec("set local statement_timeout = '5 s'"); err != nil {
 				return fmt.Errorf("could not set statement timeout: %v", err)
 			}
 
