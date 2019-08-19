@@ -55,14 +55,14 @@ func testStorage(t *testing.T, storage kvstorage.KVStorage) {
 }
 
 func TestDiskv(t *testing.T) {
-	db_path, err := ioutil.TempDir("", "pg2ch_diskv_test")
+	dbPath, err := ioutil.TempDir("", "pg2ch_diskv_test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(db_path)
+	defer os.RemoveAll(dbPath)
 
 	var storage kvstorage.KVStorage
-	storage, err = kvstorage.New("diskv", db_path)
+	storage, err = kvstorage.New("diskv", dbPath)
 	assert.Nil(t, err)
 	testStorage(t, storage)
 }

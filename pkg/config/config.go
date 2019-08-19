@@ -31,6 +31,7 @@ const (
 	defaultVerColumn              = "ver"
 	defaultLsnColumn              = "lsn"
 	defaultIsDeletedColumn        = "is_deleted"
+	defaultPerStorageType         = "diskv"
 
 	TableLSNKeyPrefix = "table_lsn_"
 )
@@ -303,7 +304,7 @@ func New(filepath string) (*Config, error) {
 	}
 
 	if len(cfg.PersStorageType) == 0 {
-		cfg.PersStorageType = "diskv"
+		cfg.PersStorageType = defaultPerStorageType
 	}
 
 	if cfg.SyncWorkers == 0 {
