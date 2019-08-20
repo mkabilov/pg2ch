@@ -251,6 +251,7 @@ max_logical_replication_workers = 10
 			stopCh <- true
 			t.Fatal("could not start replicator: ", err)
 		}
+		repl.PrintTablesLSN()
 		stopCh <- true
 	}()
 

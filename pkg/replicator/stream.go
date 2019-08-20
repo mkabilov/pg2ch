@@ -2,6 +2,7 @@ package replicator
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
@@ -70,6 +71,45 @@ func (r *Replicator) getTable(oid dbtypes.OID) (chTbl clickHouseTable, err error
 	}
 
 	return
+}
+
+// Print all replicated tables LSN
+func (r *Replicator) PrintTablesLSN() {
+	var (
+		tables []string
+		maxLen int
+		lsnMap = make(map[string]string)
+	)
+
+	for tblName := range r.chTables {
+		var lsn string
+		name := tblName.String()
+
+		if len(name) > maxLen {
+			maxLen = len(name)
+		}
+
+		if tblKey := tblName.KeyName(); r.persStorage.Has(tblKey) {
+			tblLSN, err := r.persStorage.ReadLSN(tblKey)
+
+			if err != nil {
+				lsn = "INCORRECT"
+			} else {
+				lsn = tblLSN.String()
+			}
+		} else {
+			lsn = "NO"
+		}
+		lsnMap[name] = lsn
+		tables = append(tables, name)
+	}
+	sort.Strings(tables)
+
+	// print ordered list of tables
+	format := fmt.Sprintf("%%%ds\t%%s\n", maxLen)
+	for i := range tables {
+		fmt.Printf(format, tables[i], lsnMap[tables[i]])
+	}
 }
 
 func (r *Replicator) incrementGeneration() {
