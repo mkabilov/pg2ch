@@ -28,7 +28,7 @@ begin
 	end if;
 end $$;
 create extension istore;
-create table pg1(id bigserial, a int, b smallint, c bigint, d text, f1 float,
+create table pg1(id bigserial, a int, b int, c bigint, d text, f1 float,
 	f2 double precision, bo bool, num numeric(10, 2), ch varchar(10));
 alter table pg1 replica identity full;
 create table pg2(id bigserial, a int[], b bigint[], c text[]);
@@ -46,17 +46,22 @@ insert into pg3(a, b) select
 	bigistore(array_fill(i + 2, array[3]), array_fill(i + 3, array[3]))
 from generate_series(1, 10000) i;
 `
-	addsql100 = `
+	addsql = `
 insert into pg1(a,b,c,d,f1,f2,bo,num,ch) select i, i + 1, i + 2, i::text,
-	i + 1.1, i + 2.1, true, i + 3, (i+4)::text from generate_series(1, 100) i;
+	i + 1.1, i + 2.1, true, i + 3, (i+4)::text from generate_series(1, %d) i;
 insert into pg2(a, b, c) select array_fill(i, array[3]), array_fill(i + 1, array[3]),
-	array_fill(i::text, array[3]) from generate_series(1, 100) i;
+	array_fill(i::text, array[3]) from generate_series(1, %d) i;
 insert into pg3(a, b) select
 	istore(array_fill(i, array[1]), array_fill(i + 1, array[1])),
 	bigistore(array_fill(i + 2, array[1]), array_fill(i + 3, array[1]))
-from generate_series(1, 100) i;
+from generate_series(1, %d) i;
 `
 	testConfigFile = "./test.yaml"
+)
+
+var (
+	addsql100    = fmt.Sprintf(addsql, 100, 100, 100)
+	addsql100000 = fmt.Sprintf(addsql, 100000, 100000, 100000)
 )
 
 type CHLink struct {
@@ -71,7 +76,7 @@ var (
 		`create table pg2ch_test.ch1(
 			id UInt64,
 			a Int32,
-			b Int8,
+			b Int32,
 			c Int64,
 			d String,
 			f1 Float32,
@@ -84,7 +89,7 @@ var (
 		`create table pg2ch_test.ch1_aux(
 			id UInt64,
 			a Int32,
-			b Int8,
+			b Int32,
 			c Int64,
 			d String,
 			f1 Float32,
@@ -186,13 +191,14 @@ func initNode(t *testing.T) (*pqt.PostgresNode, *config.Config) {
 	node := pqt.MakePostgresNode("master")
 
 	config.DefaultPostgresPort = uint16(node.Port)
+	config.DefaultInactivityMergeTimeout = time.Second
+
 	cfg, err := config.New(testConfigFile)
 	if cfg.PersStorageType == "diskv" {
 		db_path, err := ioutil.TempDir("", "pg2ch_diskv_dat")
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer os.RemoveAll(db_path)
 
 		cfg.PersStoragePath = db_path
 	} else if cfg.PersStorageType == "mmap" {
@@ -246,6 +252,7 @@ max_logical_replication_workers = 10
 func TestBasicSync(t *testing.T) {
 	node, cfg := initNode(t)
 	defer node.Stop()
+	defer os.RemoveAll(cfg.PersStoragePath)
 
 	var repl *replicator.Replicator
 
@@ -263,6 +270,8 @@ func TestBasicSync(t *testing.T) {
 	}()
 
 	t.Run("sync and first data", func(t *testing.T) {
+		defer repl.Finish()
+
 		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", 1, 10)
 		if ch.getCount(t, "select count(*) from pg2ch_test.ch1") != 10000 {
 			t.Fatal("count shoud be equal to 10000")
@@ -305,8 +314,6 @@ func TestBasicSync(t *testing.T) {
 
 		rows = ch.safeQuery(t, "select * from pg2ch_test.ch3 order by id desc limit 10")
 		assert.Equal(t, rows[0], []string{"20000", "[100]", "[101]", "[102]", "[103]", "1"})
-
-		repl.Finish()
 	})
 
 	<-stopCh
@@ -323,6 +330,8 @@ func TestBasicSync(t *testing.T) {
 	}()
 
 	t.Run("second round of data", func(t *testing.T) {
+		defer repl.Finish()
+
 		for repl.State() != "WORKING" {
 			time.Sleep(time.Second)
 		}
@@ -344,8 +353,6 @@ func TestBasicSync(t *testing.T) {
 
 		count = ch.getCount(t, "select count(*) from pg2ch_test.ch3")
 		assert.Equal(t, 30000, count, "expected right count in ch3")
-
-		repl.Finish()
 	})
 
 	<-stopCh
@@ -356,25 +363,26 @@ func TestConcurrentSync(t *testing.T) {
 
 	node, cfg := initNode(t)
 	defer node.Stop()
+	defer os.RemoveAll(cfg.PersStoragePath)
 
 	repl = replicator.New(cfg)
 	stopCh := make(chan bool, 1)
 
+	for i := 0; i < 10; i++ {
+		node.Execute("postgres", addsql100000)
+	}
+
 	/* we're starting to add values before sync */
 	go func() {
 		for i := 0; i < 10; i++ {
-			for j := 0; j < 1000; j++ {
-				node.Execute("postgres", addsql100)
-			}
+			node.Execute("postgres", addsql100)
 			time.Sleep(time.Second)
 		}
 	}()
 
 	go func() {
 		for i := 0; i < 10; i++ {
-			for j := 0; j < 1000; j++ {
-				node.Execute("postgres", addsql100)
-			}
+			node.Execute("postgres", addsql100)
 			time.Sleep(time.Second)
 		}
 	}()
@@ -389,12 +397,14 @@ func TestConcurrentSync(t *testing.T) {
 	}()
 
 	t.Run("checking concurrend inserted data", func(t *testing.T) {
+		defer repl.Finish()
+
 		for repl.State() != "WORKING" {
 			time.Sleep(time.Second)
 		}
 
-		expected := 1000*100 /* goroutine 1 */ + 1000*100 /* goroutine 2 */ + 10000 /* initial */
-		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", expected, 20)
+		expected := 2000 + 10000 + 1000000 /* goroutine 1 + goroutine 2 + initial */
+		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", expected, 60)
 
 		count := ch.getCount(t, "select count(*) from pg2ch_test.ch1")
 		assert.Equal(t, expected, count, "expected right count in ch1")
@@ -407,8 +417,6 @@ func TestConcurrentSync(t *testing.T) {
 
 		count = ch.getCount(t, "select count(*) from pg2ch_test.ch3")
 		assert.Equal(t, expected, count, "expected right count in ch3")
-
-		repl.Finish()
 	})
 
 	<-stopCh

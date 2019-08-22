@@ -19,25 +19,26 @@ import (
 const (
 	ApplicationName = "pg2ch"
 
-	defaultInactivityMergeTimeout = time.Minute
-	publicSchema                  = "public"
-	defaultClickHousePort         = 8123
-	defaultClickHouseHost         = "127.0.0.1"
-	defaultPostgresHost           = "127.0.0.1"
-	defaultRowIdColumn            = "row_id"
-	defaultMaxBufferLength        = 10000
-	defaultFlushThreshold         = 100
-	defaultSignColumn             = "sign"
-	defaultVerColumn              = "ver"
-	defaultLsnColumn              = "lsn"
-	defaultIsDeletedColumn        = "is_deleted"
-	defaultPerStorageType         = "diskv"
+	publicSchema           = "public"
+	defaultClickHousePort  = 8123
+	defaultClickHouseHost  = "127.0.0.1"
+	defaultPostgresHost    = "127.0.0.1"
+	defaultRowIdColumn     = "row_id"
+	defaultMaxBufferLength = 10000
+	defaultFlushThreshold  = 100
+	defaultSignColumn      = "sign"
+	defaultVerColumn       = "ver"
+	defaultLsnColumn       = "lsn"
+	defaultIsDeletedColumn = "is_deleted"
+	defaultPerStorageType  = "diskv"
 
 	TableLSNKeyPrefix = "table_lsn_"
 )
 
+/* these variables could be changed in tests */
 var (
-	DefaultPostgresPort uint16 = 5432 // could be changed in tests
+	DefaultPostgresPort           uint16 = 5432
+	DefaultInactivityMergeTimeout        = time.Minute
 )
 
 type tableEngine int
@@ -280,7 +281,7 @@ func New(filepath string) (*Config, error) {
 	}
 
 	if cfg.InactivityFlushTimeout.Seconds() == 0 {
-		cfg.InactivityFlushTimeout = defaultInactivityMergeTimeout
+		cfg.InactivityFlushTimeout = DefaultInactivityMergeTimeout
 	}
 
 	if cfg.Postgres.Port == 0 {
