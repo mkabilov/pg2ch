@@ -90,9 +90,10 @@ func TestIstoreToArrays(t *testing.T) {
 }
 
 func BenchmarkIstoreToArrays(b *testing.B) {
+	var buf bytes.Buffer
 	for n := 0; n < b.N; n++ {
-		buf := &bytes.Buffer{}
-		IstoreToArrays(buf, istoreToArrayTest[1].istore)
+		IstoreToArrays(&buf, istoreToArrayTest[1].istore)
+		buf.Reset()
 	}
 }
 

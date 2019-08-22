@@ -64,7 +64,7 @@ func QuoteLiteral(str string) string {
 	return `'` + res + `'`
 }
 
-func IstoreToArrays(buf *bytes.Buffer, str []byte) []byte {
+func IstoreToArrays(buf *bytes.Buffer, str []byte) {
 	valuesBuf := bytesBufPool.Get().(*bytes.Buffer)
 	defer func() {
 		valuesBuf.Reset()
@@ -82,12 +82,9 @@ func IstoreToArrays(buf *bytes.Buffer, str []byte) []byte {
 		case '"':
 			if counter%2 == 0 {
 				isKey = !isKey
-				if !first {
-					if isKey {
-						buf.WriteByte(',')
-					} else {
-						valuesBuf.WriteByte(',')
-					}
+				if !first && isKey {
+					buf.WriteByte(',')
+					valuesBuf.WriteByte(',')
 				}
 			}
 			counter++
@@ -109,8 +106,6 @@ func IstoreToArrays(buf *bytes.Buffer, str []byte) []byte {
 	buf.WriteString("]\t")
 	buf.Write(valuesBuf.Bytes())
 	buf.WriteByte(']')
-
-	return buf.Bytes()
 }
 
 func decodeDigit(c byte, onlyOctal bool) (byte, bool) {
