@@ -277,7 +277,8 @@ func (t *genericTable) FlushToMainTable() error {
 }
 
 func (t *genericTable) convertRow(row message.Row) chTuple {
-	return t.bufferedConvertRow(t.buf, row)
+	buf := &bytes.Buffer{}
+	return t.bufferedConvertRow(buf, row)
 }
 
 func (t *genericTable) bufferedConvertRow(buf *bytes.Buffer, row message.Row) chTuple {
