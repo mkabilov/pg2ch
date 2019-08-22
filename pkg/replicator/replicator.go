@@ -115,6 +115,7 @@ func New(cfg *config.Config) *Replicator {
 	}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.logger = logger.Sugar()
+	r.curState.Store(stateInit)
 
 	if cfg.Postgres.Debug {
 		r.pgxConnConfig.LogLevel = pgx.LogLevelDebug

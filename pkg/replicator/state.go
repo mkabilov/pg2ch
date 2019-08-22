@@ -9,16 +9,22 @@ type state struct {
 type stateValue uint32
 
 const (
-	stateWorking stateValue = iota
+	stateInit stateValue = iota
+	stateWorking
 	statePaused
 	statePausing
 	stateShuttingDown
 )
 
 var states = map[stateValue]string{
+	stateInit:    "INIT",
 	stateWorking: "WORKING",
 	statePausing: "PAUSING",
 	statePaused:  "PAUSED",
+}
+
+func (r *Replicator) State() string {
+	return r.curState.String()
 }
 
 func (r *Replicator) pause() string {
@@ -31,6 +37,14 @@ func (r *Replicator) pause() string {
 		return r.curState.String()
 	}
 	r.inTxMutex.Lock()
+
+	/* try to flush everying we have buffered */
+	if err := r.tblBuffersFlush(); err != nil {
+		r.curState.Store(stateWorking)
+		r.inTxMutex.Unlock()
+		return "could not flush tables"
+	}
+
 	r.curState.Store(statePaused)
 	r.logger.Debugf("paused")
 

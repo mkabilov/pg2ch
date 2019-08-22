@@ -46,7 +46,7 @@ insert into pg3(a, b) select
 	bigistore(array_fill(i + 2, array[3]), array_fill(i + 3, array[3]))
 from generate_series(1, 10000) i;
 `
-	addsql = `
+	addsql100 = `
 insert into pg1(a,b,c,d,f1,f2,bo,num,ch) select i, i + 1, i + 2, i::text,
 	i + 1.1, i + 2.1, true, i + 3, (i+4)::text from generate_series(1, 100) i;
 insert into pg2(a, b, c) select array_fill(i, array[3]), array_fill(i + 1, array[3]),
@@ -243,9 +243,10 @@ max_logical_replication_workers = 10
 
 	var repl *replicator.Replicator
 
+	repl = replicator.New(cfg)
 	stopCh := make(chan bool, 1)
+
 	go func() {
-		repl = replicator.New(cfg)
 		err := repl.Run()
 		if err != nil {
 			stopCh <- true
@@ -255,14 +256,14 @@ max_logical_replication_workers = 10
 		stopCh <- true
 	}()
 
-	go func() {
+	t.Run("sync and first data", func(t *testing.T) {
 		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", 1, 10)
 		if ch.getCount(t, "select count(*) from pg2ch_test.ch1") != 10000 {
 			t.Fatal("count shoud be equal to 10000")
 		}
 
 		for i := 0; i < 100; i++ {
-			node.Execute("postgres", addsql)
+			node.Execute("postgres", addsql100)
 		}
 		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", 20000, 10)
 		count := ch.getCount(t, "select count(*) from pg2ch_test.ch1")
@@ -300,7 +301,46 @@ max_logical_replication_workers = 10
 		assert.Equal(t, rows[0], []string{"20000", "[100]", "[101]", "[102]", "[103]", "1"})
 
 		repl.Finish()
+	})
+
+	<-stopCh
+	repl = replicator.New(cfg)
+
+	go func() {
+		err := repl.Run()
+		if err != nil {
+			stopCh <- true
+			t.Fatal("could not start replicator: ", err)
+		}
+		repl.PrintTablesLSN()
+		stopCh <- true
 	}()
+
+	t.Run("second round of data", func(t *testing.T) {
+		for repl.State() != "WORKING" {
+			time.Sleep(time.Second)
+		}
+		repl.PrintTablesLSN()
+
+		count := ch.getCount(t, "select count(*) from pg2ch_test.ch1")
+		assert.Equal(t, 20000, count, "expected right count in ch1")
+
+		for i := 0; i < 100; i++ {
+			node.Execute("postgres", addsql100)
+		}
+
+		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", 30000, 10)
+		count = ch.getCount(t, "select count(*) from pg2ch_test.ch1")
+		assert.Equal(t, 30000, count, "expected right count in ch1")
+
+		count = ch.getCount(t, "select count(*) from pg2ch_test.ch2")
+		assert.Equal(t, 30000, count, "expected right count in ch2")
+
+		count = ch.getCount(t, "select count(*) from pg2ch_test.ch3")
+		assert.Equal(t, 30000, count, "expected right count in ch3")
+
+		repl.Finish()
+	})
 
 	<-stopCh
 }
