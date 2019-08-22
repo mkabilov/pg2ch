@@ -60,6 +60,7 @@ type genericTable struct {
 	syncedRows        uint64
 	liveTuples        uint64
 	syncBuf           *bytes.Buffer
+	buf               *bytes.Buffer
 	syncLastBatchTime time.Time //to calculate rate
 	auxTblRowID       uint64
 
@@ -76,6 +77,7 @@ func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage
 	t := genericTable{
 		Mutex:         &sync.Mutex{},
 		syncBuf:       &bytes.Buffer{},
+		buf:           &bytes.Buffer{},
 		ctx:           ctx,
 		chLoader:      chload.New(conn),
 		cfg:           tblCfg,
@@ -274,17 +276,8 @@ func (t *genericTable) FlushToMainTable() error {
 	return t.flush()
 }
 
-func (t *genericTable) convertRow(row message.Row) chTuple {
-	var buf bytes.Buffer
-	bufSize := 0
-	for _, v := range row {
-		bufSize += len(v.Value) + 1 // and delimiter
-	}
-	if t.cfg.GenerationColumn != "" {
-		bufSize += 9 // for generationID + delimiter
-	}
-	buf.Grow(bufSize)
-
+func (t *genericTable) convertRow(buf *bytes.Buffer, row message.Row) chTuple {
+	defer buf.Reset()
 	for colId, col := range t.tupleColumns {
 		if _, ok := t.columnMapping[col.Name]; !ok {
 			continue
@@ -293,7 +286,7 @@ func (t *genericTable) convertRow(row message.Row) chTuple {
 		if colId > 0 {
 			buf.WriteByte(columnDelimiter)
 		}
-		chutils.ConvertColumn(&buf, t.cfg.PgColumns[col.Name], row[colId], t.cfg.ColumnProperties[col.Name])
+		chutils.ConvertColumn(buf, t.cfg.PgColumns[col.Name], row[colId], t.cfg.ColumnProperties[col.Name])
 	}
 
 	if t.cfg.GenerationColumn != "" {

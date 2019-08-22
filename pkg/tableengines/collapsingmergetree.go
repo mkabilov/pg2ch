@@ -65,7 +65,7 @@ func (t *collapsingMergeTreeTable) Write(p []byte) (int, error) { // sync only
 func (t *collapsingMergeTreeTable) Insert(newRow message.Row) (bool, error) {
 	t.logger.Debugf("insert: %v", newRow)
 	return t.processChTuples(chTuples{
-		appendField(t.convertRow(newRow), oneStr),
+		appendField(t.convertRow(t.buf, newRow), oneStr),
 	})
 }
 
@@ -78,8 +78,8 @@ func (t *collapsingMergeTreeTable) Update(oldRow, newRow message.Row) (bool, err
 	}
 
 	return t.processChTuples(chTuples{
-		appendField(t.convertRow(oldRow), minusOneStr),
-		appendField(t.convertRow(newRow), oneStr),
+		appendField(t.convertRow(t.buf, oldRow), minusOneStr),
+		appendField(t.convertRow(t.buf, newRow), oneStr),
 	})
 }
 
@@ -87,6 +87,6 @@ func (t *collapsingMergeTreeTable) Update(oldRow, newRow message.Row) (bool, err
 func (t *collapsingMergeTreeTable) Delete(oldRow message.Row) (bool, error) {
 	t.logger.Debugf("delete: %v", oldRow)
 	return t.processChTuples(chTuples{
-		appendField(t.convertRow(oldRow), minusOneStr),
+		appendField(t.convertRow(t.buf, oldRow), minusOneStr),
 	})
 }

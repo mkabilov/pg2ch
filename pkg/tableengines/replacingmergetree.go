@@ -72,9 +72,9 @@ func (t *replacingMergeTree) Write(p []byte) (int, error) {
 // Insert handles incoming insert DML operation
 func (t *replacingMergeTree) Insert(new message.Row) (bool, error) {
 	if t.cfg.VerColumn != "" {
-		return t.processChTuples(chTuples{appendField(t.convertRow(new), t.txFinalLSN.StrBytes(), zeroStr)})
+		return t.processChTuples(chTuples{appendField(t.convertRow(t.buf, new), t.txFinalLSN.StrBytes(), zeroStr)})
 	} else {
-		return t.processChTuples(chTuples{appendField(t.convertRow(new), zeroStr)})
+		return t.processChTuples(chTuples{appendField(t.convertRow(t.buf, new), zeroStr)})
 	}
 }
 
@@ -90,19 +90,19 @@ func (t *replacingMergeTree) Update(old, new message.Row) (bool, error) {
 	if keyChanged {
 		if t.cfg.VerColumn != "" {
 			cmdSet = chTuples{
-				appendField(t.convertRow(old), lsnStr, oneStr),
-				appendField(t.convertRow(new), lsnStr, zeroStr),
+				appendField(t.convertRow(t.buf, old), lsnStr, oneStr),
+				appendField(t.convertRow(t.buf, new), lsnStr, zeroStr),
 			}
 		} else {
 			cmdSet = chTuples{
-				appendField(t.convertRow(old), oneStr),
-				appendField(t.convertRow(new), zeroStr),
+				appendField(t.convertRow(t.buf, old), oneStr),
+				appendField(t.convertRow(t.buf, new), zeroStr),
 			}
 		}
 	} else if t.cfg.VerColumn != "" {
-		cmdSet = chTuples{appendField(t.convertRow(new), lsnStr, zeroStr)}
+		cmdSet = chTuples{appendField(t.convertRow(t.buf, new), lsnStr, zeroStr)}
 	} else {
-		cmdSet = chTuples{appendField(t.convertRow(new), zeroStr)}
+		cmdSet = chTuples{appendField(t.convertRow(t.buf, new), zeroStr)}
 	}
 
 	return t.processChTuples(cmdSet)
@@ -111,8 +111,8 @@ func (t *replacingMergeTree) Update(old, new message.Row) (bool, error) {
 // Delete handles incoming delete DML operation
 func (t *replacingMergeTree) Delete(old message.Row) (bool, error) {
 	if t.cfg.VerColumn != "" {
-		return t.processChTuples(chTuples{appendField(t.convertRow(old), t.txFinalLSN.StrBytes(), zeroStr)})
+		return t.processChTuples(chTuples{appendField(t.convertRow(t.buf, old), t.txFinalLSN.StrBytes(), zeroStr)})
 	} else {
-		return t.processChTuples(chTuples{appendField(t.convertRow(old), zeroStr)})
+		return t.processChTuples(chTuples{appendField(t.convertRow(t.buf, old), zeroStr)})
 	}
 }

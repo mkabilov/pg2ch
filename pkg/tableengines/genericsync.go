@@ -24,7 +24,7 @@ func (t *genericTable) genSyncWrite(p []byte) error {
 		return fmt.Errorf("could not parse copy string: %v", err)
 	}
 
-	if err := t.bulkUploader.Write(t.convertRow(row)); err != nil {
+	if err := t.bulkUploader.Write(t.convertRow(t.syncBuf, row)); err != nil {
 		return err
 	}
 

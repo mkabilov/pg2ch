@@ -58,7 +58,7 @@ func (t *mergeTreeTable) Write(p []byte) (int, error) {
 
 // Insert handles incoming insert DML operation
 func (t *mergeTreeTable) Insert(new message.Row) (bool, error) {
-	return t.processChTuples(chTuples{t.convertRow(new)})
+	return t.processChTuples(chTuples{t.convertRow(t.buf, new)})
 }
 
 // Update handles incoming update DML operation
