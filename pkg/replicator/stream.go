@@ -30,7 +30,7 @@ func (r *Replicator) tblBuffersFlush() error { // protected by inTxMutex: inacti
 	return nil
 }
 
-func (r *Replicator) getTable(oid dbtypes.OID) (chTbl clickHouseTable, err error) {
+func (r *Replicator) checkAndGetTable(oid dbtypes.OID) (chTbl clickHouseTable, err error) {
 	var tblLSN dbtypes.LSN
 
 	tblName, ok := r.oidName[oid]
@@ -191,7 +191,7 @@ func (r *Replicator) processCommit() error {
 }
 
 func (r *Replicator) processRelation(msg *message.Relation) error {
-	if chTbl, err := r.getTable(msg.OID); err != nil {
+	if chTbl, err := r.checkAndGetTable(msg.OID); err != nil {
 		return err
 	} else if chTbl == nil {
 		r.logger.Debug("relation message: discarding")
@@ -209,7 +209,7 @@ func (r *Replicator) processRelation(msg *message.Relation) error {
 }
 
 func (r *Replicator) processInsert(msg *message.Insert) error {
-	chTbl, err := r.getTable(msg.RelationOID)
+	chTbl, err := r.checkAndGetTable(msg.RelationOID)
 	if err != nil {
 		return err
 	} else if chTbl == nil {
@@ -228,7 +228,7 @@ func (r *Replicator) processInsert(msg *message.Insert) error {
 }
 
 func (r *Replicator) processUpdate(msg *message.Update) error {
-	chTbl, err := r.getTable(msg.RelationOID)
+	chTbl, err := r.checkAndGetTable(msg.RelationOID)
 	if err != nil {
 		return err
 	} else if chTbl == nil {
@@ -247,7 +247,7 @@ func (r *Replicator) processUpdate(msg *message.Update) error {
 }
 
 func (r *Replicator) processDelete(msg *message.Delete) error {
-	chTbl, err := r.getTable(msg.RelationOID)
+	chTbl, err := r.checkAndGetTable(msg.RelationOID)
 	if err != nil {
 		return err
 	} else if chTbl == nil {
@@ -267,7 +267,7 @@ func (r *Replicator) processDelete(msg *message.Delete) error {
 
 func (r *Replicator) processTruncate(msg *message.Truncate) error {
 	for _, oid := range msg.RelationOIDs {
-		if chTbl, err := r.getTable(oid); err != nil {
+		if chTbl, err := r.checkAndGetTable(oid); err != nil {
 			return err
 		} else if chTbl == nil {
 			r.logger.Debug("truncate message: table with oid %v discarding", oid)
