@@ -182,9 +182,8 @@ func (ch *CHLink) getCount(t *testing.T, query string) int {
 	return recCount
 }
 
-func TestBasicSync(t *testing.T) {
+func initNode(t *testing.T) (*pqt.PostgresNode, *config.Config) {
 	node := pqt.MakePostgresNode("master")
-	defer node.Stop()
 
 	config.DefaultPostgresPort = uint16(node.Port)
 	cfg, err := config.New(testConfigFile)
@@ -240,6 +239,13 @@ max_logical_replication_workers = 10
 	for _, s := range initch {
 		ch.safeExec(t, s)
 	}
+
+	return node, cfg
+}
+
+func TestBasicSync(t *testing.T) {
+	node, cfg := initNode(t)
+	defer node.Stop()
 
 	var repl *replicator.Replicator
 
@@ -338,6 +344,69 @@ max_logical_replication_workers = 10
 
 		count = ch.getCount(t, "select count(*) from pg2ch_test.ch3")
 		assert.Equal(t, 30000, count, "expected right count in ch3")
+
+		repl.Finish()
+	})
+
+	<-stopCh
+}
+
+func TestConcurrentSync(t *testing.T) {
+	var repl *replicator.Replicator
+
+	node, cfg := initNode(t)
+	defer node.Stop()
+
+	repl = replicator.New(cfg)
+	stopCh := make(chan bool, 1)
+
+	/* we're starting to add values before sync */
+	go func() {
+		for i := 0; i < 10; i++ {
+			for j := 0; j < 1000; j++ {
+				node.Execute("postgres", addsql100)
+			}
+			time.Sleep(time.Second)
+		}
+	}()
+
+	go func() {
+		for i := 0; i < 10; i++ {
+			for j := 0; j < 1000; j++ {
+				node.Execute("postgres", addsql100)
+			}
+			time.Sleep(time.Second)
+		}
+	}()
+
+	go func() {
+		err := repl.Run()
+		if err != nil {
+			stopCh <- true
+			t.Fatal("could not start replicator: ", err)
+		}
+		stopCh <- true
+	}()
+
+	t.Run("checking concurrend inserted data", func(t *testing.T) {
+		for repl.State() != "WORKING" {
+			time.Sleep(time.Second)
+		}
+
+		expected := 1000*100 /* goroutine 1 */ + 1000*100 /* goroutine 2 */ + 10000 /* initial */
+		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", expected, 20)
+
+		count := ch.getCount(t, "select count(*) from pg2ch_test.ch1")
+		assert.Equal(t, expected, count, "expected right count in ch1")
+
+		count = ch.getCount(t, "select count(*) from pg2ch_test.ch1")
+		assert.Equal(t, expected, count, "expected right count in ch1")
+
+		count = ch.getCount(t, "select count(*) from pg2ch_test.ch2")
+		assert.Equal(t, expected, count, "expected right count in ch2")
+
+		count = ch.getCount(t, "select count(*) from pg2ch_test.ch3")
+		assert.Equal(t, expected, count, "expected right count in ch3")
 
 		repl.Finish()
 	})
