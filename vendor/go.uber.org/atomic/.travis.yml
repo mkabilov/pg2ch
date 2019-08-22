@@ -8,8 +8,8 @@ go:
 
 matrix:
   include:
-    - go: 1.12.x
-      env: NO_TEST=yes LINT=yes
+  - go: 1.12.x
+    env: NO_TEST=yes LINT=yes
 
 cache:
   directories:

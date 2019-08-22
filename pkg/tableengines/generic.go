@@ -276,8 +276,12 @@ func (t *genericTable) FlushToMainTable() error {
 	return t.flush()
 }
 
-func (t *genericTable) convertRow(buf *bytes.Buffer, row message.Row) chTuple {
-	defer buf.Reset()
+func (t *genericTable) convertRow(row message.Row) chTuple {
+	return t.bufferedConvertRow(t.buf, row)
+}
+
+func (t *genericTable) bufferedConvertRow(buf *bytes.Buffer, row message.Row) chTuple {
+	buf.Reset()
 	for colId, col := range t.tupleColumns {
 		if _, ok := t.columnMapping[col.Name]; !ok {
 			continue

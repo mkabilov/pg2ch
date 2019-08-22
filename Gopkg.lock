@@ -257,6 +257,7 @@
     "github.com/tidwall/redcon",
     "go.uber.org/zap",
     "go.uber.org/zap/zapcore",
+    "golang.org/x/sys/unix",
     "gopkg.in/djherbis/buffer.v1",
     "gopkg.in/djherbis/nio.v2",
     "gopkg.in/yaml.v2",
