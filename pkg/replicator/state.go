@@ -9,14 +9,14 @@ type state struct {
 type stateValue uint32
 
 const (
-	stateIdle stateValue = iota
+	stateWorking stateValue = iota
 	statePaused
 	statePausing
 	stateShuttingDown
 )
 
 var states = map[stateValue]string{
-	stateIdle:    "IDLE",
+	stateWorking: "WORKING",
 	statePausing: "PAUSING",
 	statePaused:  "PAUSED",
 }
@@ -27,7 +27,7 @@ func (r *Replicator) pause() string {
 		state == statePaused {
 		return r.curState.String()
 	}
-	if !r.curState.CompareAndSwap(stateIdle, statePausing) {
+	if !r.curState.CompareAndSwap(stateWorking, statePausing) {
 		return r.curState.String()
 	}
 	r.inTxMutex.Lock()
@@ -40,7 +40,7 @@ func (r *Replicator) pause() string {
 // resume should mind the pause in progress state
 func (r *Replicator) resume() string {
 	r.logger.Debugf("resuming")
-	if !r.curState.CompareAndSwap(statePaused, stateIdle) {
+	if !r.curState.CompareAndSwap(statePaused, stateWorking) {
 		if r.curState.Load() == statePausing {
 			r.logger.Debugf("pause is in progress")
 			return "PAUSE IS IN PROGRESS"

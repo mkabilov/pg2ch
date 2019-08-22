@@ -123,7 +123,7 @@ func (r *Replicator) inactivityTblBufferFlush() {
 	defer r.wg.Done()
 
 	flushFn := func() {
-		if r.curState.Load() != stateIdle {
+		if r.curState.Load() != stateWorking {
 			return
 		}
 		r.inTxMutex.Lock()

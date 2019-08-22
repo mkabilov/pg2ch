@@ -220,7 +220,7 @@ func (r *Replicator) Run() error {
 	if err := r.consumer.Run(r); err != nil {
 		return err
 	}
-	r.curState.Store(stateIdle)
+	r.curState.Store(stateWorking)
 
 	if r.cfg.RedisBind != "" {
 		go r.startRedisServer()
