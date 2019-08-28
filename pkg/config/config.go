@@ -259,19 +259,6 @@ func (gc *GzipComprLevel) UnmarshalYAML(unmarshal func(interface{}) error) error
 	return nil
 }
 
-func (cc *CHConnConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	var cfg CHConnConfig
-	if err := unmarshal(&cfg); err != nil {
-		return err
-	}
-	if cfg.GzipBufSize == 0 && cfg.GzipCompression != flate.NoCompression {
-		cfg.GzipBufSize = defaultGzipBufferSize
-	}
-	*cc = cfg
-
-	return nil
-}
-
 func (gc GzipComprLevel) String() string {
 	for k, v := range compressionLevels {
 		if v == int(gc) {
@@ -379,6 +366,10 @@ func New(filepath string) (*Config, error) {
 		}
 	}
 
+	if cfg.ClickHouse.GzipBufSize == 0 && cfg.ClickHouse.GzipCompression != flate.NoCompression {
+		cfg.ClickHouse.GzipBufSize = defaultGzipBufferSize
+	}
+
 	return cfg, nil
 }
 
@@ -464,8 +455,8 @@ func (c Config) Print() {
 		fmt.Printf("%s: flush threshold: %v\n", tbl, tblCfg.BufferSize)
 	}
 
-	fmt.Printf("clickhouse gzip compression: %v\n", c.ClickHouse.GzipCompression)
-	if c.ClickHouse.GzipCompression != flate.NoCompression {
-		fmt.Printf("clickhouse gzip buffer size: %v\n", c.ClickHouse.GzipBufSize)
-	}
+	//fmt.Printf("clickhouse gzip compression: %v\n", c.ClickHouse.GzipCompression)
+	//if c.ClickHouse.GzipCompression != flate.NoCompression {
+	//	fmt.Printf("clickhouse gzip buffer size: %v\n", c.ClickHouse.GzipBufSize)
+	//}
 }
