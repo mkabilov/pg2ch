@@ -10,13 +10,13 @@ import (
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
+	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
 const (
 	// OutputPlugin contains logical decoder plugin name
 	OutputPlugin = "pgoutput"
 
-	lowerhex = "0123456789abcdef"
 	copyNull = 'N'
 )
 
@@ -35,43 +35,16 @@ var decodeMap = map[byte]byte{
 	'\\': '\\',
 }
 
-//QuoteLiteral quotes string literal
-func QuoteLiteral(str string) string {
-	needsEscapeChar := false
-	res := ""
-	for _, r1 := range str {
-		switch r1 {
-		case '\\':
-			res += `\\`
-		case '\t':
-			res += `\t`
-			needsEscapeChar = true
-		case '\r':
-			res += `\r`
-			needsEscapeChar = true
-		case '\n':
-			res += `\n`
-			needsEscapeChar = true
-		default:
-			res += string(r1)
-		}
-	}
-
-	if needsEscapeChar {
-		return `E'` + res + `'`
-	}
-
-	return `'` + res + `'`
-}
-
-func IstoreToArrays(buf *bytes.Buffer, str []byte) {
+func IstoreToArrays(w utils.Writer, str []byte) error {
 	valuesBuf := bytesBufPool.Get().(*bytes.Buffer)
 	defer func() {
 		valuesBuf.Reset()
 		bytesBufPool.Put(valuesBuf)
 	}()
 
-	buf.WriteByte('[')
+	if err := w.WriteByte('['); err != nil {
+		return err
+	}
 	valuesBuf.WriteByte('[')
 
 	first := true
@@ -83,7 +56,10 @@ func IstoreToArrays(buf *bytes.Buffer, str []byte) {
 			if counter%2 == 0 {
 				isKey = !isKey
 				if !first && isKey {
-					buf.WriteByte(',')
+					if err := w.WriteByte(','); err != nil {
+						return err
+					}
+
 					valuesBuf.WriteByte(',')
 				}
 			}
@@ -97,15 +73,29 @@ func IstoreToArrays(buf *bytes.Buffer, str []byte) {
 		case ',':
 		default:
 			if isKey {
-				buf.WriteByte(c)
+				if err := w.WriteByte(c); err != nil {
+					return err
+				}
 			} else {
 				valuesBuf.WriteByte(c)
 			}
 		}
 	}
-	buf.WriteString("]\t")
-	buf.Write(valuesBuf.Bytes())
-	buf.WriteByte(']')
+	if err := w.WriteByte(']'); err != nil {
+		return err
+	}
+	if err := w.WriteByte('\t'); err != nil {
+		return err
+	}
+
+	if _, err := w.Write(valuesBuf.Bytes()); err != nil {
+		return err
+	}
+	if err := w.WriteByte(']'); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func decodeDigit(c byte, onlyOctal bool) (byte, bool) {

@@ -8,50 +8,82 @@ import (
 	"net/http"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
+	"github.com/mkabilov/pg2ch/pkg/utils"
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 )
 
 type CHLoad struct {
 	client        *http.Client
 	conn          *chutils.CHConn
+	useGzip       bool
 	gzipWriter    *gzip.Writer
 	requestBuffer *bytes.Buffer
 }
 
 type CHLoader interface {
-	BufferWriteLine([]byte) error
-	BufferFlush(tableName config.ChTableName, columns []string) error
+	utils.Writer
+
+	Flush(tableName config.ChTableName, columns []string) error
 	Exec(string) error
 	Query(string) ([][]string, error)
 }
 
-func New(conn *chutils.CHConn) *CHLoad {
+func New(cfg *config.CHConnConfig, gzipCompressionLevel config.GzipComprLevel) *CHLoad {
 	var err error
+
 	ch := &CHLoad{
-		conn:          conn,
+		useGzip:       gzipCompressionLevel != gzip.NoCompression,
+		conn:          chutils.MakeChConnection(cfg),
 		requestBuffer: &bytes.Buffer{},
 	}
-	ch.gzipWriter, err = gzip.NewWriterLevel(ch.requestBuffer, gzip.BestSpeed)
-	if err != nil {
-		log.Fatalf("could not create gzip writer: %v", err)
+
+	if ch.useGzip {
+		ch.gzipWriter, err = gzip.NewWriterLevel(ch.requestBuffer, int(gzipCompressionLevel))
+		if err != nil {
+			log.Fatalf("could not create gzip writer: %v", err)
+		}
 	}
 
 	return ch
 }
 
-func (c *CHLoad) BufferWriteLine(p []byte) error {
-	if _, err := c.gzipWriter.Write(p); err != nil {
-		return err
+func (c *CHLoad) Write(p []byte) (int, error) {
+	if !c.useGzip {
+		return c.requestBuffer.Write(p)
 	}
 
-	if _, err := c.gzipWriter.Write([]byte("\n")); err != nil {
+	n, err := c.gzipWriter.Write(p)
+	if err != nil {
+		return 0, err
+	}
+
+	return n, nil
+}
+
+func (c *CHLoad) WriteByte(p byte) error {
+	if !c.useGzip {
+		return c.requestBuffer.WriteByte(p)
+	}
+
+	// Create buffer
+	_, err := c.gzipWriter.Write([]byte{p})
+	if err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (c *CHLoad) BufferFlush(tableName config.ChTableName, columns []string) error {
+func (c *CHLoad) Flush(tableName config.ChTableName, columns []string) error {
+	if !c.useGzip {
+		if err := c.conn.PerformInsert(tableName, columns, c.requestBuffer); err != nil {
+			return err
+		}
+
+		c.requestBuffer.Reset()
+		return nil
+	}
+
 	if err := c.gzipWriter.Close(); err != nil {
 		return fmt.Errorf("could not close gzip writer: %v", err)
 	}

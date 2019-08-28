@@ -3,17 +3,20 @@ package chutils
 import (
 	"bufio"
 	"bytes"
+	"compress/flate"
 	"fmt"
-	"github.com/mkabilov/pg2ch/pkg/config"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/mkabilov/pg2ch/pkg/config"
 )
 
 // ClickHouse connection
 type CHConn struct {
+	useGzip    bool
 	baseURL    string
 	withParams bool
 	client     *http.Client
@@ -46,6 +49,7 @@ func MakeChConnection(c *config.CHConnConfig) *CHConn {
 		baseURL:    baseURL,
 		withParams: len(connStr) > 0,
 		client:     &http.Client{},
+		useGzip:    c.GzipCompression != flate.NoCompression,
 	}
 }
 
@@ -77,7 +81,10 @@ func (c *CHConn) PerformInsert(tableName config.ChTableName, columns []string,
 	if err != nil {
 		return fmt.Errorf("could not create request: %v", err)
 	}
-	req.Header.Add("Content-Encoding", "gzip")
+	if c.useGzip {
+		req.Header.Add("Content-Encoding", "gzip")
+	}
+
 	req.Header.Set("User-Agent", config.ApplicationName)
 
 	resp, err := c.client.Do(req)

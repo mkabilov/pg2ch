@@ -1,9 +1,6 @@
 package tableengines
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/jackc/pgx"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
@@ -11,6 +8,7 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 )
 
+// collapsingMergeTree is extended with engine-specific properties
 type collapsingMergeTreeTable struct {
 	genericTable
 
@@ -25,9 +23,6 @@ func NewCollapsingMergeTree(table genericTable, tblCfg *config.Table) *collapsin
 	}
 	t.chUsedColumns = append(t.chUsedColumns, tblCfg.SignColumn)
 
-	t.tblBufferFlushQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
-		t.cfg.ChMainTable, strings.Join(t.chUsedColumns, ", "), t.cfg.ChBufferTable, t.cfg.BufferTableRowIdColumn)}
-
 	return &t
 }
 
@@ -38,21 +33,7 @@ func (t *collapsingMergeTreeTable) Sync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN) e
 
 // Write implements io.Writer which is used during the Sync process, see genSync method
 func (t *collapsingMergeTreeTable) Write(p []byte) (int, error) { // sync only
-	if err := t.genSyncWrite(p); err != nil {
-		return 0, err
-	}
-
-	if t.cfg.GenerationColumn != "" {
-		if err := t.bulkUploader.Write([]byte("\t0\t1")); err != nil { // generation id and sign
-			return 0, err
-		}
-	} else {
-		if err := t.bulkUploader.Write([]byte("\t1")); err != nil { // sign
-			return 0, err
-		}
-	}
-
-	if err := t.bulkUploader.Write([]byte("\n")); err != nil {
+	if err := t.genSyncWrite(p, oneStr); err != nil { // sign
 		return 0, err
 	}
 
@@ -62,31 +43,30 @@ func (t *collapsingMergeTreeTable) Write(p []byte) (int, error) { // sync only
 }
 
 // Insert handles incoming insert DML operation
-func (t *collapsingMergeTreeTable) Insert(newRow message.Row) (bool, error) {
+func (t *collapsingMergeTreeTable) Insert(newRow message.Row) error {
 	t.logger.Debugf("insert: %v", newRow)
-	return t.processChTuples(chTuples{
-		appendField(t.convertRow(newRow), oneStr),
-	})
+
+	return t.writeRow(chTuple{newRow, [][]byte{oneStr}})
 }
 
 // Update handles incoming update DML operation
-func (t *collapsingMergeTreeTable) Update(oldRow, newRow message.Row) (bool, error) {
+func (t *collapsingMergeTreeTable) Update(oldRow, newRow message.Row) error {
 	t.logger.Debugf("update: old: %v new: %v", oldRow, newRow)
 	if equal, _ := t.compareRows(oldRow, newRow); equal {
 		t.logger.Debugf("update: tuples seem to be identical")
-		return t.processChTuples(nil)
+		return t.writeRow()
 	}
 
-	return t.processChTuples(chTuples{
-		appendField(t.convertRow(oldRow), minusOneStr),
-		appendField(t.convertRow(newRow), oneStr),
-	})
+	if err := t.writeRow(chTuple{oldRow, [][]byte{minusOneStr}}); err != nil {
+		return err
+	}
+
+	return t.writeRow(chTuple{newRow, [][]byte{oneStr}})
 }
 
 // Delete handles incoming delete DML operation
-func (t *collapsingMergeTreeTable) Delete(oldRow message.Row) (bool, error) {
+func (t *collapsingMergeTreeTable) Delete(oldRow message.Row) error {
 	t.logger.Debugf("delete: %v", oldRow)
-	return t.processChTuples(chTuples{
-		appendField(t.convertRow(oldRow), minusOneStr),
-	})
+
+	return t.writeRow(chTuple{oldRow, [][]byte{minusOneStr}})
 }

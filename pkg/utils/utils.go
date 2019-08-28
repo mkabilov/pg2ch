@@ -4,12 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"time"
 )
 
 //ErrAttemptsExceeded represents attempts exceeded error
 var ErrAttemptsExceeded = errors.New("attempts exceeded")
+
+type Writer interface {
+	io.Writer
+	io.ByteWriter
+}
 
 //Try tries to run {fn} {maxAttempts} times with {attemptInterval} between attempts
 func Try(ctx context.Context, maxAttempts int, attemptInterval time.Duration, fn func() error) error {

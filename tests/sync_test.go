@@ -153,7 +153,7 @@ func (ch *CHLink) safeQuery(t *testing.T, sql string) [][]string {
 	return rows
 }
 
-func (ch *CHLink) waitForCount(t *testing.T, query string, min_count int, timeout int) {
+func (ch *CHLink) waitForCount(t *testing.T, query string, minCount int, timeout int) {
 	counter := 0
 
 	for {
@@ -163,7 +163,7 @@ func (ch *CHLink) waitForCount(t *testing.T, query string, min_count int, timeou
 			t.Fatal(err)
 		}
 
-		if recCount >= min_count {
+		if recCount >= minCount {
 			break
 		}
 
@@ -195,12 +195,12 @@ func initNode(t *testing.T) (*pqt.PostgresNode, *config.Config) {
 
 	cfg, err := config.New(testConfigFile)
 	if cfg.PersStorageType == "diskv" {
-		db_path, err := ioutil.TempDir("", "pg2ch_diskv_dat")
+		dbPath, err := ioutil.TempDir("", "pg2ch_diskv_dat")
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		cfg.PersStoragePath = db_path
+		cfg.PersStoragePath = dbPath
 	} else if cfg.PersStorageType == "mmap" {
 		tmpfile, err := ioutil.TempFile("", "pg2ch_mmap_dat")
 		fmt.Println(tmpfile.Name())

@@ -195,15 +195,15 @@ func (m Begin) String() string {
 		m.FinalLSN.String(), m.Timestamp.Format(time.RFC3339), m.XID)
 }
 
-func (m Relation) String() string {
+func (r Relation) String() string {
 	parts := make([]string, 0)
 
-	parts = append(parts, fmt.Sprintf("OID:%s", m.OID))
-	parts = append(parts, fmt.Sprintf("Name:%s", m.NamespacedName))
-	parts = append(parts, fmt.Sprintf("RepIdentity:%s", m.ReplicaIdentity))
+	parts = append(parts, fmt.Sprintf("OID:%s", r.OID))
+	parts = append(parts, fmt.Sprintf("Name:%s", r.NamespacedName))
+	parts = append(parts, fmt.Sprintf("RepIdentity:%s", r.ReplicaIdentity))
 
 	columns := make([]string, 0)
-	for _, c := range m.Columns {
+	for _, c := range r.Columns {
 		var isKey, mode string
 
 		if c.IsKey {

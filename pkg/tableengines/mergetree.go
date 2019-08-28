@@ -1,9 +1,6 @@
 package tableengines
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/jackc/pgx"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
@@ -16,19 +13,10 @@ type mergeTreeTable struct {
 }
 
 // NewMergeTree instantiates mergeTreeTable
-func NewMergeTree(table genericTable, tblCfg *config.Table) *mergeTreeTable {
-	t := mergeTreeTable{
+func NewMergeTree(table genericTable, _ *config.Table) *mergeTreeTable {
+	return &mergeTreeTable{
 		genericTable: table,
 	}
-
-	if t.cfg.ChBufferTable.IsEmpty() {
-		return &t
-	}
-
-	t.tblBufferFlushQueries = []string{fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM %[3]s ORDER BY %[4]s",
-		t.cfg.ChMainTable, strings.Join(t.chUsedColumns, ", "), t.cfg.ChBufferTable, t.cfg.BufferTableRowIdColumn)}
-
-	return &t
 }
 
 // Sync performs initial sync of the data; pgTx is a transaction in which temporary replication slot is created
@@ -42,31 +30,22 @@ func (t *mergeTreeTable) Write(p []byte) (int, error) {
 		return 0, err
 	}
 
-	if t.cfg.GenerationColumn != "" {
-		if err := t.bulkUploader.Write([]byte("\t0")); err != nil { // generation id
-			return 0, err
-		}
-	}
-	if err := t.bulkUploader.Write([]byte("\n")); err != nil {
-		return 0, err
-	}
-
 	t.printSyncProgress()
 
 	return len(p), nil
 }
 
 // Insert handles incoming insert DML operation
-func (t *mergeTreeTable) Insert(new message.Row) (bool, error) {
-	return t.processChTuples(chTuples{t.convertRow(new)})
+func (t *mergeTreeTable) Insert(new message.Row) error {
+	return t.writeRow(chTuple{new, nil})
 }
 
 // Update handles incoming update DML operation
-func (t *mergeTreeTable) Update(old, new message.Row) (bool, error) {
-	return t.processChTuples(nil)
+func (t *mergeTreeTable) Update(old, new message.Row) error {
+	return t.writeRow()
 }
 
 // Delete handles incoming delete DML operation
-func (t *mergeTreeTable) Delete(old message.Row) (bool, error) {
-	return t.processChTuples(nil)
+func (t *mergeTreeTable) Delete(old message.Row) error {
+	return t.writeRow()
 }

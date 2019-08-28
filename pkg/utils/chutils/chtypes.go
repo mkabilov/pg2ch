@@ -1,7 +1,6 @@
 package chutils
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 
@@ -9,6 +8,7 @@ import (
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
+	"github.com/mkabilov/pg2ch/pkg/utils"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
 )
@@ -21,7 +21,7 @@ const (
 	ajBoolUnknown = 'u'
 	null          = "null"
 
-	timestampLength = 19 // ->2019-06-08 15:50:01<- clickhouse does not support milliseconds
+	timestampLength = 19 // ->2019-06-08 15:50:01<- ClickHouse does not support milliseconds
 )
 
 var (
@@ -63,12 +63,12 @@ var (
 		dbtypes.PgAdjustAjBool:    dbtypes.ChUInt8,    // adjust boolean: true, false, unknown
 	}
 
-	ajBoolUnkownValue = []byte("2")
-	nullStr           = []byte(`\N`)
-	istoreNull        = []byte("[]\t[]")
+	ajBoolUnknownValue = []byte("-1")
+	nullStr            = []byte(`\N`)
+	istoreNull         = []byte("[]\t[]")
 )
 
-// ToClickHouseType converts pg type into clickhouse type
+// ToClickHouseType converts pg type into ClickHouse type
 func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
 	chType, ok := pgToChMap[pgColumn.BaseType]
 	if !ok {
@@ -109,7 +109,7 @@ func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
 	return chType, nil
 }
 
-func convertBaseType(buf *bytes.Buffer, baseType string, tupleData *message.Tuple, colProp config.ColumnProperty) {
+func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple, colProp config.ColumnProperty) error {
 	var w []byte
 
 	if tupleData.Kind == message.TupleNull {
@@ -118,6 +118,8 @@ func convertBaseType(buf *bytes.Buffer, baseType string, tupleData *message.Tupl
 		} else {
 			w = nullStr
 		}
+
+		return nil
 	} else {
 		w = tupleData.Value
 	}
@@ -129,8 +131,7 @@ func convertBaseType(buf *bytes.Buffer, baseType string, tupleData *message.Tupl
 		if tupleData.Kind == message.TupleNull {
 			w = istoreNull
 		} else {
-			pgutils.IstoreToArrays(buf, tupleData.Value)
-			return
+			return pgutils.IstoreToArrays(buf, tupleData.Value)
 		}
 	case dbtypes.PgAdjustAjBool:
 		fallthrough
@@ -138,13 +139,11 @@ func convertBaseType(buf *bytes.Buffer, baseType string, tupleData *message.Tupl
 		if tupleData.Kind != message.TupleNull {
 			switch tupleData.Value[0] {
 			case pgTrue:
-				buf.WriteByte('1')
-				return
+				return buf.WriteByte('1')
 			case pgFalse:
-				buf.WriteByte('0')
-				return
+				return buf.WriteByte('0')
 			case ajBoolUnknown:
-				w = ajBoolUnkownValue
+				w = ajBoolUnknownValue
 			}
 		}
 	case dbtypes.PgTimestampWithTimeZone:
@@ -153,8 +152,8 @@ func convertBaseType(buf *bytes.Buffer, baseType string, tupleData *message.Tupl
 		fallthrough
 	case dbtypes.PgTimestamp:
 		if tupleData.Kind != message.TupleNull {
-			buf.Write(tupleData.Value[:timestampLength])
-			return
+			_, err := buf.Write(tupleData.Value[:timestampLength])
+			return err
 		}
 	case dbtypes.PgTime:
 		fallthrough
@@ -164,44 +163,52 @@ func convertBaseType(buf *bytes.Buffer, baseType string, tupleData *message.Tupl
 		//TODO
 	}
 
-	buf.Write(w)
+	_, err := buf.Write(w)
+	return err
 }
 
-func ConvertColumn(buf *bytes.Buffer, column config.PgColumn, tupleData *message.Tuple, colProp config.ColumnProperty) {
+func ConvertColumn(w utils.Writer, column config.PgColumn, tupleData *message.Tuple, colProp config.ColumnProperty) error {
 	if !column.IsArray {
-		convertBaseType(buf, column.BaseType, tupleData, colProp)
-	} else {
-		// array
-		buf.WriteByte('[')
+		return convertBaseType(w, column.BaseType, tupleData, colProp)
+	}
 
-		switch column.BaseType {
-		case dbtypes.PgBigint:
-			fallthrough
-		case dbtypes.PgInteger:
-			buf.Write(tupleData.Value[1 : len(tupleData.Value)-1])
-		default:
-			val := pgtype.TextArray{}
-			if err := val.DecodeText(nil, tupleData.Value); err != nil {
-				panic(err)
+	err := w.WriteByte('[')
+	if err != nil {
+		return err
+	}
+
+	switch column.BaseType {
+	case dbtypes.PgBigint:
+		fallthrough
+	case dbtypes.PgInteger:
+		_, err = w.Write(tupleData.Value[1 : len(tupleData.Value)-1])
+	default:
+		val := pgtype.TextArray{}
+		if err := val.DecodeText(nil, tupleData.Value); err != nil {
+			return err
+		}
+
+		first := true
+		for _, val := range val.Elements {
+			if !first {
+				if err := w.WriteByte(','); err != nil {
+					return err
+				}
 			}
 
-			first := true
-			for _, val := range val.Elements {
-				if !first {
-					buf.WriteByte(',')
+			first = false
+
+			if val.Status == pgtype.Null {
+				if _, err := w.Write([]byte(null)); err != nil {
+					return err
 				}
-
-				first = false
-
-				if val.Status == pgtype.Null {
-					buf.WriteString(null)
-				} else {
-					buf.WriteByte('\'')
-					buf.WriteString(escaper.Replace(val.String))
-					buf.WriteByte('\'')
+			} else {
+				if _, err := w.Write([]byte("'" + escaper.Replace(val.String) + "'")); err != nil {
+					return err
 				}
 			}
 		}
-		buf.WriteByte(']')
 	}
+
+	return w.WriteByte(']')
 }

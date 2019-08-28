@@ -60,19 +60,19 @@ func (s *diskvStorage) WriteUint(key string, val uint64) error {
 	return s.storage.WriteString(key, fmt.Sprintf("%v", val))
 }
 
-func (d *diskvStorage) Keys() []string {
+func (s *diskvStorage) Keys() []string {
 	var result []string
-	for key := range d.storage.Keys(nil) {
+	for key := range s.storage.Keys(nil) {
 		result = append(result, key)
 	}
 	return result
 }
 
-func (d *diskvStorage) Erase(key string) error {
-	return d.storage.Erase(key)
+func (s *diskvStorage) Erase(key string) error {
+	return s.storage.Erase(key)
 }
 
-func (d *diskvStorage) Close() error {
-	d.storage = nil
+func (s *diskvStorage) Close() error {
+	s.storage = nil
 	return nil
 }

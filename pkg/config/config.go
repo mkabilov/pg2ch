@@ -1,6 +1,7 @@
 package config
 
 import (
+	"compress/flate"
 	"fmt"
 	"log"
 	"os"
@@ -23,11 +24,10 @@ const (
 	defaultClickHousePort  = 8123
 	defaultClickHouseHost  = "127.0.0.1"
 	defaultPostgresHost    = "127.0.0.1"
-	defaultRowIdColumn     = "row_id"
-	defaultMaxBufferLength = 10000
-	defaultFlushThreshold  = 100
+	DefaultRowIDColumn     = "row_id"
+	defaultBufferSize      = 1000
+	defaultGzipBufferSize  = 1000
 	defaultSignColumn      = "sign"
-	defaultVerColumn       = "ver"
 	defaultLsnColumn       = "lsn"
 	defaultIsDeletedColumn = "is_deleted"
 	defaultPerStorageType  = "diskv"
@@ -54,11 +54,23 @@ const (
 	MergeTree
 )
 
-var tableEngines = map[tableEngine]string{
-	CollapsingMergeTree: "CollapsingMergeTree",
-	ReplacingMergeTree:  "ReplacingMergeTree",
-	MergeTree:           "MergeTree",
-}
+var (
+	tableEngines = map[tableEngine]string{
+		CollapsingMergeTree: "CollapsingMergeTree",
+		ReplacingMergeTree:  "ReplacingMergeTree",
+		MergeTree:           "MergeTree",
+	}
+
+	compressionLevels = map[string]int{
+		"no":              flate.NoCompression,
+		"bestspeed":       flate.BestSpeed,
+		"bestcompression": flate.BestCompression,
+		"default":         flate.DefaultCompression,
+		"huffmanonly":     flate.HuffmanOnly,
+	}
+)
+
+type GzipComprLevel int
 
 type pgConnConfig struct {
 	pgx.ConnConfig `yaml:",inline"`
@@ -90,37 +102,35 @@ type ColumnProperty struct {
 
 // Table contains information about the table
 type Table struct {
-	BufferTableRowIdColumn string                    `yaml:"buffer_table_row_id"`
-	ChSyncAuxTable         ChTableName               `yaml:"sync_aux_table"`
-	ChBufferTable          ChTableName               `yaml:"buffer_table"`
-	ChMainTable            ChTableName               `yaml:"main_table"`
-	MaxBufferPgDMLs        int                       `yaml:"max_buffer_length"`
-	VerColumn              string                    `yaml:"ver_column"`
-	IsDeletedColumn        string                    `yaml:"is_deleted_column"`
-	SignColumn             string                    `yaml:"sign_column"`
-	GenerationColumn       string                    `yaml:"generation_column"`
-	Engine                 tableEngine               `yaml:"engine"`
-	FlushThreshold         int                       `yaml:"flush_threshold"`
-	InitSyncSkip           bool                      `yaml:"init_sync_skip"`
-	InitSyncSkipTruncate   bool                      `yaml:"init_sync_skip_truncate"`
-	Columns                map[string]string         `yaml:"columns"`
-	ColumnProperties       map[string]ColumnProperty `yaml:"column_properties"`
-	LsnColumnName          string                    `yaml:"lsn_column_name"`
+	ChSyncAuxTable       ChTableName               `yaml:"sync_aux_table"`
+	ChMainTable          ChTableName               `yaml:"main_table"`
+	IsDeletedColumn      string                    `yaml:"is_deleted_column"`
+	SignColumn           string                    `yaml:"sign_column"`
+	RowIDColumnName      string                    `yaml:"row_id_column"`
+	Engine               tableEngine               `yaml:"engine"`
+	BufferSize           int                       `yaml:"max_buffer_length"`
+	InitSyncSkip         bool                      `yaml:"init_sync_skip"`
+	InitSyncSkipTruncate bool                      `yaml:"init_sync_skip_truncate"`
+	Columns              map[string]string         `yaml:"columns"`
+	ColumnProperties     map[string]ColumnProperty `yaml:"column_properties"`
+	LsnColumnName        string                    `yaml:"lsn_column_name"`
 
 	PgOID         dbtypes.OID         `yaml:"-"`
 	PgTableName   PgTableName         `yaml:"-"`
 	TupleColumns  []message.Column    `yaml:"-"` // columns in the order they are in the table
-	PgColumns     map[string]PgColumn `yaml:"-"`
-	ColumnMapping map[string]ChColumn `yaml:"-"`
+	PgColumns     map[string]PgColumn `yaml:"-"` // map of pg column structs
+	ColumnMapping map[string]ChColumn `yaml:"-"` // mapping pg column -> ch column
 }
 
 type CHConnConfig struct {
-	Host     string            `yaml:"host"`
-	Port     uint32            `yaml:"port"`
-	Database string            `yaml:"database"`
-	User     string            `yaml:"username"`
-	Password string            `yaml:"password"`
-	Params   map[string]string `yaml:"params"`
+	Host            string            `yaml:"host"`
+	Port            uint32            `yaml:"port"`
+	Database        string            `yaml:"database"`
+	User            string            `yaml:"username"`
+	Password        string            `yaml:"password"`
+	Params          map[string]string `yaml:"params"`
+	GzipBufSize     int               `yaml:"gzip_buffer_size"`
+	GzipCompression GzipComprLevel    `yaml:"gzip_compression"`
 }
 
 // Config contains config
@@ -227,6 +237,51 @@ func (tn PgTableName) MarshalYAML() (interface{}, error) {
 	return tn.String(), nil
 }
 
+func (gc *GzipComprLevel) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var str string
+
+	if err := unmarshal(&str); err != nil {
+		return err
+	}
+
+	if str == "" {
+		*gc = GzipComprLevel(flate.NoCompression)
+
+		return nil
+	}
+
+	val, ok := compressionLevels[strings.ToLower(str)]
+	if !ok {
+		return fmt.Errorf("unknown compression level %q", str)
+	}
+	*gc = GzipComprLevel(val)
+
+	return nil
+}
+
+func (cc *CHConnConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var cfg CHConnConfig
+	if err := unmarshal(&cfg); err != nil {
+		return err
+	}
+	if cfg.GzipBufSize == 0 && cfg.GzipCompression != flate.NoCompression {
+		cfg.GzipBufSize = defaultGzipBufferSize
+	}
+	*cc = cfg
+
+	return nil
+}
+
+func (gc GzipComprLevel) String() string {
+	for k, v := range compressionLevels {
+		if v == int(gc) {
+			return k
+		}
+	}
+
+	return "unknown" //should never happen
+}
+
 func (tn PgTableName) String() string {
 	return tn.NamespacedName()
 }
@@ -313,17 +368,14 @@ func New(filepath string) (*Config, error) {
 	}
 
 	for _, tbl := range cfg.Tables {
-		if !tbl.ChBufferTable.IsEmpty() && tbl.ChBufferTable.DatabaseName == "" {
-			tbl.ChBufferTable.DatabaseName = cfg.ClickHouse.Database
-		}
 		if !tbl.ChMainTable.IsEmpty() && tbl.ChMainTable.DatabaseName == "" {
 			tbl.ChMainTable.DatabaseName = cfg.ClickHouse.Database
 		}
 		if !tbl.ChSyncAuxTable.IsEmpty() && tbl.ChSyncAuxTable.DatabaseName == "" {
 			tbl.ChSyncAuxTable.DatabaseName = cfg.ClickHouse.Database
 		}
-		if tbl.FlushThreshold == 0 {
-			tbl.FlushThreshold = defaultFlushThreshold
+		if tbl.BufferSize == 0 {
+			tbl.BufferSize = defaultBufferSize
 		}
 	}
 
@@ -372,24 +424,15 @@ func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return err
 	}
 
-	if val.BufferTableRowIdColumn == "" {
-		val.BufferTableRowIdColumn = defaultRowIdColumn
+	if val.RowIDColumnName == "" {
+		val.RowIDColumnName = DefaultRowIDColumn
 	}
-
 	if val.SignColumn == "" && val.Engine == CollapsingMergeTree {
 		val.SignColumn = defaultSignColumn
 	}
 
 	if val.IsDeletedColumn == "" && val.Engine == ReplacingMergeTree {
 		val.IsDeletedColumn = defaultIsDeletedColumn
-	}
-
-	if val.VerColumn == "" && val.Engine == ReplacingMergeTree {
-		val.VerColumn = defaultVerColumn
-	}
-
-	if val.MaxBufferPgDMLs == 0 {
-		val.MaxBufferPgDMLs = defaultMaxBufferLength
 	}
 
 	if val.LsnColumnName == "" {
@@ -418,7 +461,11 @@ func (c Config) Print() {
 	fmt.Printf("logging level: %s\n", c.LogLevel)
 
 	for tbl, tblCfg := range c.Tables {
-		fmt.Printf("%s: flush threshold: %v buffer threshold: %v\n",
-			tbl, tblCfg.FlushThreshold, tblCfg.MaxBufferPgDMLs)
+		fmt.Printf("%s: flush threshold: %v\n", tbl, tblCfg.BufferSize)
+	}
+
+	fmt.Printf("clickhouse gzip compression: %v\n", c.ClickHouse.GzipCompression)
+	if c.ClickHouse.GzipCompression != flate.NoCompression {
+		fmt.Printf("clickhouse gzip buffer size: %v\n", c.ClickHouse.GzipBufSize)
 	}
 }

@@ -9,8 +9,6 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/config"
 )
 
-const forbiddenError = "cannot modify '" + config.TableLSNKeyPrefix + "*' keys"
-
 func (r *Replicator) startRedisServer() {
 	r.logger.Infof("starting redis-like server: %v", r.cfg.RedisBind)
 	redisServer := redcon.NewServer(r.cfg.RedisBind,

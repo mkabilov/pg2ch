@@ -8,6 +8,7 @@ import (
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
 	"github.com/mkabilov/pg2ch/pkg/utils/tableinfo"
@@ -117,7 +118,7 @@ func (r *Replicator) pgRollback(tx *pgx.Tx) {
 	}
 }
 
-func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) error {
+func (r *Replicator) fetchTableConfig(tx *pgx.Tx, chConn *chutils.CHConn, tblName config.PgTableName) error {
 	var err error
 	cfg := r.cfg.Tables[tblName]
 
@@ -126,7 +127,7 @@ func (r *Replicator) fetchTableConfig(tx *pgx.Tx, tblName config.PgTableName) er
 		return fmt.Errorf("could not get columns for %s postgres table: %v", tblName.String(), err)
 	}
 
-	chColumns, err := tableinfo.TableChColumns(r.chConn, cfg.ChMainTable)
+	chColumns, err := tableinfo.TableChColumns(chConn, cfg.ChMainTable)
 	if err != nil {
 		return fmt.Errorf("could not get columns for %q clickhouse table: %v", cfg.ChMainTable, err)
 	}

@@ -20,27 +20,25 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/message"
 	"github.com/mkabilov/pg2ch/pkg/tableengines"
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils/bulkupload"
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils/chload"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 	"github.com/mkabilov/pg2ch/pkg/utils/kvstorage"
 )
 
-const (
-	generationIDKey = "generation_id"
-)
-
 type clickHouseTable interface {
-	Init() error
+	Init(lastFinalLSN dbtypes.LSN) error
 
 	Begin(finalLSN dbtypes.LSN) error
 	InitSync() error
 	Sync(*pgx.Tx, dbtypes.LSN) error
-	Insert(new message.Row) (tblFlushIsNeeded bool, err error)
-	Update(old message.Row, new message.Row) (tblFlushIsNeeded bool, err error)
-	Delete(old message.Row) (tblFlushIsNeeded bool, err error)
+	Insert(new message.Row) error
+	Update(old message.Row, new message.Row) error
+	Delete(old message.Row) error
 	Truncate() error
-	Commit(doFlush bool) error
+	Commit() error
 
-	FlushToMainTable() error //memory [-> buf table] -> main table; runs outside tx only
+	Flush() error //memory -> main table; runs outside tx only
 }
 
 type Replicator struct {
@@ -53,7 +51,8 @@ type Replicator struct {
 	errCh    chan error
 	endCh    chan bool //used to finish replicator
 
-	chConn        *chutils.CHConn
+	bulkUploader  bulkupload.BulkUploader
+	chLoader      chload.CHLoader
 	pgDeltaConn   *pgx.Conn
 	pgxConnConfig pgx.ConnConfig
 	persStorage   kvstorage.KVStorage
@@ -102,7 +101,6 @@ func New(cfg *config.Config) *Replicator {
 		inTxMutex:     &sync.Mutex{},
 		tablesToFlush: make(map[config.PgTableName]struct{}),
 		inTxTables:    make(map[config.PgTableName]clickHouseTable),
-		chConn:        chutils.MakeChConnection(&cfg.ClickHouse),
 		syncJobs:      make(chan config.PgTableName, cfg.SyncWorkers),
 		pgxConnConfig: cfg.Postgres.Merge(pgx.ConnConfig{
 			Logger:   zapadapter.NewLogger(logger),
@@ -167,10 +165,6 @@ func (r *Replicator) Init() error {
 		if err != nil {
 			return fmt.Errorf("could not read confirmed flush lsn of the replication slot: %v", err)
 		}
-	}
-
-	if err = r.readGenerationID(); err != nil {
-		return fmt.Errorf("could not get start lsn positions: %v", err)
 	}
 
 	if err = r.initTables(); err != nil {
@@ -261,7 +255,7 @@ func (r *Replicator) Run() error {
 
 	for tblName, tbl := range r.chTables {
 		r.logger.Debugw("flushing buffer data", "table", tblName)
-		if err := tbl.FlushToMainTable(); err != nil {
+		if err := tbl.Flush(); err != nil {
 			r.logger.Warnw("could not flush buffer data", "table", tblName, "error", err)
 		}
 
@@ -276,24 +270,23 @@ func (r *Replicator) Run() error {
 }
 
 func (r *Replicator) newTable(tblName config.PgTableName, tblConfig *config.Table) (clickHouseTable, error) {
-	base := tableengines.NewGenericTable(r.ctx, r.logger, r.persStorage, r.chConn,
-		tblConfig, &r.generationID)
+	baseTable := tableengines.NewGenericTable(r.ctx, r.logger, r.persStorage, r.chLoader, r.bulkUploader, tblConfig)
 
 	switch tblConfig.Engine {
 	case config.ReplacingMergeTree:
-		if tblConfig.VerColumn == "" && tblConfig.GenerationColumn == "" {
-			return nil, fmt.Errorf("ReplacingMergeTree requires either version or generation column to be set")
+		if tblConfig.LsnColumnName == "" {
+			return nil, fmt.Errorf("ReplacingMergeTree requires lsn_column_name to be set")
 		}
 
-		return tableengines.NewReplacingMergeTree(base, tblConfig), nil
+		return tableengines.NewReplacingMergeTree(baseTable, tblConfig), nil
 	case config.CollapsingMergeTree:
 		if tblConfig.SignColumn == "" {
 			return nil, fmt.Errorf("CollapsingMergeTree requires sign column to be set")
 		}
 
-		return tableengines.NewCollapsingMergeTree(base, tblConfig), nil
+		return tableengines.NewCollapsingMergeTree(baseTable, tblConfig), nil
 	case config.MergeTree:
-		return tableengines.NewMergeTree(base, tblConfig), nil
+		return tableengines.NewMergeTree(baseTable, tblConfig), nil
 	}
 
 	return nil, fmt.Errorf("%s table engine is not implemented", tblConfig.Engine)
@@ -306,9 +299,14 @@ func (r *Replicator) initTables() error {
 	}
 	defer r.pgCommit(tx)
 
+	r.bulkUploader = bulkupload.New(&r.cfg.ClickHouse, r.cfg.ClickHouse.GzipBufSize, r.cfg.ClickHouse.GzipCompression)
+	r.chLoader = chload.New(&r.cfg.ClickHouse, r.cfg.ClickHouse.GzipCompression)
+
+	chConn := chutils.MakeChConnection(&r.cfg.ClickHouse)
 	for tblName, tblConfig := range r.cfg.Tables {
-		err := r.fetchTableConfig(tx, tblName)
-		if err != nil {
+		var lsn dbtypes.LSN
+
+		if err := r.fetchTableConfig(tx, chConn, tblName); err != nil {
 			return fmt.Errorf("could not get %s table config: %v", tblName.String(), err)
 		}
 
@@ -317,7 +315,14 @@ func (r *Replicator) initTables() error {
 			return fmt.Errorf("could not instantiate table: %v", err)
 		}
 
-		if err := tbl.Init(); err != nil {
+		if r.persStorage.Has(tblName.KeyName()) {
+			lsn, err = r.persStorage.ReadLSN(tblName.KeyName())
+			if err != nil {
+				return fmt.Errorf("could not read lsn for %s table: %v", tblName.String(), err)
+			}
+		}
+
+		if err := tbl.Init(lsn); err != nil {
 			return fmt.Errorf("could not init %s: %v", tblName.String(), err)
 		}
 
@@ -329,23 +334,6 @@ func (r *Replicator) initTables() error {
 		r.oidName[oid] = tblName
 		r.chTables[tblName] = tbl
 	}
-
-	return nil
-}
-
-func (r *Replicator) readGenerationID() error {
-	var err error
-
-	if !r.persStorage.Has(generationIDKey) {
-		return nil
-	}
-
-	r.generationID, err = r.persStorage.ReadUint(generationIDKey)
-	if err != nil {
-		r.logger.Warnf("incorrect value for generation_id in the persistent storage: %v", err)
-	}
-
-	r.logger.Debugf("generation ID: %v", r.generationID)
 
 	return nil
 }

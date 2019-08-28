@@ -27,7 +27,7 @@ func TestMmapBasic(t *testing.T) {
 }
 
 func TestMmapExtend(t *testing.T) {
-	assert := assert.New(t)
+	asrt := assert.New(t)
 
 	tmpfile, err := ioutil.TempFile("", "pg2ch_mmap_extend")
 	if err != nil {
@@ -37,7 +37,7 @@ func TestMmapExtend(t *testing.T) {
 
 	var storage kvstorage.KVStorage
 	storage, err = kvstorage.New("mmap", tmpfile.Name())
-	assert.Nil(err)
+	asrt.Nil(err)
 
 	f, _ := os.Stat(tmpfile.Name())
 	size := f.Size()
@@ -45,53 +45,53 @@ func TestMmapExtend(t *testing.T) {
 	for i := 0; i < kvstorage.MinKeysCount; i++ {
 		key := "key" + strconv.Itoa(i)
 		err := storage.WriteUint(key, uint64(i))
-		assert.Nil(err)
+		asrt.Nil(err)
 	}
 
 	/* check values */
 	for i := 0; i < kvstorage.MinKeysCount; i++ {
 		key := "key" + strconv.Itoa(i)
 		val, err := storage.ReadUint(key)
-		assert.Nil(err)
-		assert.Equal(uint64(i), val)
+		asrt.Nil(err)
+		asrt.Equal(uint64(i), val)
 	}
 
 	f, _ = os.Stat(tmpfile.Name())
 	size2 := f.Size()
-	assert.Equal(size, size2, "size at beginning")
+	asrt.Equal(size, size2, "size at beginning")
 
 	for i := kvstorage.MinKeysCount; i < kvstorage.MinKeysCount*2; i++ {
 		key := "key" + strconv.Itoa(i)
 		err := storage.WriteUint(key, uint64(i))
-		assert.Nil(err)
+		asrt.Nil(err)
 	}
 
 	/* check values */
 	for i := 0; i < kvstorage.MinKeysCount*2; i++ {
 		key := "key" + strconv.Itoa(i)
 		val, err := storage.ReadUint(key)
-		assert.Nil(err)
-		assert.Equal(uint64(i), val)
+		asrt.Nil(err)
+		asrt.Equal(uint64(i), val)
 	}
 
 	f, _ = os.Stat(tmpfile.Name())
 	size3 := f.Size()
-	assert.Equal(size*2, size3, "size at end should twice bigger")
+	asrt.Equal(size*2, size3, "size at end should twice bigger")
 	err = storage.Close()
-	assert.Nil(err)
+	asrt.Nil(err)
 
 	/* reopen and check all keys */
 	storage, err = kvstorage.New("mmap", tmpfile.Name())
-	assert.Nil(err)
+	asrt.Nil(err)
 
 	for i := 0; i < kvstorage.MinKeysCount*2; i++ {
 		key := "key" + strconv.Itoa(i)
 		val, err := storage.ReadUint(key)
-		assert.Nil(err)
-		assert.Equal(uint64(i), val)
+		asrt.Nil(err)
+		asrt.Equal(uint64(i), val)
 	}
 
 	f, _ = os.Stat(tmpfile.Name())
 	size = f.Size()
-	assert.Equal(size, size3, "size should equal old size")
+	asrt.Equal(size, size3, "size should equal old size")
 }

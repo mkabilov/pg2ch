@@ -82,7 +82,9 @@ var (
 func TestIstoreToArrays(t *testing.T) {
 	for i, tt := range istoreToArrayTest {
 		got := &bytes.Buffer{}
-		IstoreToArrays(got, tt.istore)
+		if err := IstoreToArrays(got, tt.istore); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		if bytes.Compare(got.Bytes(), tt.expected) != 0 {
 			t.Fatalf("%d: Expected: %v, got: %v", i, tt.expected, got)
 		}
@@ -91,6 +93,7 @@ func TestIstoreToArrays(t *testing.T) {
 
 func BenchmarkIstoreToArrays(b *testing.B) {
 	var buf bytes.Buffer
+
 	for n := 0; n < b.N; n++ {
 		IstoreToArrays(&buf, istoreToArrayTest[1].istore)
 		buf.Reset()

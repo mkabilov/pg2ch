@@ -12,14 +12,14 @@ import (
 
 func (r *Replicator) tblBuffersFlush() error { // protected by inTxMutex: inactivity merge or on commit
 	for tblName := range r.tablesToFlush {
-		r.logger.Debugf("processing %s table", tblName)
+		r.logger.Debugf("buffer flush: processing %s table", tblName)
 		select {
 		case <-r.ctx.Done():
 			return nil
 		default:
 		}
 
-		if err := r.chTables[tblName].FlushToMainTable(); err != nil {
+		if err := r.chTables[tblName].Flush(); err != nil {
 			return fmt.Errorf("could not commit %s table: %v", tblName.String(), err)
 		}
 
@@ -112,13 +112,6 @@ func (r *Replicator) PrintTablesLSN() {
 	}
 }
 
-func (r *Replicator) incrementGeneration() {
-	r.generationID++
-	if err := r.persStorage.WriteUint(generationIDKey, r.generationID); err != nil {
-		r.logger.Warnf("could not save generation id: %v", err)
-	}
-}
-
 func (r *Replicator) inactivityTblBufferFlush() {
 	defer r.wg.Done()
 
@@ -176,10 +169,8 @@ func (r *Replicator) processCommit() error {
 		"inTxTables", inTxTables,
 		"flushIsNeeded", r.curTxTblFlushIsNeeded)
 	if !r.isEmptyTx {
-		r.incrementGeneration()
-
 		for _, chTbl := range r.inTxTables {
-			if err := chTbl.Commit(r.curTxTblFlushIsNeeded); err != nil {
+			if err := chTbl.Commit(); err != nil {
 				return fmt.Errorf("could not commit: %v", err)
 			}
 		}
@@ -217,10 +208,8 @@ func (r *Replicator) processInsert(msg *message.Insert) error {
 		return nil
 	}
 
-	if tblFlushIsNeeded, err := chTbl.Insert(msg.NewRow); err != nil {
+	if err := chTbl.Insert(msg.NewRow); err != nil {
 		return fmt.Errorf("could not insert: %v", err)
-	} else {
-		r.curTxTblFlushIsNeeded = r.curTxTblFlushIsNeeded || tblFlushIsNeeded
 	}
 
 	r.isEmptyTx = false
@@ -236,10 +225,8 @@ func (r *Replicator) processUpdate(msg *message.Update) error {
 		return nil
 	}
 
-	if tblFlushIsNeeded, err := chTbl.Update(msg.OldRow, msg.NewRow); err != nil {
+	if err := chTbl.Update(msg.OldRow, msg.NewRow); err != nil {
 		return fmt.Errorf("could not update: %v", err)
-	} else {
-		r.curTxTblFlushIsNeeded = r.curTxTblFlushIsNeeded || tblFlushIsNeeded
 	}
 
 	r.isEmptyTx = false
@@ -255,10 +242,8 @@ func (r *Replicator) processDelete(msg *message.Delete) error {
 		return nil
 	}
 
-	if tblFlushIsNeeded, err := chTbl.Delete(msg.OldRow); err != nil {
+	if err := chTbl.Delete(msg.OldRow); err != nil {
 		return fmt.Errorf("could not delete: %v", err)
-	} else {
-		r.curTxTblFlushIsNeeded = r.curTxTblFlushIsNeeded || tblFlushIsNeeded
 	}
 
 	r.isEmptyTx = false

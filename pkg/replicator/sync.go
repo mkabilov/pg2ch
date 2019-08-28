@@ -11,6 +11,8 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
 )
 
+const slotCreateAttempts = 100
+
 func (r *Replicator) SyncTables(syncTables []config.PgTableName, async bool) error {
 	if len(syncTables) == 0 {
 		return nil
@@ -125,7 +127,7 @@ func (r *Replicator) GetTablesToSync() ([]config.PgTableName, error) {
 }
 
 func (r *Replicator) getTxAndLSN(conn *pgx.Conn, pgTableName config.PgTableName) (*pgx.Tx, dbtypes.LSN, error) { //TODO: better name: getSnapshot?
-	for attempt := 0; attempt < 10; attempt++ {
+	for attempt := 0; attempt < slotCreateAttempts; attempt++ {
 		select {
 		case <-r.ctx.Done():
 			return nil, dbtypes.InvalidLSN, fmt.Errorf("context done")

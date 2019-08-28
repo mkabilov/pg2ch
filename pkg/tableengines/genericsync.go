@@ -15,16 +15,18 @@ import (
 
 const (
 	syncProgressBatch = 1000000
-	gzipFlushCount    = 10000
 )
 
-func (t *genericTable) genSyncWrite(p []byte) error {
+func (t *genericTable) genSyncWrite(p []byte, extras ...[]byte) error {
 	row, err := pgutils.DecodeCopyToTuples(t.syncBuf, p)
 	if err != nil {
 		return fmt.Errorf("could not parse copy string: %v", err)
 	}
 
-	if err := t.bulkUploader.Write(t.convertRow(row)); err != nil {
+	if err := t.writeRowToBuffer(t.bulkUploader, row, t.syncSnapshotLSN, extras...); err != nil {
+		return err
+	}
+	if err := t.bulkUploader.WriteByte('\n'); err != nil {
 		return err
 	}
 
@@ -50,9 +52,10 @@ func (t *genericTable) InitSync() error {
 
 // Sync the table. Saves PostgreSQL snapshot LSN and loads the buffered data
 // after this snapshot to the table.
-func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, w io.Writer) error {
+func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, tblWriter io.Writer) error {
 	t.syncSnapshotLSN = snapshotLSN
 
+	startTime := time.Now()
 	if tblLiveTuples, err := pgutils.PgStatLiveTuples(pgTx, t.cfg.PgTableName); err != nil {
 		t.logger.Warnf("genSync: could not get approximate number of rows: %v", err)
 	} else {
@@ -76,8 +79,10 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, w io.Write
 	}(loaderErrCh)
 
 	t.syncLastBatchTime = time.Now()
-	ct, err := pgTx.CopyToWriter(w, fmt.Sprintf("copy (select %s from only %s) to stdout",
-		strings.Join(t.pgUsedColumns, ", "), t.cfg.PgTableName.String()))
+	ct, err := pgTx.CopyToWriter(
+		tblWriter,
+		fmt.Sprintf("copy (select %s from only %s) to stdout",
+			strings.Join(t.pgUsedColumns, ", "), t.cfg.PgTableName.String()))
 	if err != nil {
 		return fmt.Errorf("could not copy: %v", err)
 	}
@@ -92,17 +97,19 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, w io.Write
 			t.syncedRows, pgRows)
 	}
 
-	t.logger.Infof("copied during the sync: %d rows", t.syncedRows)
+	t.logger.Infof("copied during the sync: %d rows in %v (%0.f rows/sec)",
+		t.syncedRows, time.Since(startTime), float64(t.syncedRows)/time.Since(startTime).Seconds())
 
 	if err := <-loaderErrCh; err != nil {
 		return fmt.Errorf("could not load to CH: %v", err)
 	}
 	close(loaderErrCh)
 
-	return t.postSync()
+	return t.loadSyncDeltas()
 }
 
-func (t *genericTable) postSync() error {
+// load changes of the table which occurred during the sync and stored in the aux table
+func (t *genericTable) loadSyncDeltas() error {
 	t.Lock()
 	defer t.Unlock()
 	defer func() {
@@ -110,20 +117,21 @@ func (t *genericTable) postSync() error {
 		t.syncBuf = nil
 	}()
 
-	if err := t.flushMemBuffer(); err != nil {
+	if err := t.flushBuffer(); err != nil {
 		return fmt.Errorf("could not flush buffer: %v", err)
 	}
 
 	t.logger.Infof("delta size: %s", t.deltaSize(t.syncSnapshotLSN))
 
-	if err := t.chLoader.Exec(
-		fmt.Sprintf("INSERT INTO %[1]s(%[2]s) SELECT %[2]s FROM %[3]s WHERE %[4]s > %[5]d ORDER BY %[6]s",
-			t.cfg.ChMainTable,
-			strings.Join(t.chUsedColumns, ","),
-			t.cfg.ChSyncAuxTable,
-			t.cfg.LsnColumnName,
-			uint64(t.syncSnapshotLSN),
-			t.cfg.BufferTableRowIdColumn)); err != nil {
+	chSql := fmt.Sprintf("INSERT INTO %[1]s(%[2]s) SELECT %[2]s FROM %[3]s WHERE %[4]s > %[5]d ORDER BY %[6]s",
+		t.cfg.ChMainTable,
+		strings.Join(t.chUsedColumns, ","),
+		t.cfg.ChSyncAuxTable,
+		t.cfg.LsnColumnName,
+		uint64(t.syncSnapshotLSN),
+		t.cfg.RowIDColumnName)
+	t.logger.Debugf("executing: %s", chSql)
+	if err := t.chLoader.Exec(chSql); err != nil {
 		return fmt.Errorf("could not merge with sync aux table: %v", err)
 	}
 
@@ -141,34 +149,36 @@ func (t *genericTable) postSync() error {
 }
 
 func (t *genericTable) printSyncProgress() {
-	if t.syncedRows%syncProgressBatch == 0 {
-		var (
-			eta  time.Duration
-			left uint64
-		)
-		speed := float64(syncProgressBatch) / time.Since(t.syncLastBatchTime).Seconds()
-		if t.liveTuples >= t.syncedRows {
-			left = t.liveTuples - t.syncedRows
-		}
-
-		if t.syncedRows < t.liveTuples {
-			eta = time.Second * time.Duration(left/uint64(speed))
-		}
-
-		t.logger.Infof("%d rows copied to %q (ETA: %v left: %v speed: %.0f rows/s)",
-			t.syncedRows, t.cfg.ChMainTable, eta.Truncate(time.Second), left, speed)
-
-		t.syncLastBatchTime = time.Now()
+	if t.syncedRows%syncProgressBatch != 0 {
+		return
 	}
+
+	var (
+		eta  time.Duration
+		left uint64
+	)
+	speed := float64(syncProgressBatch) / time.Since(t.syncLastBatchTime).Seconds()
+	if t.liveTuples >= t.syncedRows {
+		left = t.liveTuples - t.syncedRows
+	}
+
+	if t.syncedRows < t.liveTuples {
+		eta = time.Second * time.Duration(left/uint64(speed))
+	}
+
+	t.logger.Infof("%d rows copied to %q (ETA: %v left: %v speed: %.0f rows/s)",
+		t.syncedRows, t.cfg.ChMainTable, eta.Truncate(time.Second), left, speed)
+
+	t.syncLastBatchTime = time.Now()
 }
 
 func (t *genericTable) syncAuxTableColumns() []string {
-	return append(t.chUsedColumns, t.cfg.BufferTableRowIdColumn, t.cfg.LsnColumnName)
+	return append(t.chUsedColumns, t.cfg.RowIDColumnName)
 }
 
 func (t *genericTable) deltaSize(lsn dbtypes.LSN) string {
 	res, err := t.chLoader.Query(fmt.Sprintf("SELECT count(*) FROM %s WHERE %s > %d",
-		t.cfg.ChSyncAuxTable, t.cfg.LsnColumnName, uint64(lsn))) //TODO: sql injections
+		t.cfg.ChSyncAuxTable, t.cfg.LsnColumnName, uint64(lsn)))
 	if err != nil {
 		t.logger.Fatalf("query error: %v", err)
 	}

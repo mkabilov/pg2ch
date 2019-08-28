@@ -70,10 +70,10 @@ func mapFile(file *os.File, fileSize int) ([]byte, error) {
 
 func newMmapStorage(location string) (KVStorage, error) {
 	var (
-		file     *os.File
-		fileSize      = minFileSize
-		isNew    bool = false
+		file  *os.File
+		isNew bool
 	)
+	fileSize := minFileSize
 
 	flags := os.O_RDWR | unix.O_CLOEXEC
 	if f, err := os.Stat(location); os.IsNotExist(err) {
@@ -201,7 +201,7 @@ func (s *mmapStorage) WriteUint(key string, val uint64) error {
 
 	s.indexMap[key] = pos
 	s.data[pos] = byte(len(key))
-	copy(s.data[pos+1:], []byte(key))
+	copy(s.data[pos+1:], key)
 	binary.BigEndian.PutUint64(s.data[pos+maxKeySize:], val)
 	msync(s.data[pos:], blockSize)
 	return nil

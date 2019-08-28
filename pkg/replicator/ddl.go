@@ -15,6 +15,12 @@ var orderByCols = map[string]string{}
 //GenerateChDDL generates clickhouse table DDLs
 //TODO: refactor me
 func (r *Replicator) GenerateChDDL() error {
+	for key, val := range orderByCols {
+		newKey := r.cfg.ClickHouse.Database + "." + key
+		delete(orderByCols, key)
+		orderByCols[newKey] = val
+	}
+
 	if err := r.pgDeltaConnect(); err != nil {
 		return fmt.Errorf("could not connect to pg: %v", err)
 	}
@@ -33,6 +39,9 @@ func (r *Replicator) GenerateChDDL() error {
 		)
 
 		tblCfg := r.cfg.Tables[tblName]
+		if _, ok := processedTables[tblCfg.ChMainTable]; ok {
+			continue
+		}
 
 		tblCfg.TupleColumns, tblCfg.PgColumns, err = tableinfo.TablePgColumns(tx, tblName)
 		if err != nil {
@@ -78,19 +87,19 @@ func (r *Replicator) GenerateChDDL() error {
 			if hasColumnCfg {
 				switch {
 				case columnCfg.IstoreKeysSuffix != "":
-					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%s Array(Int32)", chColName, columnCfg.IstoreKeysSuffix))
+					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s_%s Array(Int32)", chColName, columnCfg.IstoreKeysSuffix))
 					if pgCol.BaseType == dbtypes.PgAdjustBigIstore {
-						chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%s Array(Int64)", chColName, columnCfg.IstoreValuesSuffix))
+						chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s_%s Array(Int64)", chColName, columnCfg.IstoreValuesSuffix))
 					} else {
-						chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s_%s Array(Int32)", chColName, columnCfg.IstoreValuesSuffix))
+						chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s_%s Array(Int32)", chColName, columnCfg.IstoreValuesSuffix))
 					}
 				default:
-					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s %s", chColName, chColType))
+					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s %s", chColName, chColType))
 				}
 				continue
 			}
 
-			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s %s", chColName, chColType))
+			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s %s", chColName, chColType))
 		}
 		pkColumns := make([]string, pkColumnNumb)
 
@@ -108,28 +117,21 @@ func (r *Replicator) GenerateChDDL() error {
 			pkColumns[pgCol.PkCol-1] = pgColName
 		}
 
-		if tblCfg.GenerationColumn != "" {
-			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s UInt32", tblCfg.GenerationColumn))
+		if tblCfg.LsnColumnName != "" {
+			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s UInt32", tblCfg.LsnColumnName))
 		}
 
 		switch tblCfg.Engine {
 		case config.ReplacingMergeTree:
-			if tblCfg.VerColumn != "" {
-				chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s UInt64", tblCfg.VerColumn))
-				engineParams = tblCfg.VerColumn
-			} else {
-				engineParams = tblCfg.GenerationColumn
-			}
-
-			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s UInt8", tblCfg.IsDeletedColumn))
+			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s UInt8", tblCfg.IsDeletedColumn))
 		case config.CollapsingMergeTree:
 			engineParams = tblCfg.SignColumn
-			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("    %s Int8", engineParams))
+			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s Int8", engineParams))
 		}
 
-		tableDDL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = %s(%s)",
+		tableDDL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s) Engine = %s(%s)",
 			tblCfg.ChMainTable,
-			strings.Join(chColumnDDLs, ",\n"),
+			strings.Join(chColumnDDLs, ","),
 			tblCfg.Engine.String(),
 			engineParams)
 		if partitionColumn != "" {
@@ -137,37 +139,20 @@ func (r *Replicator) GenerateChDDL() error {
 		}
 
 		if ob, ok := orderByCols[tblCfg.ChMainTable.String()]; ok {
-			orderBy = ob
+			orderBy = fmt.Sprintf(" ORDER BY(%s)", ob)
 		} else if len(pkColumns) > 0 {
 			orderBy = fmt.Sprintf(" ORDER BY(%s)", strings.Join(pkColumns, ", "))
 		}
 		tableDDL += orderBy + ";"
 
-		if _, ok := processedTables[tblCfg.ChMainTable]; !ok {
-			fmt.Println(tableDDL)
-			processedTables[tblCfg.ChMainTable] = struct{}{}
-		}
-
-		if !tblCfg.ChBufferTable.IsEmpty() {
-			if _, ok := processedTables[tblCfg.ChBufferTable]; !ok {
-				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree()%s;\n",
-					tblCfg.ChBufferTable,
-					strings.Join(
-						append(chColumnDDLs, fmt.Sprintf("    %s UInt64", tblCfg.BufferTableRowIdColumn)), ",\n"),
-					orderBy)
-				processedTables[tblCfg.ChBufferTable] = struct{}{}
-			}
-		}
+		fmt.Println(tableDDL)
+		processedTables[tblCfg.ChMainTable] = struct{}{}
 
 		if !tblCfg.ChSyncAuxTable.IsEmpty() {
 			if _, ok := processedTables[tblCfg.ChSyncAuxTable]; !ok {
-				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (\n%s\n) Engine = MergeTree()%s;\n",
+				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (%s) Engine = MergeTree()%s;\n",
 					tblCfg.ChSyncAuxTable,
-					strings.Join(
-						append(chColumnDDLs,
-							fmt.Sprintf("    %s UInt64", tblCfg.BufferTableRowIdColumn),
-							fmt.Sprintf("    %s UInt64", tblCfg.LsnColumnName),
-						), ",\n"),
+					strings.Join(append(chColumnDDLs, fmt.Sprintf("%s UInt64", tblCfg.RowIDColumnName)), ","),
 					orderBy)
 				processedTables[tblCfg.ChSyncAuxTable] = struct{}{}
 			}
