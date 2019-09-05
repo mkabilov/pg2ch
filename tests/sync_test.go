@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	initpg = `
+	initPg = `
 do $$
 begin
 	if not exists (select from pg_catalog.pg_roles
@@ -46,22 +46,22 @@ insert into pg3(a, b) select
 	bigistore(array_fill(i + 2, array[3]), array_fill(i + 3, array[3]))
 from generate_series(1, 10000) i;
 `
-	addsql = `
+	addSQL = `
 insert into pg1(a,b,c,d,f1,f2,bo,num,ch) select i, i + 1, i + 2, i::text,
-	i + 1.1, i + 2.1, true, i + 3, (i+4)::text from generate_series(1, %d) i;
+	i + 1.1, i + 2.1, true, i + 3, (i+4)::text from generate_series(1, %[1]d) i;
 insert into pg2(a, b, c) select array_fill(i, array[3]), array_fill(i + 1, array[3]),
-	array_fill(i::text, array[3]) from generate_series(1, %d) i;
+	array_fill(i::text, array[3]) from generate_series(1, %[1]d) i;
 insert into pg3(a, b) select
 	istore(array_fill(i, array[1]), array_fill(i + 1, array[1])),
 	bigistore(array_fill(i + 2, array[1]), array_fill(i + 3, array[1]))
-from generate_series(1, %d) i;
+from generate_series(1, %[1]d) i;
 `
 	testConfigFile = "./test.yaml"
 )
 
 var (
-	addsql100    = fmt.Sprintf(addsql, 100, 100, 100)
-	addsql100000 = fmt.Sprintf(addsql, 100000, 100000, 100000)
+	addsql100    = fmt.Sprintf(addSQL, 100)
+	addsql100000 = fmt.Sprintf(addSQL, 100000)
 )
 
 type CHLink struct {
@@ -84,7 +84,8 @@ var (
 			bo Int8,
 			num Decimal(10, 2),
 			ch String,
-			sign Int8
+			sign Int8,
+		    lsn UInt64
 		 ) engine=CollapsingMergeTree(sign) order by id;`,
 		`create table pg2ch_test.ch1_aux(
 			id UInt64,
@@ -106,7 +107,8 @@ var (
 			a Array(Int32),
 			b Array(Int64),
 			c Array(String),
-			sign Int8
+			sign Int8,
+			lsn UInt64
 		 ) engine=CollapsingMergeTree(sign) order by id;`,
 		`create table pg2ch_test.ch2_aux(
 			id UInt64,
@@ -123,7 +125,8 @@ var (
 			a_values Array(Int32),
 			b_keys Array(Int32),
 			b_values Array(Int64),
-			sign Int8
+			sign Int8,
+			lsn UInt64
 		 ) engine=CollapsingMergeTree(sign) order by id;`,
 		`create table pg2ch_test.ch3_aux(
 			id UInt64,
@@ -153,7 +156,7 @@ func (ch *CHLink) safeQuery(t *testing.T, sql string) [][]string {
 	return rows
 }
 
-func (ch *CHLink) waitForCount(t *testing.T, query string, minCount int, timeout int) {
+func (ch *CHLink) waitForCount(t *testing.T, query string, minCount int, maxAttempts int) {
 	counter := 0
 
 	for {
@@ -170,8 +173,8 @@ func (ch *CHLink) waitForCount(t *testing.T, query string, minCount int, timeout
 		counter += 1
 		time.Sleep(time.Second)
 
-		if counter >= timeout {
-			t.Fatal("timeout on query: ", query)
+		if counter >= maxAttempts {
+			t.Fatalf("attempts exceeded for query: %v", query)
 		}
 	}
 
@@ -236,7 +239,7 @@ max_logical_replication_workers = 10
 	   host	replication		all		::1/128			trust
 	`)
 	node.Start()
-	node.Execute("postgres", initpg)
+	node.Execute("postgres", initPg)
 	node.Execute("postgres", fmt.Sprintf("create publication %s for all tables",
 		cfg.Postgres.PublicationName))
 	node.Execute("postgres", fmt.Sprintf("select pg_create_logical_replication_slot('%s', 'pgoutput')",
@@ -273,47 +276,44 @@ func TestBasicSync(t *testing.T) {
 		defer repl.Finish()
 
 		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", 1, 10)
-		if ch.getCount(t, "select count(*) from pg2ch_test.ch1") != 10000 {
-			t.Fatal("count shoud be equal to 10000")
+		if count := ch.getCount(t, "select count(*) from pg2ch_test.ch1"); count != 10000 {
+			t.Fatalf("count for ch1 should be equal to 10000, got: %v", count)
 		}
 
 		for i := 0; i < 100; i++ {
 			node.Execute("postgres", addsql100)
 		}
 		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", 20000, 10)
-		count := ch.getCount(t, "select count(*) from pg2ch_test.ch1")
-		if count != 20000 {
-			t.Fatal("count shoud be equal to 20000")
+		if count := ch.getCount(t, "select count(*) from pg2ch_test.ch1"); count != 20000 {
+			t.Fatalf("count for ch1 should be equal to 20000, got: %v", count)
 		}
 
-		count = ch.getCount(t, "select count(*) from pg2ch_test.ch2")
-		if count != 20000 {
-			t.Fatal("count shoud be equal to 20000")
+		if count := ch.getCount(t, "select count(*) from pg2ch_test.ch2"); count != 20000 {
+			t.Fatalf("count for ch2 should be equal to 20000, got: %v", count)
 		}
 
-		count = ch.getCount(t, "select count(*) from pg2ch_test.ch3")
-		if count != 20000 {
-			t.Fatal("count shoud be equal to 20000")
+		if count := ch.getCount(t, "select count(*) from pg2ch_test.ch3"); count != 20000 {
+			t.Fatalf("ch3: count should be equal to 20000, got: %v", count)
 		}
 
 		rows := ch.safeQuery(t, "select * from pg2ch_test.ch1 order by id desc limit 10")
-		assert.Equal(t, rows[0], []string{"20000", "100", "101", "102", "100", "101.1", "102.1", "1", "103.00", "104", "1"}, "row 0")
+		assert.Equal(t, []string{"20000", "100", "101", "102", "100", "101.1", "102.1", "1", "103.00", "104", "1"}, rows[0][0:len(rows[0])-1], "row 0")
 
 		rows = ch.safeQuery(t, "select * from pg2ch_test.ch2 order by id desc limit 10")
-		assert.Equal(t, rows[0][0], "20000", "row 0")
-		assert.Equal(t, rows[0][1], "[100,100,100]", "row 0")
-		assert.Equal(t, rows[0][2], "[101,101,101]", "row 0")
-		assert.Equal(t, rows[0][3], "['100','100','100']", "row 0")
-		assert.Equal(t, rows[0][4], "1", "row 0")
+		assert.Equal(t, "20000", rows[0][0], "row 0")
+		assert.Equal(t, "[100,100,100]", rows[0][1], "row 0")
+		assert.Equal(t, "[101,101,101]", rows[0][2], "row 0")
+		assert.Equal(t, "['100','100','100']", rows[0][3], "row 0")
+		assert.Equal(t, "1", rows[0][4], "row 0")
 
-		assert.Equal(t, rows[1][0], "19999", "row 1")
-		assert.Equal(t, rows[1][1], "[99,99,99]", "row 1")
-		assert.Equal(t, rows[1][2], "[100,100,100]", "row 1")
-		assert.Equal(t, rows[1][3], "['99','99','99']", "row 1")
-		assert.Equal(t, rows[1][4], "1", "row 0")
+		assert.Equal(t, "19999", rows[1][0], "row 1")
+		assert.Equal(t, "[99,99,99]", rows[1][1], "row 1")
+		assert.Equal(t, "[100,100,100]", rows[1][2], "row 1")
+		assert.Equal(t, "['99','99','99']", rows[1][3], "row 1")
+		assert.Equal(t, "1", rows[1][4], "row 0")
 
 		rows = ch.safeQuery(t, "select * from pg2ch_test.ch3 order by id desc limit 10")
-		assert.Equal(t, rows[0], []string{"20000", "[100]", "[101]", "[102]", "[103]", "1"})
+		assert.Equal(t, []string{"20000", "[100]", "[101]", "[102]", "[103]", "1"}, rows[0][0:len(rows[0])-1])
 	})
 
 	<-stopCh
@@ -332,7 +332,7 @@ func TestBasicSync(t *testing.T) {
 	t.Run("second round of data", func(t *testing.T) {
 		defer repl.Finish()
 
-		for repl.State() != "WORKING" {
+		for repl.State() != replicator.StateWorking {
 			time.Sleep(time.Second)
 		}
 		repl.PrintTablesLSN()
@@ -399,7 +399,7 @@ func TestConcurrentSync(t *testing.T) {
 	t.Run("checking concurrend inserted data", func(t *testing.T) {
 		defer repl.Finish()
 
-		for repl.State() != "WORKING" {
+		for repl.State() != replicator.StateWorking {
 			time.Sleep(time.Second)
 		}
 

@@ -51,8 +51,6 @@ type Replicator struct {
 	errCh    chan error
 	endCh    chan bool //used to finish replicator
 
-	bulkUploader  bulkupload.BulkUploader
-	chLoader      chload.CHLoader
 	pgDeltaConn   *pgx.Conn
 	pgxConnConfig pgx.ConnConfig
 	persStorage   kvstorage.KVStorage
@@ -113,7 +111,7 @@ func New(cfg *config.Config) *Replicator {
 	}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.logger = logger.Sugar()
-	r.curState.Store(stateInit)
+	r.curState.Store(StateInit)
 
 	if cfg.Postgres.Debug {
 		r.pgxConnConfig.LogLevel = pgx.LogLevelDebug
@@ -215,7 +213,7 @@ func (r *Replicator) Run() error {
 	if err := r.consumer.Run(r); err != nil {
 		return err
 	}
-	r.curState.Store(stateWorking)
+	r.curState.Store(StateWorking)
 
 	if r.cfg.RedisBind != "" {
 		go r.startRedisServer()
@@ -231,8 +229,8 @@ func (r *Replicator) Run() error {
 	}
 
 	r.waitForShutdown()
-	if r.curState.Load() != statePaused {
-		r.curState.Store(stateShuttingDown)
+	if r.curState.Load() != StatePaused {
+		r.curState.Store(StateShuttingDown)
 		r.inTxMutex.Lock()
 	} else {
 		r.logger.Debugf("in paused state, no need to wait for tx to finish")
@@ -270,7 +268,9 @@ func (r *Replicator) Run() error {
 }
 
 func (r *Replicator) newTable(tblName config.PgTableName, tblConfig *config.Table) (clickHouseTable, error) {
-	baseTable := tableengines.NewGenericTable(r.ctx, r.logger, r.persStorage, r.chLoader, r.bulkUploader, tblConfig)
+	chLoader := chload.New(&r.cfg.ClickHouse, r.cfg.ClickHouse.GzipCompression)
+	bulkUploader := bulkupload.New(&r.cfg.ClickHouse, r.cfg.ClickHouse.GzipBufSize, r.cfg.ClickHouse.GzipCompression)
+	baseTable := tableengines.NewGenericTable(r.ctx, r.logger, r.persStorage, chLoader, bulkUploader, tblConfig)
 
 	switch tblConfig.Engine {
 	case config.ReplacingMergeTree:
@@ -298,9 +298,6 @@ func (r *Replicator) initTables() error {
 		return err
 	}
 	defer r.pgCommit(tx)
-
-	r.bulkUploader = bulkupload.New(&r.cfg.ClickHouse, r.cfg.ClickHouse.GzipBufSize, r.cfg.ClickHouse.GzipCompression)
-	r.chLoader = chload.New(&r.cfg.ClickHouse, r.cfg.ClickHouse.GzipCompression)
 
 	chConn := chutils.MakeChConnection(&r.cfg.ClickHouse)
 	for tblName, tblConfig := range r.cfg.Tables {

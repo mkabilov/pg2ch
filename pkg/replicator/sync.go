@@ -46,29 +46,15 @@ func (r *Replicator) SyncTables(syncTables []config.PgTableName, async bool) err
 	return nil
 }
 
-func (r *Replicator) syncTable(pgTableName config.PgTableName) error {
-	conn, err := pgx.Connect(r.pgxConnConfig)
-	if err != nil {
-		return fmt.Errorf("could not connect: %v", err)
-	}
-	defer func() {
-		if err := conn.Close(); err != nil {
-			r.errCh <- err
-		}
-	}()
-	connInfo, err := initPostgresql(conn)
-	if err != nil {
-		return fmt.Errorf("could not fetch conn info: %v", err)
-	}
-	conn.ConnInfo = connInfo
-
+func (r *Replicator) syncTable(conn *pgx.Conn, pgTableName config.PgTableName) error {
 	tx, snapshotLSN, err := r.getTxAndLSN(conn, pgTableName)
 	if err != nil {
 		return err
 	}
 	defer func() {
+		r.logger.Debugf("committing pg transaction, pid: %v", conn.PID())
 		if err := tx.Commit(); err != nil {
-			r.errCh <- err
+			r.errCh <- fmt.Errorf("could not commit: %v", err)
 		}
 	}()
 
@@ -162,11 +148,42 @@ func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
 	defer func() {
 		doneCh <- struct{}{}
 	}()
+	conn, err := pgx.Connect(r.pgxConnConfig)
+	if err != nil {
+		select {
+		case r.errCh <- fmt.Errorf("could not connect: %v", err):
+		default:
+		}
+	}
+	r.logger.Debugf("sync job %d: connected to postgres, pid: %v", i, conn.PID())
+
+	defer func() {
+		r.logger.Debugf("sync job %d: closing pg connection, pid: %v", i, conn.PID())
+		if err := conn.Close(); err != nil {
+			select {
+			case r.errCh <- fmt.Errorf("could not close connection: %v", err):
+			default:
+			}
+		}
+	}()
+
+	connInfo, err := initPostgresql(conn)
+	if err != nil {
+		select {
+		case r.errCh <- fmt.Errorf("could not fetch conn info: %v", err):
+		default:
+		}
+	}
+	conn.ConnInfo = connInfo
 
 	for pgTableName := range r.syncJobs {
 		r.logger.Debugf("sync job %d: starting syncing %q pg table", i, pgTableName)
-		if err := r.syncTable(pgTableName); err != nil {
-			r.errCh <- err
+		if err := r.syncTable(conn, pgTableName); err != nil {
+			select {
+			case r.errCh <- fmt.Errorf("could not sync table %s: %v", pgTableName, err):
+			default:
+			}
+
 			return
 		}
 

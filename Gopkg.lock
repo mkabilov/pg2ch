@@ -52,7 +52,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:f58b8bcf5268648964d8c55287fae363f3acdd69de460bf55e74864722c1f707"
+  digest = "1:555387d74ab1af5ea1f92e273adc1eb227fde7077eb1d4898f92461577240279"
   name = "github.com/jackc/pgx"
   packages = [
     ".",
@@ -64,7 +64,7 @@
     "pgtype",
   ]
   pruneopts = "UT"
-  revision = "719800394dbe207c695fa782b0f960b488485eb0"
+  revision = "f26e4c0e6921395ee2556c61c0152b031254ff6c"
 
 [[projects]]
   digest = "1:12cb143f2148bf54bcd9fe622abac17325e85eeb1d84b8ec6caf1c80232108fd"
@@ -111,12 +111,12 @@
   version = "v1.0.0"
 
 [[projects]]
-  digest = "1:972c2427413d41a1e06ca4897e8528e5a1622894050e2f527b38ddf0f343f759"
+  digest = "1:8548c309c65a85933a625be5e7d52b6ac927ca30c56869fae58123b8a77a75e1"
   name = "github.com/stretchr/testify"
   packages = ["assert"]
   pruneopts = "UT"
-  revision = "ffdc059bfe9ce6a4e144ba849dbedead332c6053"
-  version = "v1.3.0"
+  revision = "221dbe5ed46703ee255b1da0dec05086f5035f62"
+  version = "v1.4.0"
 
 [[projects]]
   digest = "1:0b8d86f074869a0e1c6293773bfafea7515752d28b49921f8e3f889158c921de"
@@ -163,15 +163,15 @@
   name = "golang.org/x/crypto"
   packages = ["pbkdf2"]
   pruneopts = "UT"
-  revision = "4def268fd1a49955bfb3dda92fe3db4f924f2285"
+  revision = "9756ffdc24725223350eb3266ffb92590d28f278"
 
 [[projects]]
   branch = "master"
-  digest = "1:47844666be86089349a441f5f0ece22f42a87a8cb8c9a31294c593f43209ad19"
+  digest = "1:b8340ec580cc3c81782c6c46ad20bf17c4b567be60cc2901e8bc220a8b473de1"
   name = "golang.org/x/sys"
   packages = ["unix"]
   pruneopts = "UT"
-  revision = "fde4db37ae7ad8191b03d30d27f258b5291ae4e3"
+  revision = "9109b7679e13aa34a54834cfb4949cac4b96e576"
 
 [[projects]]
   digest = "1:5f1559c4cee44069f81517430ebba19589869f3d4d4648213a4d5ddd199b11d8"

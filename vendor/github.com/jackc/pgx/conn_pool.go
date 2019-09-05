@@ -110,6 +110,25 @@ func (p *ConnPool) Acquire() (*Conn, error) {
 	return c, err
 }
 
+func (p *ConnPool) AcquireEx(ctx context.Context) (*Conn, error) {
+	var deadline *time.Time
+
+	if p.acquireTimeout > 0 {
+		tmp := time.Now().Add(p.acquireTimeout)
+		deadline = &tmp
+	}
+
+	ctxDeadline, ok := ctx.Deadline()
+	if ok && (deadline == nil || ctxDeadline.Before(*deadline)) {
+		deadline = &ctxDeadline
+	}
+
+	p.cond.L.Lock()
+	c, err := p.acquire(deadline)
+	p.cond.L.Unlock()
+	return c, err
+}
+
 // deadlinePassed returns true if the given deadline has passed.
 func (p *ConnPool) deadlinePassed(deadline *time.Time) bool {
 	return deadline != nil && time.Now().After(*deadline)
@@ -341,7 +360,8 @@ func (p *ConnPool) afterConnectionCreated(c *Conn) (*Conn, error) {
 	}
 
 	for _, ps := range p.preparedStatements {
-		if _, err := c.Prepare(ps.Name, ps.SQL); err != nil {
+		opts := &PrepareExOptions{ParameterOIDs: ps.ParameterOIDs}
+		if _, err := c.PrepareEx(context.Background(), ps.Name, ps.SQL, opts); err != nil {
 			c.die(err)
 			return nil, err
 		}

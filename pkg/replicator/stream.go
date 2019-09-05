@@ -116,7 +116,7 @@ func (r *Replicator) inactivityTblBufferFlush() {
 	defer r.wg.Done()
 
 	flushFn := func() {
-		if r.curState.Load() != stateWorking {
+		if r.curState.Load() != StateWorking {
 			return
 		}
 		r.inTxMutex.Lock()
@@ -279,7 +279,7 @@ func (r *Replicator) HandleMessage(lsn dbtypes.LSN, msg message.Message) error {
 
 	switch v := msg.(type) {
 	case *message.Begin:
-		if r.curState.Load() == stateShuttingDown {
+		if r.curState.Load() == StateShuttingDown {
 			r.logger.Debugf("shutting down. discarding %T message", msg)
 			r.txFinalLSN = dbtypes.InvalidLSN
 			return nil

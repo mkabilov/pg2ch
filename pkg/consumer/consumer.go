@@ -82,9 +82,9 @@ func (c *consumer) Wait() {
 	c.logger.Debugf("consumer finished its work")
 }
 
-func (c *consumer) close(err error) {
+func (c *consumer) close(format string, args ...interface{}) {
 	select {
-	case c.errCh <- err:
+	case c.errCh <- fmt.Errorf(format, args...):
 	default:
 	}
 }
@@ -176,7 +176,7 @@ func (c *consumer) processReplicationMessage(handler Handler) {
 				return
 			} else if err != nil {
 				// TODO: make sure we retry and cleanup after ourselves afterwards
-				c.close(fmt.Errorf("replication failed: %v", err))
+				c.close("replication failed: %v", err)
 				return
 			}
 
@@ -188,12 +188,12 @@ func (c *consumer) processReplicationMessage(handler Handler) {
 			if repMsg.WalMessage != nil {
 				msg, err := decoder.Parse(repMsg.WalMessage.WalData)
 				if err != nil {
-					c.close(fmt.Errorf("invalid pgoutput message: %s", err))
+					c.close("invalid pgoutput message: %s", err)
 					return
 				}
 
 				if err := handler.HandleMessage(dbtypes.LSN(repMsg.WalMessage.WalStart), msg); err != nil {
-					c.close(fmt.Errorf("error handling waldata: %s", err))
+					c.close("error handling waldata: %s", err)
 					return
 				}
 			}
@@ -201,7 +201,7 @@ func (c *consumer) processReplicationMessage(handler Handler) {
 			if repMsg.ServerHeartbeat != nil && repMsg.ServerHeartbeat.ReplyRequested == 1 {
 				c.logger.Debugf("server wants a reply")
 				if err := c.SendStatus(); err != nil {
-					c.close(fmt.Errorf("could not send replay progress: %v", err))
+					c.close("could not send replay progress: %v", err)
 					return
 				}
 			}
