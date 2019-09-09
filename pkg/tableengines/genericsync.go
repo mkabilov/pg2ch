@@ -7,8 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx"
-	"gopkg.in/djherbis/buffer.v1"
-
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils/bulkupload"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
 )
@@ -52,7 +51,7 @@ func (t *genericTable) InitSync() error {
 
 // Sync the table. Saves PostgreSQL snapshot LSN and loads the buffered data
 // after this snapshot to the table.
-func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, tblWriter io.Writer) error {
+func (t *genericTable) genSync(chUploader bulkupload.BulkUploader, pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, tblWriter io.Writer) error {
 	t.syncSnapshotLSN = snapshotLSN
 
 	startTime := time.Now()
@@ -69,10 +68,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, tblWriter 
 		"snapshotLSN", snapshotLSN.Dec())
 	t.syncedRows = 0
 
-	if err := t.bulkUploader.Init(buffer.New(10 * 1024 * 1024)); err != nil {
-		return fmt.Errorf("could not init bulkuploader: %v", err)
-	}
-
+	t.bulkUploader = chUploader
 	loaderErrCh := make(chan error, 1)
 	go func(errCh chan error) {
 		errCh <- t.bulkUploader.BulkUpload(t.cfg.ChMainTable, t.chUsedColumns)
@@ -104,6 +100,7 @@ func (t *genericTable) genSync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, tblWriter 
 		return fmt.Errorf("could not load to CH: %v", err)
 	}
 	close(loaderErrCh)
+	t.bulkUploader = nil
 
 	return t.loadSyncDeltas()
 }

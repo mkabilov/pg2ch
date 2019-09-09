@@ -74,7 +74,7 @@ type genericTable struct {
 
 //noinspection GoExportedFuncWithUnexportedType
 func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage kvstorage.KVStorage,
-	loader chload.CHLoader, bulkUploader bulkupload.BulkUploader, tblCfg *config.Table) genericTable {
+	loader chload.CHLoader, tblCfg *config.Table) genericTable {
 	t := genericTable{
 		Mutex:         &sync.Mutex{},
 		memFlushMutex: &sync.Mutex{},
@@ -86,7 +86,6 @@ func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage
 		chUsedColumns: make([]string, 0),
 		pgUsedColumns: make([]string, 0),
 		tupleColumns:  tblCfg.TupleColumns,
-		bulkUploader:  bulkUploader,
 		persStorage:   persStorage,
 		logger:        logger.With("table", tblCfg.PgTableName.String()),
 	}

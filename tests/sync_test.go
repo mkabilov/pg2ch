@@ -21,26 +21,32 @@ const (
 	initPg = `
 do $$
 begin
-	if not exists (select from pg_catalog.pg_roles
-		where rolname = 'postgres')
+	if not exists (select from pg_catalog.pg_roles where rolname = 'postgres')
 	then
 		create role postgres superuser login;
 	end if;
 end $$;
+
 create extension istore;
+
 create table pg1(id bigserial, a int, b int, c bigint, d text, f1 float,
 	f2 double precision, bo bool, num numeric(10, 2), ch varchar(10));
 alter table pg1 replica identity full;
+
 create table pg2(id bigserial, a int[], b bigint[], c text[]);
 alter table pg2 replica identity full;
+
 create table pg3(id bigserial, a istore, b bigistore);
 alter table pg3 replica identity full;
+
 insert into pg1(a,b,c,d,f1,f2,bo,num,ch) select i, i + 1, i + 2, i::text, i + 1.1,
 	i + 2.1, true, i + 3, (i+4)::text
 from generate_series(1, 10000) i;
+
 insert into pg2(a, b, c) select array_fill(i, array[3]), array_fill(i + 1, array[3]),
 	array_fill(i::text, array[3])
 from generate_series(1, 10000) i;
+
 insert into pg3(a, b) select
 	istore(array_fill(i, array[3]), array_fill(i + 1, array[3])),
 	bigistore(array_fill(i + 2, array[3]), array_fill(i + 3, array[3]))
@@ -49,8 +55,10 @@ from generate_series(1, 10000) i;
 	addSQL = `
 insert into pg1(a,b,c,d,f1,f2,bo,num,ch) select i, i + 1, i + 2, i::text,
 	i + 1.1, i + 2.1, true, i + 3, (i+4)::text from generate_series(1, %[1]d) i;
+
 insert into pg2(a, b, c) select array_fill(i, array[3]), array_fill(i + 1, array[3]),
 	array_fill(i::text, array[3]) from generate_series(1, %[1]d) i;
+
 insert into pg3(a, b) select
 	istore(array_fill(i, array[1]), array_fill(i + 1, array[1])),
 	bigistore(array_fill(i + 2, array[1]), array_fill(i + 3, array[1]))
@@ -157,7 +165,7 @@ func (ch *CHLink) safeQuery(t *testing.T, sql string) [][]string {
 }
 
 func (ch *CHLink) waitForCount(t *testing.T, query string, minCount int, maxAttempts int) {
-	counter := 0
+	attempt := 0
 
 	for {
 		rows := ch.safeQuery(t, query)
@@ -170,10 +178,10 @@ func (ch *CHLink) waitForCount(t *testing.T, query string, minCount int, maxAtte
 			break
 		}
 
-		counter += 1
+		attempt += 1
 		time.Sleep(time.Second)
 
-		if counter >= maxAttempts {
+		if attempt >= maxAttempts {
 			t.Fatalf("attempts exceeded for query: %v", query)
 		}
 	}
@@ -396,15 +404,15 @@ func TestConcurrentSync(t *testing.T) {
 		stopCh <- true
 	}()
 
-	t.Run("checking concurrend inserted data", func(t *testing.T) {
+	t.Run("checking concurrent inserted data", func(t *testing.T) {
 		defer repl.Finish()
 
 		for repl.State() != replicator.StateWorking {
 			time.Sleep(time.Second)
 		}
 
-		expected := 2000 + 10000 + 1000000 /* goroutine 1 + goroutine 2 + initial */
-		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", expected, 60)
+		expected := 10000 + 10*100000 + 10*100 + 10*100 // 1012000: init, main goroutine, go routine 1, go routine 2
+		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", expected, 100)
 
 		count := ch.getCount(t, "select count(*) from pg2ch_test.ch1")
 		assert.Equal(t, expected, count, "expected right count in ch1")

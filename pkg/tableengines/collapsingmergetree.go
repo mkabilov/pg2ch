@@ -5,6 +5,7 @@ import (
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils/bulkupload"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 )
 
@@ -27,8 +28,8 @@ func NewCollapsingMergeTree(table genericTable, tblCfg *config.Table) *collapsin
 }
 
 // Sync performs initial sync of the data; pgTx is a transaction in which temporary replication slot is created
-func (t *collapsingMergeTreeTable) Sync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN) error {
-	return t.genSync(pgTx, snapshotLSN, t)
+func (t *collapsingMergeTreeTable) Sync(chUploader bulkupload.BulkUploader, pgTx *pgx.Tx, snapshotLSN dbtypes.LSN) error {
+	return t.genSync(chUploader, pgTx, snapshotLSN, t)
 }
 
 // Write implements io.Writer which is used during the Sync process, see genSync method

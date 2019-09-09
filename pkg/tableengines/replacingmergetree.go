@@ -2,9 +2,9 @@ package tableengines
 
 import (
 	"github.com/jackc/pgx"
-
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/message"
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils/bulkupload"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 )
 
@@ -23,8 +23,8 @@ func NewReplacingMergeTree(table genericTable, tblCfg *config.Table) *replacingM
 }
 
 // Sync performs initial sync of the data; pgTx is a transaction in which temporary replication slot is created
-func (t *replacingMergeTree) Sync(pgTx *pgx.Tx, snapshotLSN dbtypes.LSN) error {
-	return t.genSync(pgTx, snapshotLSN, t)
+func (t *replacingMergeTree) Sync(chUploader bulkupload.BulkUploader, pgTx *pgx.Tx, snapshotLSN dbtypes.LSN) error {
+	return t.genSync(chUploader, pgTx, snapshotLSN, t)
 }
 
 // Write implements io.Writer which is used during the Sync process, see genSync method

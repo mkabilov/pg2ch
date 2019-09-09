@@ -5,13 +5,18 @@ import (
 	"sort"
 
 	"github.com/jackc/pgx"
+	"gopkg.in/djherbis/buffer.v1"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils/bulkupload"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
 )
 
-const slotCreateAttempts = 100
+const (
+	slotCreateAttempts     = 100
+	bulkUploaderBufferSize = 10 * 1024 * 1024
+)
 
 func (r *Replicator) SyncTables(syncTables []config.PgTableName, async bool) error {
 	if len(syncTables) == 0 {
@@ -46,7 +51,7 @@ func (r *Replicator) SyncTables(syncTables []config.PgTableName, async bool) err
 	return nil
 }
 
-func (r *Replicator) syncTable(conn *pgx.Conn, pgTableName config.PgTableName) error {
+func (r *Replicator) syncTable(chUploader bulkupload.BulkUploader, conn *pgx.Conn, pgTableName config.PgTableName) error {
 	tx, snapshotLSN, err := r.getTxAndLSN(conn, pgTableName)
 	if err != nil {
 		return err
@@ -58,7 +63,7 @@ func (r *Replicator) syncTable(conn *pgx.Conn, pgTableName config.PgTableName) e
 		}
 	}()
 
-	if err := r.chTables[pgTableName].Sync(tx, snapshotLSN); err != nil {
+	if err := r.chTables[pgTableName].Sync(chUploader, tx, snapshotLSN); err != nil {
 		return fmt.Errorf("could not sync: %v", err)
 	}
 
@@ -175,10 +180,17 @@ func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
 		}
 	}
 	conn.ConnInfo = connInfo
+	chUploader := bulkupload.New(&r.cfg.ClickHouse, r.cfg.ClickHouse.GzipBufSize, r.cfg.ClickHouse.GzipCompression)
+	if err := chUploader.Init(buffer.New(bulkUploaderBufferSize)); err != nil {
+		select {
+		case r.errCh <- fmt.Errorf("could not init bulkuploader: %v", err):
+		default:
+		}
+	}
 
 	for pgTableName := range r.syncJobs {
 		r.logger.Debugf("sync job %d: starting syncing %q pg table", i, pgTableName)
-		if err := r.syncTable(conn, pgTableName); err != nil {
+		if err := r.syncTable(chUploader, conn, pgTableName); err != nil {
 			select {
 			case r.errCh <- fmt.Errorf("could not sync table %s: %v", pgTableName, err):
 			default:

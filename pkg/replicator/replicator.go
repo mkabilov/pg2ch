@@ -31,7 +31,7 @@ type clickHouseTable interface {
 
 	Begin(finalLSN dbtypes.LSN) error
 	InitSync() error
-	Sync(*pgx.Tx, dbtypes.LSN) error
+	Sync(bulkupload.BulkUploader, *pgx.Tx, dbtypes.LSN) error
 	Insert(new message.Row) error
 	Update(old message.Row, new message.Row) error
 	Delete(old message.Row) error
@@ -269,8 +269,7 @@ func (r *Replicator) Run() error {
 
 func (r *Replicator) newTable(tblName config.PgTableName, tblConfig *config.Table) (clickHouseTable, error) {
 	chLoader := chload.New(&r.cfg.ClickHouse, r.cfg.ClickHouse.GzipCompression)
-	bulkUploader := bulkupload.New(&r.cfg.ClickHouse, r.cfg.ClickHouse.GzipBufSize, r.cfg.ClickHouse.GzipCompression)
-	baseTable := tableengines.NewGenericTable(r.ctx, r.logger, r.persStorage, chLoader, bulkUploader, tblConfig)
+	baseTable := tableengines.NewGenericTable(r.ctx, r.logger, r.persStorage, chLoader, tblConfig)
 
 	switch tblConfig.Engine {
 	case config.ReplacingMergeTree:
