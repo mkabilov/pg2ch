@@ -49,7 +49,7 @@ type Replicator struct {
 	consumer consumer.Interface
 	cfg      *config.Config
 	errCh    chan error
-	endCh    chan bool //used to finish replicator
+	stopCh   chan struct{} //used to finish replicator
 
 	pgDeltaConn   *pgx.Conn
 	pgxConnConfig pgx.ConnConfig
@@ -94,7 +94,7 @@ func New(cfg *config.Config) *Replicator {
 		chTables: make(map[config.PgTableName]clickHouseTable),
 		oidName:  make(map[dbtypes.OID]config.PgTableName),
 		errCh:    make(chan error),
-		endCh:    make(chan bool),
+		stopCh:   make(chan struct{}),
 
 		inTxMutex:     &sync.Mutex{},
 		tablesToFlush: make(map[config.PgTableName]struct{}),
@@ -347,7 +347,7 @@ func (r *Replicator) logErrCh() {
 }
 
 func (r *Replicator) Finish() {
-	r.endCh <- true
+	r.stopCh <- struct{}{}
 }
 
 func (r *Replicator) waitForShutdown() {
@@ -357,7 +357,7 @@ func (r *Replicator) waitForShutdown() {
 loop:
 	for {
 		select {
-		case <-r.endCh:
+		case <-r.stopCh:
 			break loop
 		case sig := <-sigs:
 			switch sig {

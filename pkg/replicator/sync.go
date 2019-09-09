@@ -20,6 +20,7 @@ const (
 
 func (r *Replicator) SyncTables(syncTables []config.PgTableName, async bool) error {
 	if len(syncTables) == 0 {
+		r.logger.Info("no tables to sync")
 		return nil
 	}
 
@@ -149,10 +150,12 @@ func (r *Replicator) getTxAndLSN(conn *pgx.Conn, pgTableName config.PgTableName)
 }
 
 // go routine
-func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
+func (r *Replicator) syncJob(jobID int, doneCh chan<- struct{}) {
 	defer func() {
+		r.logger.Infof("sync job %d finished", jobID)
 		doneCh <- struct{}{}
 	}()
+
 	conn, err := pgx.Connect(r.pgxConnConfig)
 	if err != nil {
 		select {
@@ -160,10 +163,10 @@ func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
 		default:
 		}
 	}
-	r.logger.Debugf("sync job %d: connected to postgres, pid: %v", i, conn.PID())
+	r.logger.Infof("sync job %d: connected to postgres, pid: %v", jobID, conn.PID())
 
 	defer func() {
-		r.logger.Debugf("sync job %d: closing pg connection, pid: %v", i, conn.PID())
+		r.logger.Infof("sync job %d: closing pg connection, pid: %v", jobID, conn.PID())
 		if err := conn.Close(); err != nil {
 			select {
 			case r.errCh <- fmt.Errorf("could not close connection: %v", err):
@@ -181,15 +184,15 @@ func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
 	}
 	conn.ConnInfo = connInfo
 	chUploader := bulkupload.New(&r.cfg.ClickHouse, r.cfg.ClickHouse.GzipBufSize, r.cfg.ClickHouse.GzipCompression)
-	if err := chUploader.Init(buffer.New(bulkUploaderBufferSize)); err != nil {
-		select {
-		case r.errCh <- fmt.Errorf("could not init bulkuploader: %v", err):
-		default:
-		}
-	}
-
 	for pgTableName := range r.syncJobs {
-		r.logger.Debugf("sync job %d: starting syncing %q pg table", i, pgTableName)
+		r.logger.Infof("sync job %d: starting syncing %q pg table", jobID, pgTableName)
+		if err := chUploader.Init(buffer.New(bulkUploaderBufferSize)); err != nil {
+			select {
+			case r.errCh <- fmt.Errorf("could not init bulkuploader: %v", err):
+			default:
+			}
+		}
+
 		if err := r.syncTable(chUploader, conn, pgTableName); err != nil {
 			select {
 			case r.errCh <- fmt.Errorf("could not sync table %s: %v", pgTableName, err):
@@ -199,6 +202,6 @@ func (r *Replicator) syncJob(i int, doneCh chan<- struct{}) {
 			return
 		}
 
-		r.logger.Debugf("sync job %d: %q table synced", i, pgTableName)
+		r.logger.Infof("sync job %d: %q table synced", jobID, pgTableName)
 	}
 }
