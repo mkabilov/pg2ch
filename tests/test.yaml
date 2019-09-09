@@ -36,4 +36,4 @@ postgres:
 
 db_path: /tmp/db
 db_type: mmap
-loglevel: error
+loglevel: info

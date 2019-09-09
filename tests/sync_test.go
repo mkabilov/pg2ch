@@ -173,6 +173,7 @@ func (ch *CHLink) waitForCount(t *testing.T, query string, minCount int, maxAtte
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Logf("query %q, attempt: %v, count: %v (min count: %v)", query, attempt, recCount, minCount)
 
 		if recCount >= minCount {
 			break
@@ -373,13 +374,17 @@ func TestConcurrentSync(t *testing.T) {
 	defer node.Stop()
 	defer os.RemoveAll(cfg.PersStoragePath)
 
+	expected := 10000 // from initPg
+
 	repl = replicator.New(cfg)
 	stopCh := make(chan bool, 1)
 
+	expected += 10 * 100000
 	for i := 0; i < 10; i++ {
 		node.Execute("postgres", addsql100000)
 	}
 
+	expected += 10 * 100
 	/* we're starting to add values before sync */
 	go func() {
 		for i := 0; i < 10; i++ {
@@ -388,6 +393,7 @@ func TestConcurrentSync(t *testing.T) {
 		}
 	}()
 
+	expected += 10 * 100
 	go func() {
 		for i := 0; i < 10; i++ {
 			node.Execute("postgres", addsql100)
@@ -411,8 +417,7 @@ func TestConcurrentSync(t *testing.T) {
 			time.Sleep(time.Second)
 		}
 
-		expected := 10000 + 10*100000 + 10*100 + 10*100 // 1012000: init, main goroutine, go routine 1, go routine 2
-		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", expected, 100)
+		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", expected, 150)
 
 		count := ch.getCount(t, "select count(*) from pg2ch_test.ch1")
 		assert.Equal(t, expected, count, "expected right count in ch1")
