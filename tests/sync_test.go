@@ -417,12 +417,11 @@ func TestConcurrentSync(t *testing.T) {
 			time.Sleep(time.Second)
 		}
 
-		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", expected, 150)
+		ch.waitForCount(t, "select count(*) from pg2ch_test.ch1", expected, 100)
+		ch.waitForCount(t, "select count(*) from pg2ch_test.ch2", expected, 100)
+		ch.waitForCount(t, "select count(*) from pg2ch_test.ch3", expected, 100)
 
 		count := ch.getCount(t, "select count(*) from pg2ch_test.ch1")
-		assert.Equal(t, expected, count, "expected right count in ch1")
-
-		count = ch.getCount(t, "select count(*) from pg2ch_test.ch1")
 		assert.Equal(t, expected, count, "expected right count in ch1")
 
 		count = ch.getCount(t, "select count(*) from pg2ch_test.ch2")
