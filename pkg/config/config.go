@@ -448,15 +448,16 @@ func (c PgColumn) IsTime() bool {
 }
 
 func (c Config) Print() {
-	fmt.Printf("inactivity flush timeout: %v\n", c.InactivityFlushTimeout)
-	fmt.Printf("logging level: %s\n", c.LogLevel)
+	fmt.Fprintf(os.Stderr, "inactivity flush timeout: %v\n", c.InactivityFlushTimeout)
+	fmt.Fprintf(os.Stderr, "logging level: %s\n", c.LogLevel)
+	fmt.Fprintf(os.Stderr, "number of sync workers: %d\n", c.SyncWorkers)
 
 	for tbl, tblCfg := range c.Tables {
-		fmt.Printf("%s: flush threshold: %v\n", tbl, tblCfg.BufferSize)
+		fmt.Fprintf(os.Stderr, "%s: flush threshold: %v\n", tbl, tblCfg.BufferSize)
 	}
 
-	//fmt.Printf("clickhouse gzip compression: %v\n", c.ClickHouse.GzipCompression)
-	//if c.ClickHouse.GzipCompression != flate.NoCompression {
-	//	fmt.Printf("clickhouse gzip buffer size: %v\n", c.ClickHouse.GzipBufSize)
-	//}
+	fmt.Fprintf(os.Stderr, "clickhouse gzip compression: %v\n", c.ClickHouse.GzipCompression)
+	if c.ClickHouse.GzipCompression != flate.NoCompression {
+		fmt.Fprintf(os.Stderr, "clickhouse gzip buffer size: %v\n", c.ClickHouse.GzipBufSize)
+	}
 }
