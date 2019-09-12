@@ -2,7 +2,10 @@ package replicator
 
 import (
 	"fmt"
+	"os"
 	"strings"
+
+	"gopkg.in/yaml.v2"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
@@ -10,13 +13,42 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils/tableinfo"
 )
 
-var orderByCols = map[string]string{}
+const (
+	pkColumnsFile         = "pk_columns.yaml"
+	compressedColumnsFile = "compress_columns.yaml"
+	codecSuffix           = " CODEC(Delta, LZ4)"
+)
 
-//GenerateChDDL generates clickhouse table DDLs
+var (
+	orderByCols     = make(map[string][]string)
+	compressColumns = map[string]struct{}{}
+)
+
+//GenerateChDDL generates ClickHouse table DDLs
 //TODO: refactor me
 func (r *Replicator) GenerateChDDL() error {
+	if _, err := os.Stat(pkColumnsFile); err == nil {
+		fp, err := os.Open(pkColumnsFile)
+		if err == nil {
+			if err := yaml.NewDecoder(fp).Decode(orderByCols); err != nil {
+				return fmt.Errorf("could not read primary keys file: %v", err)
+			}
+			fp.Close()
+		}
+	}
+
+	if _, err := os.Stat(compressedColumnsFile); err == nil {
+		fp, err := os.Open(compressedColumnsFile)
+		if err == nil {
+			if err := yaml.NewDecoder(fp).Decode(compressColumns); err != nil {
+				return fmt.Errorf("could not read primary keys file: %v", err)
+			}
+			fp.Close()
+		}
+	}
+
 	for key, val := range orderByCols {
-		newKey := r.cfg.ClickHouse.Database + "." + key
+		newKey := r.cfg.ClickHouse.Database + "." + key + "_main"
 		delete(orderByCols, key)
 		orderByCols[newKey] = val
 	}
@@ -39,9 +71,6 @@ func (r *Replicator) GenerateChDDL() error {
 		)
 
 		tblCfg := r.cfg.Tables[tblName]
-		if _, ok := processedTables[tblCfg.ChMainTable]; ok {
-			continue
-		}
 
 		tblCfg.TupleColumns, tblCfg.PgColumns, err = tableinfo.TablePgColumns(tx, tblName)
 		if err != nil {
@@ -84,22 +113,22 @@ func (r *Replicator) GenerateChDDL() error {
 				}
 			}
 
-			if hasColumnCfg {
-				switch {
-				case columnCfg.IstoreKeysSuffix != "":
-					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s_%s Array(Int32)", chColName, columnCfg.IstoreKeysSuffix))
-					if pgCol.BaseType == dbtypes.PgAdjustBigIstore {
-						chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s_%s Array(Int64)", chColName, columnCfg.IstoreValuesSuffix))
-					} else {
-						chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s_%s Array(Int32)", chColName, columnCfg.IstoreValuesSuffix))
-					}
-				default:
-					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s %s", chColName, chColType))
+			if hasColumnCfg && columnCfg.IstoreKeysSuffix != "" {
+				chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s_%s Array(Int32)", chColName, columnCfg.IstoreKeysSuffix))
+
+				if pgCol.BaseType == dbtypes.PgAdjustBigIstore {
+					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s_%s Array(Int64)", chColName, columnCfg.IstoreValuesSuffix))
+				} else {
+					chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s_%s Array(Int32)", chColName, columnCfg.IstoreValuesSuffix))
 				}
 				continue
 			}
+			codec := ""
+			if _, ok := compressColumns[chColName]; ok {
+				codec = codecSuffix
+			}
 
-			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s %s", chColName, chColType))
+			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s %s%s", chColName, chColType, codec))
 		}
 		pkColumns := make([]string, pkColumnNumb)
 
@@ -118,7 +147,7 @@ func (r *Replicator) GenerateChDDL() error {
 		}
 
 		if tblCfg.LsnColumnName != "" {
-			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s UInt32", tblCfg.LsnColumnName))
+			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s UInt64 CODEC(Delta, LZ4)", tblCfg.LsnColumnName))
 		}
 
 		switch tblCfg.Engine {
@@ -131,7 +160,7 @@ func (r *Replicator) GenerateChDDL() error {
 
 		tableDDL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s) Engine = %s(%s)",
 			tblCfg.ChMainTable,
-			strings.Join(chColumnDDLs, ","),
+			strings.Join(chColumnDDLs, ", "),
 			tblCfg.Engine.String(),
 			engineParams)
 		if partitionColumn != "" {
@@ -139,25 +168,30 @@ func (r *Replicator) GenerateChDDL() error {
 		}
 
 		if ob, ok := orderByCols[tblCfg.ChMainTable.String()]; ok {
-			orderBy = fmt.Sprintf(" ORDER BY(%s)", ob)
+			orderBy = fmt.Sprintf(" ORDER BY(%s)", strings.Join(ob, ", "))
 		} else if len(pkColumns) > 0 {
 			orderBy = fmt.Sprintf(" ORDER BY(%s)", strings.Join(pkColumns, ", "))
 		}
 		tableDDL += orderBy + ";"
 
-		fmt.Println(tableDDL)
-		processedTables[tblCfg.ChMainTable] = struct{}{}
+		if _, ok := processedTables[tblCfg.ChMainTable]; !ok {
+			fmt.Println(tableDDL)
+			processedTables[tblCfg.ChMainTable] = struct{}{}
+		}
 
 		if !tblCfg.ChSyncAuxTable.IsEmpty() {
 			if _, ok := processedTables[tblCfg.ChSyncAuxTable]; !ok {
-				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (%s) Engine = MergeTree()%s;\n",
+				columns := append(chColumnDDLs, fmt.Sprintf("%s UInt64", tblCfg.RowIDColumnName))
+				columns = append(columns, fmt.Sprintf("%s String", tblCfg.TableNameColumnName))
+
+				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (%s) Engine = MergeTree()%s PARTITION BY (%s);\n",
 					tblCfg.ChSyncAuxTable,
-					strings.Join(append(chColumnDDLs, fmt.Sprintf("%s UInt64", tblCfg.RowIDColumnName)), ","),
-					orderBy)
+					strings.Join(columns, ", "),
+					tblCfg.LsnColumnName,
+					tblCfg.TableNameColumnName)
 				processedTables[tblCfg.ChSyncAuxTable] = struct{}{}
 			}
 		}
-
 	}
 
 	return nil

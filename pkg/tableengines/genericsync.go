@@ -44,6 +44,12 @@ func (t *genericTable) InitSync() error {
 		}
 	}
 
+	if !t.cfg.ChSyncAuxTable.IsEmpty() {
+		if err := t.truncateTable(t.cfg.ChSyncAuxTable); err != nil {
+			return fmt.Errorf("could not truncate aux table: %v", err)
+		}
+	}
+
 	t.inSync = true
 
 	return nil
@@ -120,21 +126,21 @@ func (t *genericTable) loadSyncDeltas() error {
 
 	t.logger.Infof("delta size: %s", t.deltaSize(t.syncSnapshotLSN))
 
-	chSql := fmt.Sprintf("INSERT INTO %[1]s(%[2]s) SELECT %[2]s FROM %[3]s WHERE %[4]s > %[5]d ORDER BY %[6]s",
+	chSql := fmt.Sprintf("INSERT INTO %[1]s(%[2]s) SELECT %[2]s FROM %[3]s WHERE %[4]s > %[5]d and %[7]s = '%[8]s' ORDER BY %[6]s",
 		t.cfg.ChMainTable,
 		strings.Join(t.chUsedColumns, ","),
 		t.cfg.ChSyncAuxTable,
-		t.cfg.LsnColumnName,
-		uint64(t.syncSnapshotLSN),
-		t.cfg.RowIDColumnName)
+		t.cfg.LsnColumnName, uint64(t.syncSnapshotLSN),
+		t.cfg.RowIDColumnName,
+		t.cfg.TableNameColumnName, t.auxTableNameColumnValue)
 	t.logger.Debugf("executing: %s", chSql)
 	if err := t.chLoader.Exec(chSql); err != nil {
 		return fmt.Errorf("could not merge with sync aux table: %v", err)
 	}
 
 	if !t.cfg.ChSyncAuxTable.IsEmpty() {
-		if err := t.truncateTable(t.cfg.ChSyncAuxTable); err != nil {
-			return fmt.Errorf("could not truncate table: %v", err)
+		if err := t.dropTablePartition(t.cfg.ChSyncAuxTable, string(t.auxTableNameColumnValue)); err != nil {
+			return fmt.Errorf("could not drop partition of the %q table: %v", t.cfg.ChSyncAuxTable, err)
 		}
 	}
 
@@ -170,7 +176,7 @@ func (t *genericTable) printSyncProgress() {
 }
 
 func (t *genericTable) syncAuxTableColumns() []string {
-	return append(t.chUsedColumns, t.cfg.RowIDColumnName)
+	return append(t.chUsedColumns, t.cfg.RowIDColumnName, t.cfg.TableNameColumnName)
 }
 
 func (t *genericTable) deltaSize(lsn dbtypes.LSN) string {

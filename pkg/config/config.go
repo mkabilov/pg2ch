@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,17 +21,18 @@ import (
 const (
 	ApplicationName = "pg2ch"
 
-	publicSchema           = "public"
-	defaultClickHousePort  = 8123
-	defaultClickHouseHost  = "127.0.0.1"
-	defaultPostgresHost    = "127.0.0.1"
-	DefaultRowIDColumn     = "row_id"
-	defaultBufferSize      = 1000
-	defaultGzipBufferSize  = 1000
-	defaultSignColumn      = "sign"
-	defaultLsnColumn       = "lsn"
-	defaultIsDeletedColumn = "is_deleted"
-	defaultPerStorageType  = "diskv"
+	publicSchema               = "public"
+	defaultClickHousePort      = 8123
+	defaultClickHouseHost      = "127.0.0.1"
+	defaultPostgresHost        = "127.0.0.1"
+	DefaultRowIDColumn         = "row_id"
+	defaultBufferSize          = 1000
+	defaultGzipBufferSize      = 1000
+	defaultSignColumn          = "sign"
+	defaultLsnColumn           = "lsn"
+	defaultIsDeletedColumn     = "is_deleted"
+	defaultTableNameColumnName = "table_name"
+	defaultPerStorageType      = "diskv"
 
 	TableLSNKeyPrefix = "table_lsn_"
 )
@@ -107,6 +109,7 @@ type Table struct {
 	IsDeletedColumn      string                    `yaml:"is_deleted_column"`
 	SignColumn           string                    `yaml:"sign_column"`
 	RowIDColumnName      string                    `yaml:"row_id_column"`
+	TableNameColumnName  string                    `yaml:"table_name_column_name"`
 	Engine               tableEngine               `yaml:"engine"`
 	BufferSize           int                       `yaml:"max_buffer_length"`
 	InitSyncSkip         bool                      `yaml:"init_sync_skip"`
@@ -430,6 +433,10 @@ func (t *Table) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		val.LsnColumnName = defaultLsnColumn
 	}
 
+	if val.TableNameColumnName == "" {
+		val.TableNameColumnName = defaultTableNameColumnName
+	}
+
 	*t = Table(val)
 
 	return nil
@@ -451,13 +458,33 @@ func (c Config) Print() {
 	fmt.Fprintf(os.Stderr, "inactivity flush timeout: %v\n", c.InactivityFlushTimeout)
 	fmt.Fprintf(os.Stderr, "logging level: %s\n", c.LogLevel)
 	fmt.Fprintf(os.Stderr, "number of sync workers: %d\n", c.SyncWorkers)
-
-	for tbl, tblCfg := range c.Tables {
-		fmt.Fprintf(os.Stderr, "%s: flush threshold: %v\n", tbl, tblCfg.BufferSize)
-	}
-
 	fmt.Fprintf(os.Stderr, "clickhouse gzip compression: %v\n", c.ClickHouse.GzipCompression)
 	if c.ClickHouse.GzipCompression != flate.NoCompression {
 		fmt.Fprintf(os.Stderr, "clickhouse gzip buffer size: %v\n", c.ClickHouse.GzipBufSize)
+	}
+
+	targetTables := make(map[string][]string)
+	for pgTable, tblCfg := range c.Tables {
+		chTableStr := tblCfg.ChMainTable.String()
+		pgTableStr := fmt.Sprintf("pg: %s", pgTable.String())
+		if !tblCfg.ChSyncAuxTable.IsEmpty() {
+			pgTableStr += fmt.Sprintf(" aux: %s", tblCfg.ChSyncAuxTable.String())
+		}
+		pgTableStr += fmt.Sprintf(" flush threshold: %v", tblCfg.BufferSize)
+		if _, ok := targetTables[chTableStr]; ok {
+			targetTables[chTableStr] = append(targetTables[chTableStr], pgTableStr)
+		} else {
+			targetTables[chTableStr] = []string{pgTableStr}
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "clickhouse table - postgres table(s) mapping\n")
+	for chTable, pgTables := range targetTables {
+		fmt.Fprintf(os.Stderr, "%s:\n", chTable)
+		sort.Strings(pgTables)
+		for _, pgTable := range pgTables {
+			fmt.Fprintf(os.Stderr, "\t%s\n", pgTable)
+		}
+		fmt.Fprintf(os.Stderr, "\n")
 	}
 }

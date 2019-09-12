@@ -108,8 +108,9 @@ var (
 			ch String,
 			sign Int8,
 			row_id UInt64,
-			lsn UInt64
-		) engine=CollapsingMergeTree(sign) order by id;`,
+			lsn UInt64,
+			table_name String
+		) engine=MergeTree() order by lsn partition by (table_name);`,
 		`create table pg2ch_test.ch2(
 			id UInt64,
 			a Array(Int32),
@@ -125,8 +126,9 @@ var (
 			c Array(String),
 			sign Int8,
 			row_id UInt64,
-			lsn UInt64
-		) engine=CollapsingMergeTree(sign) order by id;`,
+			lsn UInt64,
+			table_name String
+		) engine=MergeTree() order by lsn partition by (table_name);`,
 		`create table pg2ch_test.ch3(
 			id UInt64,
 			a_keys Array(Int32),
@@ -144,8 +146,9 @@ var (
 			b_values Array(Int64),
 			sign Int8,
 			row_id UInt64,
-			lsn UInt64
-		) engine=CollapsingMergeTree(sign) order by id;`,
+			lsn UInt64,
+			table_name String
+		) engine=MergeTree() order by lsn partition by (table_name);`,
 	}
 )
 
@@ -180,7 +183,7 @@ func (ch *CHLink) waitForCount(t *testing.T, query string, minCount int, maxAtte
 		}
 
 		attempt += 1
-		time.Sleep(time.Second)
+		time.Sleep(time.Second * 2)
 
 		if attempt >= maxAttempts {
 			t.Fatalf("attempts exceeded for query: %v", query)
@@ -357,9 +360,11 @@ func TestBasicSync(t *testing.T) {
 		count = ch.getCount(t, "select count(*) from pg2ch_test.ch1")
 		assert.Equal(t, 30000, count, "expected right count in ch1")
 
+		ch.waitForCount(t, "select count(*) from pg2ch_test.ch2", 30000, 10)
 		count = ch.getCount(t, "select count(*) from pg2ch_test.ch2")
 		assert.Equal(t, 30000, count, "expected right count in ch2")
 
+		ch.waitForCount(t, "select count(*) from pg2ch_test.ch3", 30000, 10)
 		count = ch.getCount(t, "select count(*) from pg2ch_test.ch3")
 		assert.Equal(t, 30000, count, "expected right count in ch3")
 	})
@@ -379,8 +384,8 @@ func TestConcurrentSync(t *testing.T) {
 	repl = replicator.New(cfg)
 	stopCh := make(chan bool, 1)
 
-	expected += 10 * 100000
-	for i := 0; i < 10; i++ {
+	expected += 5 * 100000
+	for i := 0; i < 5; i++ {
 		node.Execute("postgres", addsql100000)
 	}
 

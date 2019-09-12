@@ -107,13 +107,11 @@ func (r *Replicator) GetTablesToSync() ([]config.PgTableName, error) {
 		}
 	}
 
-	if len(syncTables) == 0 {
-		return syncTables, nil
+	if len(syncTables) > 0 {
+		sort.SliceStable(syncTables, func(i, j int) bool {
+			return rowsCnt[syncTables[i]] > rowsCnt[syncTables[j]]
+		})
 	}
-
-	sort.SliceStable(syncTables, func(i, j int) bool {
-		return rowsCnt[syncTables[i]] > rowsCnt[syncTables[j]]
-	})
 
 	return syncTables, nil
 }

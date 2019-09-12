@@ -57,12 +57,13 @@ type genericTable struct {
 	memBufferPgDMLsCnt int         // number of pg DML commands in the current buffer,
 	// i.e. 1 update pg dml command => 2 ch inserts: with -1 sign, and +1 sign
 
-	inSync            bool          // protected via table mutex
-	syncedRows        uint64        // number of processed rows during the sync
-	liveTuples        uint64        // number of live tuples taken from pg_statistics table, i.e. approx num of rows
-	syncBuf           *bytes.Buffer // buffer for various things during the sync
-	syncLastBatchTime time.Time     //to calculate rate
-	auxTblRowID       uint64        // row_id stored in the aux table
+	inSync                  bool          // protected via table mutex
+	syncedRows              uint64        // number of processed rows during the sync
+	liveTuples              uint64        // number of live tuples taken from pg_statistics table, i.e. approx num of rows
+	syncBuf                 *bytes.Buffer // buffer for various things during the sync
+	syncLastBatchTime       time.Time     //to calculate rate
+	auxTblRowID             uint64        // row_id stored in the aux table
+	auxTableNameColumnValue []byte        // table name for the table_name_column_name column
 
 	bulkUploader    bulkupload.BulkUploader // used only during the sync
 	syncSnapshotLSN dbtypes.LSN             // LSN of the initial copy snapshot, protected via table mutex
@@ -76,18 +77,19 @@ type genericTable struct {
 func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage kvstorage.KVStorage,
 	loader chload.CHLoader, tblCfg *config.Table) genericTable {
 	t := genericTable{
-		Mutex:         &sync.Mutex{},
-		memFlushMutex: &sync.Mutex{},
-		syncBuf:       &bytes.Buffer{},
-		ctx:           ctx,
-		chLoader:      loader,
-		cfg:           tblCfg,
-		columnMapping: make(map[string]config.ChColumn),
-		chUsedColumns: make([]string, 0),
-		pgUsedColumns: make([]string, 0),
-		tupleColumns:  tblCfg.TupleColumns,
-		persStorage:   persStorage,
-		logger:        logger.With("table", tblCfg.PgTableName.String()),
+		Mutex:                   &sync.Mutex{},
+		memFlushMutex:           &sync.Mutex{},
+		syncBuf:                 &bytes.Buffer{},
+		ctx:                     ctx,
+		chLoader:                loader,
+		cfg:                     tblCfg,
+		columnMapping:           make(map[string]config.ChColumn),
+		chUsedColumns:           make([]string, 0),
+		pgUsedColumns:           make([]string, 0),
+		tupleColumns:            tblCfg.TupleColumns,
+		persStorage:             persStorage,
+		logger:                  logger.With("table", tblCfg.PgTableName.String()),
+		auxTableNameColumnValue: []byte(tblCfg.PgTableName.String()),
 	}
 
 	for _, pgCol := range t.tupleColumns {
@@ -118,11 +120,15 @@ func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage
 
 func (t *genericTable) truncateTable(tableName config.ChTableName) error {
 	t.logger.Debugf("truncating %q table", tableName)
-	if err := t.chLoader.Exec(fmt.Sprintf("truncate table %s.%s", tableName.DatabaseName, tableName.TableName)); err != nil {
-		return err
-	}
 
-	return nil
+	return t.chLoader.Exec(fmt.Sprintf("truncate table %s.%s", tableName.DatabaseName, tableName.TableName))
+}
+
+func (t *genericTable) dropTablePartition(tableName config.ChTableName, partitionName string) error {
+	t.logger.Debugf("dropping %q partiton of the %q table", partitionName, tableName)
+
+	return t.chLoader.Exec(fmt.Sprintf("alter table %s.%s drop partition '%s'",
+		tableName.DatabaseName, tableName.TableName, partitionName))
 }
 
 func (t *genericTable) advanceProcessedLSN() error {
@@ -140,11 +146,12 @@ func (t *genericTable) writeRow(tuples ...chTuple) error {
 
 	for _, tuple := range tuples {
 		if t.inSync {
+			// writing to the aux table
 			if err := t.writeRowToBuffer(
-				t.chLoader,
+				t.chLoader, // we use the same buffer as during the normal operation
 				tuple.row,
 				t.txFinalLSN,
-				append(tuple.extra, []byte(strconv.FormatUint(t.auxTblRowID, 10)))...); err != nil {
+				append(tuple.extra, []byte(strconv.FormatUint(t.auxTblRowID, 10)), t.auxTableNameColumnValue)...); err != nil {
 				return err
 			}
 		} else {
