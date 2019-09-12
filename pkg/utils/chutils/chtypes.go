@@ -112,18 +112,6 @@ func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
 func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple, colProp config.ColumnProperty) error {
 	var w []byte
 
-	if tupleData.Kind == message.TupleNull {
-		if len(colProp.Coalesce) > 0 {
-			w = colProp.Coalesce
-		} else {
-			w = nullStr
-		}
-
-		return nil
-	} else {
-		w = tupleData.Value
-	}
-
 	switch baseType {
 	case dbtypes.PgAdjustIstore:
 		fallthrough
@@ -161,6 +149,19 @@ func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple
 		//TODO
 	case dbtypes.PgTimeWithTimeZone:
 		//TODO
+	default:
+		if tupleData.Kind == message.TupleNull {
+			if len(colProp.Coalesce) > 0 {
+				w = colProp.Coalesce
+			} else {
+				w = nullStr
+			}
+
+			_, err := buf.Write(w)
+			return err
+		}
+
+		w = tupleData.Value
 	}
 
 	_, err := buf.Write(w)
@@ -177,34 +178,36 @@ func ConvertColumn(w utils.Writer, column config.PgColumn, tupleData *message.Tu
 		return err
 	}
 
-	switch column.BaseType {
-	case dbtypes.PgBigint:
-		fallthrough
-	case dbtypes.PgInteger:
-		_, err = w.Write(tupleData.Value[1 : len(tupleData.Value)-1])
-	default:
-		val := pgtype.TextArray{}
-		if err := val.DecodeText(nil, tupleData.Value); err != nil {
-			return err
-		}
-
-		first := true
-		for _, val := range val.Elements {
-			if !first {
-				if err := w.WriteByte(','); err != nil {
-					return err
-				}
+	if tupleData.Kind != message.TupleNull {
+		switch column.BaseType {
+		case dbtypes.PgBigint:
+			fallthrough
+		case dbtypes.PgInteger:
+			_, err = w.Write(tupleData.Value[1 : len(tupleData.Value)-1])
+		default:
+			val := pgtype.TextArray{}
+			if err := val.DecodeText(nil, tupleData.Value); err != nil {
+				return err
 			}
 
-			first = false
-
-			if val.Status == pgtype.Null {
-				if _, err := w.Write([]byte(null)); err != nil {
-					return err
+			first := true
+			for _, val := range val.Elements {
+				if !first {
+					if err := w.WriteByte(','); err != nil {
+						return err
+					}
 				}
-			} else {
-				if _, err := w.Write([]byte("'" + escaper.Replace(val.String) + "'")); err != nil {
-					return err
+
+				first = false
+
+				if val.Status == pgtype.Null {
+					if _, err := w.Write([]byte(null)); err != nil {
+						return err
+					}
+				} else {
+					if _, err := w.Write([]byte("'" + escaper.Replace(val.String) + "'")); err != nil {
+						return err
+					}
 				}
 			}
 		}
