@@ -184,7 +184,7 @@ func (r *Replicator) GenerateChDDL() error {
 				columns := append(chColumnDDLs, fmt.Sprintf("%s UInt64", tblCfg.RowIDColumnName))
 				columns = append(columns, fmt.Sprintf("%s String", tblCfg.TableNameColumnName))
 
-				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (%s) Engine = MergeTree()%s PARTITION BY (%s);\n",
+				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (%s) Engine = MergeTree() ORDER BY (%s) PARTITION BY (%s);\n",
 					tblCfg.ChSyncAuxTable,
 					strings.Join(columns, ", "),
 					tblCfg.LsnColumnName,
