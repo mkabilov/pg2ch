@@ -71,6 +71,10 @@ type genericTable struct {
 	logger          *zap.SugaredLogger
 
 	txFinalLSN dbtypes.LSN // finalLSN of the currently processing transaction
+
+	//used only during the sync
+	syncPgColumns map[int]*config.PgColumn       // pg columns as they go in the 'select *' statement
+	syncColProps  map[int]*config.ColumnProperty // column properties as they go in the 'select *' statement
 }
 
 //noinspection GoExportedFuncWithUnexportedType
@@ -90,13 +94,17 @@ func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage
 		persStorage:             persStorage,
 		logger:                  logger.With("table", tblCfg.PgTableName.String()),
 		auxTableNameColumnValue: []byte(tblCfg.PgTableName.String()),
+		syncPgColumns:           make(map[int]*config.PgColumn),
+		syncColProps:            make(map[int]*config.ColumnProperty),
 	}
 
-	for _, pgCol := range t.tupleColumns {
+	for pgColID, pgCol := range t.tupleColumns {
 		chCol, ok := tblCfg.ColumnMapping[pgCol.Name]
 		if !ok {
 			continue
 		}
+		t.syncPgColumns[pgColID] = t.cfg.PgColumns[pgCol.Name]
+		t.syncColProps[pgColID] = t.cfg.ColumnProperties[pgCol.Name]
 
 		t.columnMapping[pgCol.Name] = chCol
 		t.pgUsedColumns = append(t.pgUsedColumns, pgCol.Name)

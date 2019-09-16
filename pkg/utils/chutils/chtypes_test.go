@@ -166,9 +166,7 @@ func (mw *mockWriter) Reset() {
 }
 
 func TestConvertBaseType(t *testing.T) {
-	w := &mockWriter{
-		buf: bytes.NewBuffer(nil),
-	}
+	w := &mockWriter{buf: &bytes.Buffer{}}
 
 	t.Run("nulls", func(t *testing.T) {
 		for _, bType := range baseTypes {

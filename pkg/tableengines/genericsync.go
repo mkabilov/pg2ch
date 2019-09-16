@@ -17,14 +17,27 @@ const (
 )
 
 func (t *genericTable) genSyncWrite(p []byte, extras ...[]byte) error {
-	row, err := pgutils.DecodeCopyToTuples(t.syncBuf, p)
-	if err != nil {
+	if err := bulkupload.DecodeCopyToTuples(t.syncBuf, t.bulkUploader, t.syncPgColumns, t.syncColProps, p); err != nil {
 		return fmt.Errorf("could not parse copy string: %v", err)
 	}
 
-	if err := t.writeRowToBuffer(t.bulkUploader, row, t.syncSnapshotLSN, extras...); err != nil {
+	if err := t.bulkUploader.WriteByte(columnDelimiter); err != nil {
 		return err
 	}
+	if _, err := t.bulkUploader.Write(t.syncSnapshotLSN.Decimal()); err != nil {
+		return err
+	}
+
+	for _, extra := range extras {
+		if err := t.bulkUploader.WriteByte(columnDelimiter); err != nil {
+			return err
+		}
+
+		if _, err := t.bulkUploader.Write(extra); err != nil {
+			return err
+		}
+	}
+
 	if err := t.bulkUploader.WriteByte('\n'); err != nil {
 		return err
 	}

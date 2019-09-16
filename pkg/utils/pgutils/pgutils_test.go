@@ -3,8 +3,6 @@ package pgutils
 import (
 	"bytes"
 	"testing"
-
-	"github.com/mkabilov/pg2ch/pkg/message"
 )
 
 var (
@@ -33,50 +31,6 @@ var (
 			expected: []byte("[-1,0,42]\t[-2,0,40]"),
 		},
 	}
-
-	decodeTuplesTest = []struct {
-		row      []byte
-		expected message.Row
-	}{
-		{
-			row: []byte("1\t2\t3\n"),
-			expected: message.Row{
-				&message.Tuple{Kind: message.TupleText, Value: []byte("1")},
-				&message.Tuple{Kind: message.TupleText, Value: []byte("2")},
-				&message.Tuple{Kind: message.TupleText, Value: []byte("3")},
-			},
-		},
-		{
-			row: []byte("1\t\\N\t3\n"),
-			expected: message.Row{
-				&message.Tuple{Kind: message.TupleText, Value: []byte("1")},
-				&message.Tuple{Kind: message.TupleNull, Value: []byte{}},
-				&message.Tuple{Kind: message.TupleText, Value: []byte("3")},
-			},
-		},
-		{
-			row:      []byte{},
-			expected: message.Row{},
-		},
-		{
-			row: []byte("\n"),
-			expected: message.Row{
-				&message.Tuple{Kind: message.TupleText, Value: []byte{}},
-			},
-		},
-		{
-			row: []byte(`\x48\x65\x6C\x6c\x6f` + "\n"),
-			expected: message.Row{
-				&message.Tuple{Kind: message.TupleText, Value: []byte("Hello")},
-			},
-		},
-		{
-			row: []byte(`\110\145\154\154\157` + "\n"),
-			expected: message.Row{
-				&message.Tuple{Kind: message.TupleText, Value: []byte("Hello")},
-			},
-		},
-	}
 )
 
 func TestIstoreToArrays(t *testing.T) {
@@ -97,30 +51,5 @@ func BenchmarkIstoreToArrays(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		IstoreToArrays(&buf, istoreToArrayTest[1].istore)
 		buf.Reset()
-	}
-}
-
-func TestDecodeCopyToTuples(t *testing.T) {
-	var buf bytes.Buffer
-
-	for i, tt := range decodeTuplesTest {
-		got, err := DecodeCopyToTuples(&buf, tt.row)
-		if err != nil {
-			t.Fatalf("%d: Unexpected error: %v", i, err)
-		}
-
-		if len(got) != len(tt.expected) {
-			t.Fatalf("%d: Expected %d columns, got %d columns", i, len(tt.expected), len(got))
-		}
-
-		for colId, colVal := range got {
-			if bytes.Compare(colVal.Value, tt.expected[colId].Value) != 0 {
-				t.Fatalf("%d: Expected Value %v, got %v", i, tt.expected[colId].Value, colVal.Value)
-			}
-
-			if colVal.Kind != tt.expected[colId].Kind {
-				t.Fatalf("%d: Expected Kind %v, got %v", i, tt.expected[colId].Kind, colVal.Kind)
-			}
-		}
 	}
 }
