@@ -142,6 +142,8 @@ var (
 		{baseType: dbtypes.PgBoolean, val: `{t}`, exp: `[1]`},
 
 		{baseType: dbtypes.PgInterval, val: `{00:00:00,00:00:12,00:11:12,23:11:12}`, exp: `[0,12,672,83472]`},
+		{baseType: dbtypes.PgText, val: `{a,b,c}`, exp: `['a','b','c']`},
+		{baseType: dbtypes.PgDate, val: `{2019-01-01}`, exp: `['2019-01-01']`},
 	}
 )
 

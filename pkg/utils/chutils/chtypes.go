@@ -26,8 +26,6 @@ const (
 )
 
 var (
-	escaper = strings.NewReplacer(`\`, `\\`, `'`, `\'`)
-
 	pgToChMap = map[string]string{
 		dbtypes.PgSmallint:                 dbtypes.ChInt16,
 		dbtypes.PgInteger:                  dbtypes.ChInt32,
@@ -62,6 +60,23 @@ var (
 		dbtypes.PgAdjustAjTime:    dbtypes.ChDateTime, // adjust time
 		dbtypes.PgAdjustAjDate:    dbtypes.ChDate,     // adjust date
 		dbtypes.PgAdjustAjBool:    dbtypes.ChUInt8,    // adjust boolean: true, false, unknown
+	}
+
+	quotedValueTypes = map[string]struct{}{
+		dbtypes.PgChar:                     {},
+		dbtypes.PgCharacter:                {},
+		dbtypes.PgCharacterVarying:         {},
+		dbtypes.PgText:                     {},
+		dbtypes.PgJson:                     {},
+		dbtypes.PgJsonb:                    {},
+		dbtypes.PgUuid:                     {},
+		dbtypes.PgTime:                     {},
+		dbtypes.PgTimeWithTimeZone:         {},
+		dbtypes.PgTimeWithoutTimeZone:      {},
+		dbtypes.PgTimestamp:                {},
+		dbtypes.PgTimestampWithTimeZone:    {},
+		dbtypes.PgTimestampWithoutTimeZone: {},
+		dbtypes.PgDate:                     {},
 	}
 
 	ajBoolUnknownValue = []byte("-1")
@@ -242,8 +257,20 @@ func ConvertColumn(w utils.Writer, column *config.PgColumn, tupleData *message.T
 				Value: []byte(val.String),
 			}
 
+			if _, ok := quotedValueTypes[column.BaseType]; ok {
+				if err := w.WriteByte('\''); err != nil {
+					return err
+				}
+			}
+
 			if err := convertBaseType(w, column.BaseType, td, colProp); err != nil {
 				return err
+			}
+
+			if _, ok := quotedValueTypes[column.BaseType]; ok {
+				if err := w.WriteByte('\''); err != nil {
+					return err
+				}
 			}
 		}
 	}
