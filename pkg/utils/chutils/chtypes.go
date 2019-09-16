@@ -129,7 +129,7 @@ func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple
 	var w []byte
 
 	if tupleData.Kind == message.TupleNull {
-		if len(colProp.Coalesce) > 0 {
+		if colProp != nil && len(colProp.Coalesce) > 0 {
 			w = colProp.Coalesce
 		} else {
 			w = nullStr
@@ -143,7 +143,7 @@ func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple
 		fallthrough
 	case dbtypes.PgAdjustBigIstore:
 		if tupleData.Kind == message.TupleNull {
-			if len(colProp.Coalesce) > 0 {
+			if colProp != nil && len(colProp.Coalesce) > 0 {
 				w = colProp.Coalesce
 			} else {
 				w = istoreNull
