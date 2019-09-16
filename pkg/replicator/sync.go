@@ -53,6 +53,10 @@ func (r *Replicator) SyncTables(syncTables []config.PgTableName, async bool) err
 }
 
 func (r *Replicator) syncTable(chUploader bulkupload.BulkUploader, conn *pgx.Conn, pgTableName config.PgTableName) error {
+	if err := chUploader.Init(buffer.New(bulkUploaderBufferSize)); err != nil {
+		return fmt.Errorf("could not init bulkuploader: %v", err)
+	}
+
 	tx, snapshotLSN, err := r.getTxAndLSN(conn, pgTableName)
 	if err != nil {
 		return err
@@ -184,13 +188,6 @@ func (r *Replicator) syncJob(jobID int, doneCh chan<- struct{}) {
 	chUploader := bulkupload.New(&r.cfg.ClickHouse, r.cfg.ClickHouse.GzipBufSize, r.cfg.ClickHouse.GzipCompression)
 	for pgTableName := range r.syncJobs {
 		r.logger.Infof("sync job %d: starting syncing %q pg table", jobID, pgTableName)
-		if err := chUploader.Init(buffer.New(bulkUploaderBufferSize)); err != nil {
-			select {
-			case r.errCh <- fmt.Errorf("could not init bulkuploader: %v", err):
-			default:
-			}
-		}
-
 		if err := r.syncTable(chUploader, conn, pgTableName); err != nil {
 			select {
 			case r.errCh <- fmt.Errorf("could not sync table %s: %v", pgTableName, err):

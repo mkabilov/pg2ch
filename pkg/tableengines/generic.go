@@ -241,8 +241,7 @@ func (t *genericTable) writeRowToBuffer(buf utils.Writer, row message.Row, lsn d
 			}
 		}
 
-		err := chutils.ConvertColumn(buf, t.cfg.PgColumns[col.Name], row[colId], t.cfg.ColumnProperties[col.Name])
-		if err != nil {
+		if err := chutils.ConvertColumn(buf, t.cfg.PgColumns[col.Name], row[colId], t.cfg.ColumnProperties[col.Name]); err != nil {
 			return err
 		}
 	}

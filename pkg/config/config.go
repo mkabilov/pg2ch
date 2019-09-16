@@ -104,25 +104,25 @@ type ColumnProperty struct {
 
 // Table contains information about the table
 type Table struct {
-	ChSyncAuxTable       ChTableName               `yaml:"sync_aux_table"`
-	ChMainTable          ChTableName               `yaml:"main_table"`
-	IsDeletedColumn      string                    `yaml:"is_deleted_column"`
-	SignColumn           string                    `yaml:"sign_column"`
-	RowIDColumnName      string                    `yaml:"row_id_column"`
-	TableNameColumnName  string                    `yaml:"table_name_column_name"`
-	Engine               tableEngine               `yaml:"engine"`
-	BufferSize           int                       `yaml:"max_buffer_length"`
-	InitSyncSkip         bool                      `yaml:"init_sync_skip"`
-	InitSyncSkipTruncate bool                      `yaml:"init_sync_skip_truncate"`
-	Columns              map[string]string         `yaml:"columns"`
-	ColumnProperties     map[string]ColumnProperty `yaml:"column_properties"`
-	LsnColumnName        string                    `yaml:"lsn_column_name"`
+	ChSyncAuxTable       ChTableName                `yaml:"sync_aux_table"`
+	ChMainTable          ChTableName                `yaml:"main_table"`
+	IsDeletedColumn      string                     `yaml:"is_deleted_column"`
+	SignColumn           string                     `yaml:"sign_column"`
+	RowIDColumnName      string                     `yaml:"row_id_column"`
+	TableNameColumnName  string                     `yaml:"table_name_column_name"`
+	Engine               tableEngine                `yaml:"engine"`
+	BufferSize           int                        `yaml:"max_buffer_length"`
+	InitSyncSkip         bool                       `yaml:"init_sync_skip"`
+	InitSyncSkipTruncate bool                       `yaml:"init_sync_skip_truncate"`
+	Columns              map[string]string          `yaml:"columns"`
+	ColumnProperties     map[string]*ColumnProperty `yaml:"column_properties"`
+	LsnColumnName        string                     `yaml:"lsn_column_name"`
 
-	PgOID         dbtypes.OID         `yaml:"-"`
-	PgTableName   PgTableName         `yaml:"-"`
-	TupleColumns  []message.Column    `yaml:"-"` // columns in the order they are in the table
-	PgColumns     map[string]PgColumn `yaml:"-"` // map of pg column structs
-	ColumnMapping map[string]ChColumn `yaml:"-"` // mapping pg column -> ch column
+	PgOID         dbtypes.OID          `yaml:"-"`
+	PgTableName   PgTableName          `yaml:"-"`
+	TupleColumns  []message.Column     `yaml:"-"` // columns in the order they are in the table
+	PgColumns     map[string]*PgColumn `yaml:"-"` // map of pg column structs
+	ColumnMapping map[string]ChColumn  `yaml:"-"` // mapping pg column -> ch column
 }
 
 type CHConnConfig struct {

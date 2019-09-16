@@ -2,6 +2,7 @@ package chutils
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/pgtype"
@@ -19,9 +20,9 @@ const (
 
 	//ajBool specific value
 	ajBoolUnknown = 'u'
-	null          = "null"
 
 	timestampLength = 19 // ->2019-06-08 15:50:01<- ClickHouse does not support milliseconds
+	timeLength      = 8  // ->15:50:01<- ClickHouse does not support milliseconds
 )
 
 var (
@@ -69,7 +70,7 @@ var (
 )
 
 // ToClickHouseType converts pg type into ClickHouse type
-func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
+func ToClickHouseType(pgColumn *config.PgColumn) (string, error) {
 	chType, ok := pgToChMap[pgColumn.BaseType]
 	if !ok {
 		chType = dbtypes.ChString
@@ -109,106 +110,140 @@ func ToClickHouseType(pgColumn config.PgColumn) (string, error) {
 	return chType, nil
 }
 
-func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple, colProp config.ColumnProperty) error {
+func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple, colProp *config.ColumnProperty) error {
 	var w []byte
+
+	if tupleData.Kind == message.TupleNull {
+		if len(colProp.Coalesce) > 0 {
+			w = colProp.Coalesce
+		} else {
+			w = nullStr
+		}
+	} else {
+		w = tupleData.Value
+	}
 
 	switch baseType {
 	case dbtypes.PgAdjustIstore:
 		fallthrough
 	case dbtypes.PgAdjustBigIstore:
 		if tupleData.Kind == message.TupleNull {
-			w = istoreNull
+			if len(colProp.Coalesce) > 0 {
+				w = colProp.Coalesce
+			} else {
+				w = istoreNull
+			}
 		} else {
 			return pgutils.IstoreToArrays(buf, tupleData.Value)
 		}
 	case dbtypes.PgAdjustAjBool:
 		fallthrough
 	case dbtypes.PgBoolean:
-		if tupleData.Kind != message.TupleNull {
-			switch tupleData.Value[0] {
-			case pgTrue:
-				return buf.WriteByte('1')
-			case pgFalse:
-				return buf.WriteByte('0')
-			case ajBoolUnknown:
-				w = ajBoolUnknownValue
-			}
+		if tupleData.Kind == message.TupleNull {
+			break
+		}
+
+		switch tupleData.Value[0] {
+		case pgTrue:
+			return buf.WriteByte('1')
+		case pgFalse:
+			return buf.WriteByte('0')
+		case ajBoolUnknown:
+			_, err := buf.Write(ajBoolUnknownValue)
+			return err
 		}
 	case dbtypes.PgTimestampWithTimeZone:
 		fallthrough
 	case dbtypes.PgTimestampWithoutTimeZone:
 		fallthrough
 	case dbtypes.PgTimestamp:
-		if tupleData.Kind != message.TupleNull {
-			_, err := buf.Write(tupleData.Value[:timestampLength])
-			return err
+		if tupleData.Kind == message.TupleNull {
+			break
+		}
+
+		_, err := buf.Write(tupleData.Value[:timestampLength])
+		return err
+	case dbtypes.PgInterval:
+		if tupleData.Kind == message.TupleNull {
+			break
+		}
+		res := 0
+		for p, val := range strings.Split(string(tupleData.Value), ":") {
+			intVal, err := strconv.Atoi(val)
+			if err != nil {
+				return fmt.Errorf("could not convert part of interval value %q to int: %v", val, err)
+			}
+			switch p {
+			case 0:
+				res += 3600 * intVal
+			case 1:
+				res += 60 * intVal
+			case 2:
+				res += intVal
+			}
+
+			w = []byte(strconv.Itoa(res))
 		}
 	case dbtypes.PgTime:
 		fallthrough
 	case dbtypes.PgTimeWithoutTimeZone:
-		//TODO
+		fallthrough
 	case dbtypes.PgTimeWithTimeZone:
-		//TODO
-	default:
 		if tupleData.Kind == message.TupleNull {
-			if len(colProp.Coalesce) > 0 {
-				w = colProp.Coalesce
-			} else {
-				w = nullStr
-			}
-
-			_, err := buf.Write(w)
-			return err
+			break
 		}
 
-		w = tupleData.Value
+		_, err := buf.Write(tupleData.Value[:timeLength])
+		return err
 	}
 
 	_, err := buf.Write(w)
 	return err
 }
 
-func ConvertColumn(w utils.Writer, column config.PgColumn, tupleData *message.Tuple, colProp config.ColumnProperty) error {
+func ConvertColumn(w utils.Writer, column *config.PgColumn, tupleData *message.Tuple, colProp *config.ColumnProperty) error {
 	if !column.IsArray {
 		return convertBaseType(w, column.BaseType, tupleData, colProp)
 	}
 
-	err := w.WriteByte('[')
-	if err != nil {
+	if tupleData.Kind == message.TupleNull {
+		_, err := w.Write([]byte(`[]`))
 		return err
 	}
 
-	if tupleData.Kind != message.TupleNull {
-		switch column.BaseType {
-		case dbtypes.PgBigint:
-			fallthrough
-		case dbtypes.PgInteger:
-			_, err = w.Write(tupleData.Value[1 : len(tupleData.Value)-1])
-		default:
-			val := pgtype.TextArray{}
-			if err := val.DecodeText(nil, tupleData.Value); err != nil {
-				return err
+	if err := w.WriteByte('['); err != nil {
+		return err
+	}
+
+	switch column.BaseType {
+	case dbtypes.PgBigint:
+		fallthrough
+	case dbtypes.PgInteger:
+		if _, err := w.Write(tupleData.Value[1 : len(tupleData.Value)-1]); err != nil {
+			return err
+		}
+	default:
+		val := pgtype.TextArray{}
+		if err := val.DecodeText(nil, tupleData.Value); err != nil {
+			return err
+		}
+
+		first := true
+		for _, val := range val.Elements {
+			if !first {
+				if err := w.WriteByte(','); err != nil {
+					return err
+				}
+			}
+			first = false
+
+			td := &message.Tuple{
+				Kind:  message.TupleText,
+				Value: []byte(val.String),
 			}
 
-			first := true
-			for _, val := range val.Elements {
-				if !first {
-					if err := w.WriteByte(','); err != nil {
-						return err
-					}
-				}
-
-				first = false
-
-				if val.Status == pgtype.Null {
-					if _, err := w.Write([]byte(null)); err != nil {
-						return err
-					}
-				} else {
-					if _, err := w.Write([]byte("'" + escaper.Replace(val.String) + "'")); err != nil {
-						return err
-					}
-				}
+			if err := convertBaseType(w, column.BaseType, td, colProp); err != nil {
+				return err
 			}
 		}
 	}

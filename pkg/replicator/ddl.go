@@ -107,7 +107,7 @@ func (r *Replicator) GenerateChDDL() error {
 			}
 			if !hasColumnCfg && (pgCol.BaseType == dbtypes.PgAdjustIstore || pgCol.BaseType == dbtypes.PgAdjustBigIstore) {
 				hasColumnCfg = true
-				columnCfg = config.ColumnProperty{
+				columnCfg = &config.ColumnProperty{
 					IstoreKeysSuffix:   "keys",
 					IstoreValuesSuffix: "values",
 				}

@@ -72,9 +72,7 @@ func insertQuery(tableName config.ChTableName, columns []string) string {
 }
 
 // Make INSERT command, sends SQL command as query parameter
-func (c *CHConn) PerformInsert(tableName config.ChTableName, columns []string,
-	reqBody io.Reader) error {
-
+func (c *CHConn) PerformInsert(tableName config.ChTableName, columns []string, reqBody io.Reader) error {
 	req, err := http.NewRequest(http.MethodPost,
 		c.queryURL(insertQuery(tableName, columns)), reqBody)
 

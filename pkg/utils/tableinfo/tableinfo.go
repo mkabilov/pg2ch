@@ -12,10 +12,10 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 )
 
-// TablePgColumns returns postgresql table's columns structure
-func TablePgColumns(tx *pgx.Tx, tblName config.PgTableName) ([]message.Column, map[string]config.PgColumn, error) {
+// TablePgColumns returns PostgreSQL table's columns structure
+func TablePgColumns(tx *pgx.Tx, tblName config.PgTableName) ([]message.Column, map[string]*config.PgColumn, error) {
 	columns := make([]message.Column, 0)
-	pgColumns := make(map[string]config.PgColumn)
+	pgColumns := make(map[string]*config.PgColumn)
 
 	rows, err := tx.Query(`select
   a.attname,
@@ -75,7 +75,7 @@ order by
 			TypeOID: attOID,
 			Mode:    attTypMod,
 		})
-		pgColumns[colName] = pgColumn
+		pgColumns[colName] = &pgColumn
 	}
 
 	return columns, pgColumns, nil

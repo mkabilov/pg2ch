@@ -160,13 +160,13 @@ func (r *Replicator) fetchTableConfig(tx *pgx.Tx, chConn *chutils.CHConn, tblNam
 	}
 
 	if cfg.ColumnProperties == nil {
-		cfg.ColumnProperties = make(map[string]config.ColumnProperty)
+		cfg.ColumnProperties = make(map[string]*config.ColumnProperty)
 	}
 
 	for pgCol := range cfg.ColumnMapping {
 		// we can't move that to the config struct because we need actual type of the column
 		if _, ok := cfg.ColumnProperties[pgCol]; !ok && cfg.PgColumns[pgCol].IsIstore() {
-			cfg.ColumnProperties[pgCol] = config.ColumnProperty{
+			cfg.ColumnProperties[pgCol] = &config.ColumnProperty{
 				IstoreKeysSuffix:   "keys",
 				IstoreValuesSuffix: "values",
 			}

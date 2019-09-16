@@ -59,6 +59,9 @@ func (t *genericTable) InitSync() error {
 // after this snapshot to the table.
 func (t *genericTable) genSync(chUploader bulkupload.BulkUploader, pgTx *pgx.Tx, snapshotLSN dbtypes.LSN, tblWriter io.Writer) error {
 	t.syncSnapshotLSN = snapshotLSN
+	t.bulkUploader = chUploader
+	t.syncedRows = 0
+	t.syncLastBatchTime = time.Now()
 
 	startTime := time.Now()
 	if tblLiveTuples, err := pgutils.PgStatLiveTuples(pgTx, t.cfg.PgTableName); err != nil {
@@ -72,15 +75,12 @@ func (t *genericTable) genSync(chUploader bulkupload.BulkUploader, pgTx *pgx.Tx,
 		"clickhouse", t.cfg.ChMainTable,
 		"liveTuples", t.liveTuples,
 		"snapshotLSN", snapshotLSN.Dec())
-	t.syncedRows = 0
 
-	t.bulkUploader = chUploader
 	loaderErrCh := make(chan error, 1)
 	go func(errCh chan error) {
 		errCh <- t.bulkUploader.BulkUpload(t.cfg.ChMainTable, t.chUsedColumns)
 	}(loaderErrCh)
 
-	t.syncLastBatchTime = time.Now()
 	ct, err := pgTx.CopyToWriter(
 		tblWriter,
 		fmt.Sprintf("copy (select %s from only %s) to stdout",
