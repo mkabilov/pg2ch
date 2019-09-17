@@ -59,7 +59,7 @@ var (
 		dbtypes.PgAdjustBigIstore: dbtypes.ChInt64,    // type for bigistore values
 		dbtypes.PgAdjustAjTime:    dbtypes.ChDateTime, // adjust time
 		dbtypes.PgAdjustAjDate:    dbtypes.ChDate,     // adjust date
-		dbtypes.PgAdjustAjBool:    dbtypes.ChUInt8,    // adjust boolean: true, false, unknown
+		dbtypes.PgAdjustAjBool:    dbtypes.ChInt8,     // adjust boolean: true, false, unknown: 1, 0, -1
 	}
 
 	quotedValueTypes = map[string]struct{}{
