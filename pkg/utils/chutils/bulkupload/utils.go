@@ -11,8 +11,6 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
-const copyNull = 'N'
-
 var decodeMap = map[byte]byte{
 	'b':  '\b',
 	'f':  '\f',
@@ -88,7 +86,7 @@ func DecodeCopyToTuples(colBuf *bytes.Buffer, out utils.Writer, pgColumns map[in
 		}
 
 		ch := in[i]
-		if ch == copyNull {
+		if ch == 'N' {
 			tupleKind = message.TupleNull
 			continue
 		}

@@ -21,6 +21,7 @@ var bytesBufPool = sync.Pool{
 		return bytes.NewBuffer([]byte{})
 	}}
 
+//IstoreToArrays writes 2 tab-delimited ClickHouse arrays from the postgres istore
 func IstoreToArrays(w utils.Writer, str []byte) error {
 	valuesBuf := bytesBufPool.Get().(*bytes.Buffer)
 	defer func() {

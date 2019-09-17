@@ -144,7 +144,7 @@ func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple
 	case dbtypes.PgAdjustBigIstore:
 		if tupleData.Kind == message.TupleNull {
 			if colProp != nil && len(colProp.Coalesce) > 0 {
-				w = colProp.Coalesce
+				break
 			} else {
 				w = istoreNull
 			}

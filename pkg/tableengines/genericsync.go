@@ -182,7 +182,7 @@ func (t *genericTable) printSyncProgress() {
 		eta = time.Second * time.Duration(left/uint64(speed))
 	}
 
-	t.logger.Infof("%d rows copied to %q (ETA: %v left: %v speed: %.0f rows/s)",
+	t.logger.Infof("%d rows copied to %q (ETA: %v left: %v rows speed: %.0f rows/s)",
 		t.syncedRows, t.cfg.ChMainTable, eta.Truncate(time.Second), left, speed)
 
 	t.syncLastBatchTime = time.Now()
