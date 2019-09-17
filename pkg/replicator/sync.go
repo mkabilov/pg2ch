@@ -13,11 +13,6 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
 )
 
-const (
-	slotCreateAttempts     = 100
-	bulkUploaderBufferSize = 10 * 1024 * 1024
-)
-
 func (r *Replicator) SyncTables(syncTables []config.PgTableName, async bool) error {
 	if len(syncTables) == 0 {
 		r.logger.Info("no tables to sync")
@@ -53,7 +48,7 @@ func (r *Replicator) SyncTables(syncTables []config.PgTableName, async bool) err
 }
 
 func (r *Replicator) syncTable(chUploader bulkupload.BulkUploader, conn *pgx.Conn, pgTableName config.PgTableName) error {
-	if err := chUploader.Init(buffer.New(bulkUploaderBufferSize)); err != nil {
+	if err := chUploader.Init(buffer.New(r.cfg.PipeBufferSize)); err != nil {
 		return fmt.Errorf("could not init bulkuploader: %v", err)
 	}
 
@@ -121,7 +116,7 @@ func (r *Replicator) GetTablesToSync() ([]config.PgTableName, error) {
 }
 
 func (r *Replicator) getTxAndLSN(conn *pgx.Conn, pgTableName config.PgTableName) (*pgx.Tx, dbtypes.LSN, error) { //TODO: better name: getSnapshot?
-	for attempt := 0; attempt < slotCreateAttempts; attempt++ {
+	for attempt := 0; attempt < r.cfg.CreateSlotMaxAttempts; attempt++ {
 		select {
 		case <-r.ctx.Done():
 			return nil, dbtypes.InvalidLSN, fmt.Errorf("context done")
@@ -185,7 +180,7 @@ func (r *Replicator) syncJob(jobID int, doneCh chan<- struct{}) {
 		}
 	}
 	conn.ConnInfo = connInfo
-	chUploader := bulkupload.New(&r.cfg.ClickHouse, r.cfg.ClickHouse.GzipBufSize, r.cfg.ClickHouse.GzipCompression)
+	chUploader := bulkupload.New(&r.cfg.ClickHouse, r.cfg.GzipBufSize, r.cfg.GzipCompression)
 	for pgTableName := range r.syncJobs {
 		r.logger.Infof("sync job %d: starting syncing %q pg table", jobID, pgTableName)
 		if err := r.syncTable(chUploader, conn, pgTableName); err != nil {

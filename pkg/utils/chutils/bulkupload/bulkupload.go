@@ -36,7 +36,7 @@ type BulkUpload struct {
 
 func New(cfg *config.CHConnConfig, gzipBufSize int, comprLevel config.GzipComprLevel) *BulkUpload {
 	ch := &BulkUpload{
-		conn:           chutils.MakeChConnection(cfg),
+		conn:           chutils.MakeChConnection(cfg, comprLevel != gzip.NoCompression),
 		gzipBufSize:    gzipBufSize,
 		gzipComprLevel: int(comprLevel),
 		useGzip:        comprLevel != flate.NoCompression,

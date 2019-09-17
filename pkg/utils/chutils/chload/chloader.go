@@ -33,7 +33,7 @@ func New(cfg *config.CHConnConfig, gzipCompressionLevel config.GzipComprLevel) *
 
 	ch := &CHLoad{
 		useGzip:       gzipCompressionLevel != gzip.NoCompression,
-		conn:          chutils.MakeChConnection(cfg),
+		conn:          chutils.MakeChConnection(cfg, gzipCompressionLevel != gzip.NoCompression),
 		requestBuffer: &bytes.Buffer{},
 	}
 

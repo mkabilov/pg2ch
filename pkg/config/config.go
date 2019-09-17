@@ -21,18 +21,20 @@ import (
 const (
 	ApplicationName = "pg2ch"
 
-	publicSchema               = "public"
-	defaultClickHousePort      = 8123
-	defaultClickHouseHost      = "127.0.0.1"
-	defaultPostgresHost        = "127.0.0.1"
-	DefaultRowIDColumn         = "row_id"
-	defaultBufferSize          = 1000
-	defaultGzipBufferSize      = 1000
-	defaultSignColumn          = "sign"
-	defaultLsnColumn           = "lsn"
-	defaultIsDeletedColumn     = "is_deleted"
-	defaultTableNameColumnName = "table_name"
-	defaultPerStorageType      = "diskv"
+	publicSchema                 = "public"
+	defaultClickHousePort        = 8123
+	defaultClickHouseHost        = "127.0.0.1"
+	defaultPostgresHost          = "127.0.0.1"
+	DefaultRowIDColumn           = "row_id"
+	defaultBufferSize            = 1000
+	defaultGzipBufferSize        = 10485760
+	defaultPipeBufferSize        = 10485760
+	defaultCreateSlotMaxAttempts = 100
+	defaultSignColumn            = "sign"
+	defaultLsnColumn             = "lsn"
+	defaultIsDeletedColumn       = "is_deleted"
+	defaultTableNameColumnName   = "table_name"
+	defaultPerStorageType        = "diskv"
 
 	TableLSNKeyPrefix = "table_lsn_"
 )
@@ -126,14 +128,12 @@ type Table struct {
 }
 
 type CHConnConfig struct {
-	Host            string            `yaml:"host"`
-	Port            uint32            `yaml:"port"`
-	Database        string            `yaml:"database"`
-	User            string            `yaml:"username"`
-	Password        string            `yaml:"password"`
-	Params          map[string]string `yaml:"params"`
-	GzipBufSize     int               `yaml:"gzip_buffer_size"`
-	GzipCompression GzipComprLevel    `yaml:"gzip_compression"`
+	Host     string            `yaml:"host"`
+	Port     uint32            `yaml:"port"`
+	Database string            `yaml:"database"`
+	User     string            `yaml:"username"`
+	Password string            `yaml:"password"`
+	Params   map[string]string `yaml:"params"`
 }
 
 // Config contains config
@@ -148,6 +148,10 @@ type Config struct {
 	PprofBind              string                 `yaml:"pprof_bind"`
 	SyncWorkers            int                    `yaml:"sync_workers"`
 	LogLevel               zapcore.Level          `yaml:"loglevel"`
+	GzipBufSize            int                    `yaml:"gzip_buffer_size"`
+	GzipCompression        GzipComprLevel         `yaml:"gzip_compression"`
+	PipeBufferSize         int64                  `yaml:"pipe_buffer_size"`
+	CreateSlotMaxAttempts  int                    `yaml:"create_slot_max_attempts"`
 }
 
 type Column struct {
@@ -369,8 +373,16 @@ func New(filepath string) (*Config, error) {
 		}
 	}
 
-	if cfg.ClickHouse.GzipBufSize == 0 && cfg.ClickHouse.GzipCompression != flate.NoCompression {
-		cfg.ClickHouse.GzipBufSize = defaultGzipBufferSize
+	if cfg.GzipBufSize == 0 && cfg.GzipCompression != flate.NoCompression {
+		cfg.GzipBufSize = defaultGzipBufferSize
+	}
+
+	if cfg.PipeBufferSize == 0 {
+		cfg.PipeBufferSize = defaultPipeBufferSize
+	}
+
+	if cfg.CreateSlotMaxAttempts == 0 {
+		cfg.CreateSlotMaxAttempts = defaultCreateSlotMaxAttempts
 	}
 
 	return cfg, nil
@@ -458,15 +470,17 @@ func (c Config) Print() {
 	fmt.Fprintf(os.Stderr, "inactivity flush timeout: %v\n", c.InactivityFlushTimeout)
 	fmt.Fprintf(os.Stderr, "logging level: %s\n", c.LogLevel)
 	fmt.Fprintf(os.Stderr, "number of sync workers: %d\n", c.SyncWorkers)
-	fmt.Fprintf(os.Stderr, "clickhouse gzip compression: %v\n", c.ClickHouse.GzipCompression)
-	if c.ClickHouse.GzipCompression != flate.NoCompression {
-		fmt.Fprintf(os.Stderr, "clickhouse gzip buffer size: %v\n", c.ClickHouse.GzipBufSize)
+	fmt.Fprintf(os.Stderr, "gzip compression level: %v\n", c.GzipCompression)
+	if c.GzipCompression != flate.NoCompression {
+		fmt.Fprintf(os.Stderr, "gzip buffer size: %v\n", c.GzipBufSize)
 	}
+	fmt.Fprintf(os.Stderr, "pipe buffer size: %v\n", c.PipeBufferSize)
+	fmt.Fprintf(os.Stderr, "create slot max attempts: %v\n", c.CreateSlotMaxAttempts)
 
 	targetTables := make(map[string][]string)
 	for pgTable, tblCfg := range c.Tables {
 		chTableStr := tblCfg.ChMainTable.String()
-		pgTableStr := fmt.Sprintf("pg: %s", pgTable.String())
+		pgTableStr := pgTable.String()
 		if !tblCfg.ChSyncAuxTable.IsEmpty() {
 			pgTableStr += fmt.Sprintf(" aux: %s", tblCfg.ChSyncAuxTable.String())
 		}

@@ -3,7 +3,6 @@ package chutils
 import (
 	"bufio"
 	"bytes"
-	"compress/flate"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -23,7 +22,7 @@ type CHConn struct {
 }
 
 // Make new ClickHouse connection. For HTTP it just makes URL
-func MakeChConnection(c *config.CHConnConfig) *CHConn {
+func MakeChConnection(c *config.CHConnConfig, useGzip bool) *CHConn {
 	var baseURL string
 	connStr := url.Values{}
 
@@ -49,7 +48,7 @@ func MakeChConnection(c *config.CHConnConfig) *CHConn {
 		baseURL:    baseURL,
 		withParams: len(connStr) > 0,
 		client:     &http.Client{},
-		useGzip:    c.GzipCompression != flate.NoCompression,
+		useGzip:    useGzip,
 	}
 }
 
