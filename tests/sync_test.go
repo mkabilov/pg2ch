@@ -1,7 +1,6 @@
 package tests
 
 import (
-	"compress/gzip"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -227,7 +226,7 @@ func initNode(t *testing.T) (*pqt.PostgresNode, *config.Config) {
 	} else {
 		t.Fatal("unknown db type")
 	}
-	ch.conn = chutils.MakeChConnection(&cfg.ClickHouse, cfg.GzipCompression != gzip.NoCompression)
+	ch.conn = chutils.MakeChConnection(&cfg.ClickHouse, cfg.GzipCompression.UseCompression())
 
 	if err != nil {
 		log.Fatal("config parsing error: ", err)

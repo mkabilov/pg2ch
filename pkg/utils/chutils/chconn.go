@@ -13,6 +13,12 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/config"
 )
 
+type CHConnector interface {
+	Exec(string) error
+	PerformInsert(config.ChTableName, []string, io.Reader) error
+	Query(string) ([][]string, error)
+}
+
 // ClickHouse connection
 type CHConn struct {
 	useGzip    bool

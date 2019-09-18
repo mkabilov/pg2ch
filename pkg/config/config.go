@@ -2,6 +2,7 @@ package config
 
 import (
 	"compress/flate"
+	"compress/gzip"
 	"fmt"
 	"log"
 	"os"
@@ -274,6 +275,10 @@ func (gc GzipComprLevel) String() string {
 	}
 
 	return "unknown" //should never happen
+}
+
+func (gc GzipComprLevel) UseCompression() bool {
+	return gc != gzip.NoCompression
 }
 
 func (tn PgTableName) String() string {

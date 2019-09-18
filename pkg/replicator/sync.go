@@ -8,6 +8,7 @@ import (
 	"gopkg.in/djherbis/buffer.v1"
 
 	"github.com/mkabilov/pg2ch/pkg/config"
+	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils/bulkupload"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
@@ -180,7 +181,8 @@ func (r *Replicator) syncJob(jobID int, doneCh chan<- struct{}) {
 		}
 	}
 	conn.ConnInfo = connInfo
-	chUploader := bulkupload.New(&r.cfg.ClickHouse, r.cfg.GzipBufSize, r.cfg.GzipCompression)
+	chConn := chutils.MakeChConnection(&r.cfg.ClickHouse, r.cfg.GzipCompression.UseCompression())
+	chUploader := bulkupload.New(chConn, r.cfg.GzipBufSize, r.cfg.GzipCompression)
 	for pgTableName := range r.syncJobs {
 		r.logger.Infof("sync job %d: starting syncing %q pg table", jobID, pgTableName)
 		if err := r.syncTable(chUploader, conn, pgTableName); err != nil {

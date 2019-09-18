@@ -22,7 +22,7 @@ type BulkUploader interface {
 }
 
 type BulkUpload struct {
-	conn           *chutils.CHConn
+	conn           chutils.CHConnector
 	pipeWriter     *nio.PipeWriter
 	pipeReader     *nio.PipeReader
 	gzipWriter     *gzip.Writer
@@ -34,9 +34,9 @@ type BulkUpload struct {
 	gzipBufSize    int
 }
 
-func New(cfg *config.CHConnConfig, gzipBufSize int, comprLevel config.GzipComprLevel) *BulkUpload {
+func New(chConn chutils.CHConnector, gzipBufSize int, comprLevel config.GzipComprLevel) *BulkUpload {
 	ch := &BulkUpload{
-		conn:           chutils.MakeChConnection(cfg, comprLevel != gzip.NoCompression),
+		conn:           chConn,
 		gzipBufSize:    gzipBufSize,
 		gzipComprLevel: int(comprLevel),
 		useGzip:        comprLevel != flate.NoCompression,

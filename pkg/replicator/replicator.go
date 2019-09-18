@@ -1,7 +1,6 @@
 package replicator
 
 import (
-	"compress/gzip"
 	"context"
 	"database/sql"
 	"fmt"
@@ -269,7 +268,8 @@ func (r *Replicator) Run() error {
 }
 
 func (r *Replicator) newTable(tblName config.PgTableName, tblConfig *config.Table) (clickHouseTable, error) {
-	chLoader := chload.New(&r.cfg.ClickHouse, r.cfg.GzipCompression)
+	chConn := chutils.MakeChConnection(&r.cfg.ClickHouse, r.cfg.GzipCompression.UseCompression())
+	chLoader := chload.New(chConn, r.cfg.GzipCompression)
 	baseTable := tableengines.NewGenericTable(r.ctx, r.logger, r.persStorage, chLoader, tblConfig)
 
 	switch tblConfig.Engine {
@@ -299,7 +299,7 @@ func (r *Replicator) initTables() error {
 	}
 	defer r.pgCommit(tx)
 
-	chConn := chutils.MakeChConnection(&r.cfg.ClickHouse, r.cfg.GzipCompression != gzip.NoCompression)
+	chConn := chutils.MakeChConnection(&r.cfg.ClickHouse, r.cfg.GzipCompression.UseCompression())
 	for tblName, tblConfig := range r.cfg.Tables {
 		var lsn dbtypes.LSN
 

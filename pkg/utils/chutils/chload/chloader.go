@@ -14,7 +14,7 @@ import (
 
 type CHLoad struct {
 	client        *http.Client
-	conn          *chutils.CHConn
+	conn          chutils.CHConnector
 	useGzip       bool
 	gzipWriter    *gzip.Writer
 	requestBuffer *bytes.Buffer
@@ -28,12 +28,12 @@ type CHLoader interface {
 	Query(string) ([][]string, error)
 }
 
-func New(cfg *config.CHConnConfig, gzipCompressionLevel config.GzipComprLevel) *CHLoad {
+func New(chConn chutils.CHConnector, gzipCompressionLevel config.GzipComprLevel) *CHLoad {
 	var err error
 
 	ch := &CHLoad{
-		useGzip:       gzipCompressionLevel != gzip.NoCompression,
-		conn:          chutils.MakeChConnection(cfg, gzipCompressionLevel != gzip.NoCompression),
+		useGzip:       gzipCompressionLevel.UseCompression(),
+		conn:          chConn,
 		requestBuffer: &bytes.Buffer{},
 	}
 
