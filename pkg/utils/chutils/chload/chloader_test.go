@@ -1,15 +1,16 @@
-package bulkupload
+package chload
 
 import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
 	"github.com/mkabilov/pg2ch/pkg/config"
-	"gopkg.in/djherbis/buffer.v1"
 	"io"
 	"io/ioutil"
 	"testing"
 )
+
+var testDataMap = make(map[int][]byte)
 
 type chConnMock struct {
 	buf *bytes.Buffer
@@ -24,7 +25,10 @@ func (c *chConnMock) Exec(str string) error {
 }
 
 func (c *chConnMock) Query(string) ([][]string, error) {
-	return nil, nil
+	return [][]string{
+		{"col1", "col2"},
+		{"val1", "val2"},
+	}, nil
 }
 
 func (c *chConnMock) Write(p []byte) (int, error) {
@@ -59,39 +63,25 @@ func TestBulkLoader(t *testing.T) {
 
 	t.Run("no compression", func(t *testing.T) {
 		testData.Reset()
-		bUpl := New(chConn, 1024, gzip.NoCompression)
-		if err := bUpl.Init(buffer.New(1024)); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		doneCh := make(chan struct{})
-
-		go func() {
-			if err := bUpl.BulkUpload(config.ChTableName{DatabaseName: "default", TableName: "my_table"}, []string{"col1", "col2"}); err != nil {
-				t.Fatalf("unexpected error while bulkuploading: %v", err)
-			}
-			doneCh <- struct{}{}
-		}()
+		chL := New(chConn, gzip.NoCompression)
 
 		for i := 0; i < 10; i++ {
 			myChunk := []byte(fmt.Sprintf("ncomp%d", i))
 
 			testData.Write(myChunk)
-			if _, err := bUpl.Write(myChunk); err != nil {
+			if _, err := chL.Write(myChunk); err != nil {
 				t.Fatalf("unexpected error while writing to bulk uploader: %v", err)
 			}
 
 			testData.WriteByte('\n')
-			if err := bUpl.WriteByte('\n'); err != nil {
+			if err := chL.WriteByte('\n'); err != nil {
 				t.Fatalf("unexpected error while writing to bulk uploader: %v", err)
 			}
 		}
 
-		if err := bUpl.Finish(); err != nil {
-			t.Fatalf("unexpected error while finishing bulk upload: %v", err)
+		if err := chL.Flush(config.ChTableName{DatabaseName: "", TableName: ""}, []string{}); err != nil {
+			t.Fatalf("unexpected error while flushing ch loader: %v", err)
 		}
-
-		<-doneCh
 
 		chConnBuf, err := ioutil.ReadAll(chConn.buf)
 		if err != nil {
@@ -107,39 +97,25 @@ func TestBulkLoader(t *testing.T) {
 
 	t.Run("with compression", func(t *testing.T) {
 		testData.Reset()
-		bUpl := New(chConn, 1024, gzip.BestSpeed)
-		if err := bUpl.Init(buffer.New(1024)); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		doneCh := make(chan struct{})
-
-		go func() {
-			if err := bUpl.BulkUpload(config.ChTableName{DatabaseName: "default", TableName: "my_table"}, []string{"col1", "col2"}); err != nil {
-				t.Fatalf("unexpected error while bulkuploading: %v", err)
-			}
-			doneCh <- struct{}{}
-		}()
+		chL := New(chConn, gzip.BestSpeed)
 
 		for i := 0; i < 10; i++ {
-			myChunk := []byte(fmt.Sprintf("comp%d", i))
+			myChunk := []byte(fmt.Sprintf("ncomp%d", i))
 
 			testData.Write(myChunk)
-			if _, err := bUpl.Write(myChunk); err != nil {
+			if _, err := chL.Write(myChunk); err != nil {
 				t.Fatalf("unexpected error while writing to bulk uploader: %v", err)
 			}
 
 			testData.WriteByte('\n')
-			if err := bUpl.WriteByte('\n'); err != nil {
+			if err := chL.WriteByte('\n'); err != nil {
 				t.Fatalf("unexpected error while writing to bulk uploader: %v", err)
 			}
 		}
 
-		if err := bUpl.Finish(); err != nil {
-			t.Fatalf("unexpected error while finishing bulk upload: %v", err)
+		if err := chL.Flush(config.ChTableName{DatabaseName: "", TableName: ""}, []string{}); err != nil {
+			t.Fatalf("unexpected error while flushing ch loader: %v", err)
 		}
-
-		<-doneCh
 
 		gzR, err := gzip.NewReader(chConn.buf)
 		if err != nil {
@@ -154,7 +130,29 @@ func TestBulkLoader(t *testing.T) {
 		if exp := testData.Bytes(); bytes.Compare(chConnBuf, exp) != 0 {
 			t.Fatalf("expected: %q, got: %q", exp, chConnBuf)
 		}
+
 		chConn.Reset()
 	})
+}
 
+func init() {
+	for i := 0; i < 10; i++ {
+		testDataMap[i] = []byte(fmt.Sprintf("some %d test data: %d", i+1, i))
+	}
+}
+
+func BenchmarkWrite(b *testing.B) {
+	chConn := &chConnMock{
+		buf: &bytes.Buffer{},
+	}
+
+	chL := New(chConn, gzip.NoCompression)
+	for n := 0; n < b.N; n++ {
+		chL.Write(testDataMap[n%10])
+		if n%10 == 0 {
+			chL.WriteByte('\n')
+		} else {
+			chL.WriteByte('\t')
+		}
+	}
 }
