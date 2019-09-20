@@ -2,7 +2,10 @@
 
 Continuous data transfer from PostgreSQL to ClickHouse using logical replication mechanism.
 
-**[WIP]**
+### Status of the project
+Currently pg2ch tool is in active testing stage,
+as for now it is not for production use
+
 
 ### Getting and running
 
