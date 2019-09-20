@@ -93,7 +93,8 @@ var (
 			num Decimal(10, 2),
 			ch String,
 			sign Int8,
-		    lsn UInt64
+		    lsn UInt64,
+			table_name LowCardinality(String) CODEC(Delta, LZ4)
 		 ) engine=CollapsingMergeTree(sign) order by id;`,
 		`create table pg2ch_test.ch1_aux(
 			id UInt64,
@@ -117,7 +118,8 @@ var (
 			b Array(Int64),
 			c Array(String),
 			sign Int8,
-			lsn UInt64
+			lsn UInt64,
+			table_name LowCardinality(String) CODEC(Delta, LZ4)
 		 ) engine=CollapsingMergeTree(sign) order by id;`,
 		`create table pg2ch_test.ch2_aux(
 			id UInt64,
@@ -136,7 +138,8 @@ var (
 			b_keys Array(Int32),
 			b_values Array(Int64),
 			sign Int8,
-			lsn UInt64
+			lsn UInt64,
+			table_name LowCardinality(String) CODEC(Delta, LZ4)
 		 ) engine=CollapsingMergeTree(sign) order by id;`,
 		`create table pg2ch_test.ch3_aux(
 			id UInt64,
