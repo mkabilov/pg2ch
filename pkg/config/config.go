@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -363,7 +362,7 @@ func New(filepath string) (*Config, error) {
 	}
 
 	if cfg.SyncWorkers == 0 {
-		cfg.SyncWorkers = runtime.NumCPU()
+		cfg.SyncWorkers = 1
 	}
 
 	for _, tbl := range cfg.Tables {
