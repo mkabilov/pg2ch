@@ -127,13 +127,13 @@ func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage
 }
 
 func (t *genericTable) truncateTable(tableName config.ChTableName) error {
-	t.logger.Debugf("truncating %q table", tableName)
+	t.logger.Infof("truncating %q table", tableName)
 
 	return t.chLoader.Exec(fmt.Sprintf("truncate table %s.%s", tableName.DatabaseName, tableName.TableName))
 }
 
 func (t *genericTable) dropTablePartition(tableName config.ChTableName, partitionName string) error {
-	t.logger.Debugf("dropping %q partiton of the %q table", partitionName, tableName)
+	t.logger.Infof("dropping %q partiton of the %q table", partitionName, tableName)
 
 	return t.chLoader.Exec(fmt.Sprintf("alter table %s.%s drop partition '%s'",
 		tableName.DatabaseName, tableName.TableName, partitionName))
