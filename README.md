@@ -4,7 +4,9 @@
 
 Continuous data transfer from PostgreSQL to ClickHouse using logical replication mechanism.
 
-**[WIP]**
+### Status of the project
+Currently pg2ch tool is in active testing stage,
+as for now it is not for production use
 
 ### Getting and running
 
@@ -24,21 +26,24 @@ Run:
 tables:
     {postgresql table name}:
         main_table: {clickhouse table name}
-        buffer_table: {clickhouse buffer table name} # optional, if not specified, insert directly to the main table
-        buffer_row_id: {clickhouse buffer table column name for row id} 
+        sync_aux_table: {clickhouse auxilary table, used for storing incoming changes of table which is in sync process}
+        row_id_column: {name of the row_id column in the aux table, default "row_id"}
+        table_name_column_name: {name of the column in the aux table which stores the name of the postgresql table the data came from, default "table_name"}
+        lsn_column_name: {name of the column in the aux and main tables which is used to store the origin lsn of the row, default "lsn"}
         init_sync_skip: {skip initial copy of the data}
-        init_sync_skip_buffer_table: {if true bypass buffer_table and write directly to the main_table on initial sync copy}
-                                     # makes sense in case of huge tables        
-        init_sync_skip_truncate: {skip truncate of the main_table during init sync}                                 
+        init_sync_skip_truncate: {skip truncate of the main_table during init sync}
         engine: {clickhouse table engine: MergeTree, ReplacingMergeTree or CollapsingMergeTree}
-        max_buffer_length: {number of DML(insert/update/delete) commands to store in the memory before flushing to the buffer/main table } 
-        merge_threshold: {if buffer table specified, number of buffer flushed before moving data from buffer to the main table}
+        max_buffer_length: {number of DML(insert/update/delete) commands to store in the memory before flushing to the main table } 
         columns: # postgres - clickhouse column name mapping, 
                  # if not present, all the columns are expected to be on the clickhouse side with the exact same names 
             {postgresql column name}: {clickhouse column name}
-        is_deleted_column: # in case of ReplacingMergeTree 1 will be stored in the {is_deleted_column} in order to mark deleted rows
+        column_properties:
+                {postgresql column name}:
+                        istore_keys_suffix: {prefix for the istore keys column}
+                        istore_values_suffix: {prefix for the istore values column}
+                        coalesce: {in case of pg column has null value, replace it with value entered here}
+        is_deleted_column: {in case of ReplacingMergeTree 1 will be stored in the {is_deleted_column} in order to mark deleted rows}
         sign_column: {clickhouse sign column name for CollapsingMergeTree engines only, default "sign"}
-        ver_column: {clickhouse version column name for the ReplacingMergeTree engine, default "ver"}
 
 inactivity_merge_timeout: {interval, default 1 min} # merge buffered data after that timeout
 
@@ -61,6 +66,8 @@ postgres: # postgresql connection params
     publication_name: {postgresql publication name}
     
 db_path: {path to the persistent storage dir where table lsn positions will be stored}
+db_type: {type of the storage, "diskv" or "mmap", default "diskv"}
+gzip_compression: {gzip compression level: "no", "bestspeed", "bestcompression", "default", "huffmanonly", default: "no"}
 ```
 
 ### Sample setup:

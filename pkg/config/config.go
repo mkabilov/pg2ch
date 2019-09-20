@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx"
+	"go.uber.org/zap/zapcore"
 	"gopkg.in/yaml.v2"
 
 	"github.com/mkabilov/pg2ch/pkg/message"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
-	"go.uber.org/zap/zapcore"
 )
 
 const (
@@ -107,8 +107,8 @@ type ColumnProperty struct {
 
 // Table contains information about the table
 type Table struct {
-	ChSyncAuxTable       ChTableName                `yaml:"sync_aux_table"`
 	ChMainTable          ChTableName                `yaml:"main_table"`
+	ChSyncAuxTable       ChTableName                `yaml:"sync_aux_table"`
 	IsDeletedColumn      string                     `yaml:"is_deleted_column"`
 	SignColumn           string                     `yaml:"sign_column"`
 	RowIDColumnName      string                     `yaml:"row_id_column"`
