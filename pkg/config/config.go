@@ -392,6 +392,10 @@ func New(filepath string) (*Config, error) {
 	return cfg, nil
 }
 
+func (ct ChTableName) NamespacedName() string {
+	return fmt.Sprintf("%s.%s", ct.DatabaseName, ct.TableName)
+}
+
 func (ct ChTableName) String() string {
 	return fmt.Sprintf("%s.%s", ct.DatabaseName, ct.TableName)
 }

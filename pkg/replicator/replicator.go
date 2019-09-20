@@ -274,10 +274,6 @@ func (r *Replicator) newTable(tblName config.PgTableName, tblConfig *config.Tabl
 
 	switch tblConfig.Engine {
 	case config.ReplacingMergeTree:
-		if tblConfig.LsnColumnName == "" {
-			return nil, fmt.Errorf("ReplacingMergeTree requires lsn_column_name to be set")
-		}
-
 		return tableengines.NewReplacingMergeTree(baseTable, tblConfig), nil
 	case config.CollapsingMergeTree:
 		if tblConfig.SignColumn == "" {

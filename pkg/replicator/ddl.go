@@ -146,9 +146,8 @@ func (r *Replicator) GenerateChDDL() error {
 			pkColumns[pgCol.PkCol-1] = pgColName
 		}
 
-		if tblCfg.LsnColumnName != "" {
-			chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s UInt64 CODEC(Delta, LZ4)", tblCfg.LsnColumnName))
-		}
+		chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s UInt64 CODEC(Delta, LZ4)", tblCfg.LsnColumnName))
+		chColumnDDLs = append(chColumnDDLs, fmt.Sprintf("%s LowCardinality(String) CODEC(Delta, LZ4)", tblCfg.TableNameColumnName))
 
 		switch tblCfg.Engine {
 		case config.ReplacingMergeTree:
@@ -182,7 +181,6 @@ func (r *Replicator) GenerateChDDL() error {
 		if !tblCfg.ChSyncAuxTable.IsEmpty() {
 			if _, ok := processedTables[tblCfg.ChSyncAuxTable]; !ok {
 				columns := append(chColumnDDLs, fmt.Sprintf("%s UInt64", tblCfg.RowIDColumnName))
-				columns = append(columns, fmt.Sprintf("%s String", tblCfg.TableNameColumnName))
 
 				fmt.Printf("CREATE TABLE IF NOT EXISTS %s (%s) Engine = MergeTree() ORDER BY (%s) PARTITION BY (%s);\n",
 					tblCfg.ChSyncAuxTable,

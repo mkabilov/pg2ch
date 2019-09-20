@@ -28,6 +28,13 @@ func (t *genericTable) genSyncWrite(p []byte, extras ...[]byte) error {
 		return err
 	}
 
+	if err := t.bulkUploader.WriteByte(columnDelimiter); err != nil {
+		return err
+	}
+	if _, err := t.bulkUploader.Write(t.pgTableName); err != nil {
+		return err
+	}
+
 	for _, extra := range extras {
 		if err := t.bulkUploader.WriteByte(columnDelimiter); err != nil {
 			return err
@@ -145,14 +152,14 @@ func (t *genericTable) loadSyncDeltas() error {
 		t.cfg.ChSyncAuxTable,
 		t.cfg.LsnColumnName, uint64(t.syncSnapshotLSN),
 		t.cfg.RowIDColumnName,
-		t.cfg.TableNameColumnName, t.auxTableNameColumnValue)
+		t.cfg.TableNameColumnName, t.pgTableName)
 	t.logger.Debugf("executing: %s", chSql)
 	if err := t.chLoader.Exec(chSql); err != nil {
 		return fmt.Errorf("could not merge with sync aux table: %v", err)
 	}
 
 	if !t.cfg.ChSyncAuxTable.IsEmpty() {
-		if err := t.dropTablePartition(t.cfg.ChSyncAuxTable, string(t.auxTableNameColumnValue)); err != nil {
+		if err := t.dropTablePartition(t.cfg.ChSyncAuxTable, string(t.pgTableName)); err != nil {
 			return fmt.Errorf("could not drop partition of the %q table: %v", t.cfg.ChSyncAuxTable, err)
 		}
 	}
@@ -189,12 +196,15 @@ func (t *genericTable) printSyncProgress() {
 }
 
 func (t *genericTable) syncAuxTableColumns() []string {
-	return append(t.chUsedColumns, t.cfg.RowIDColumnName, t.cfg.TableNameColumnName)
+	return append(t.chUsedColumns, t.cfg.RowIDColumnName)
 }
 
 func (t *genericTable) deltaSize(lsn dbtypes.LSN) string {
-	res, err := t.chLoader.Query(fmt.Sprintf("SELECT count(*) FROM %s WHERE %s > %d",
-		t.cfg.ChSyncAuxTable, t.cfg.LsnColumnName, uint64(lsn)))
+	res, err := t.chLoader.Query(fmt.Sprintf("SELECT count(*) FROM %s WHERE %s > %d and %s = '%s'",
+		t.cfg.ChSyncAuxTable,
+		t.cfg.LsnColumnName, uint64(lsn),
+		t.cfg.TableNameColumnName, t.cfg.PgTableName.NamespacedName(),
+	))
 	if err != nil {
 		t.logger.Fatalf("query error: %v", err)
 	}

@@ -137,22 +137,36 @@ func TestBulkLoader(t *testing.T) {
 
 func init() {
 	for i := 0; i < 10; i++ {
-		testDataMap[i] = []byte(fmt.Sprintf("some %d test data: %d", i+1, i))
+		if i%2 == 0 {
+			testDataMap[i] = []byte(fmt.Sprintf("some %d test data: %d", i+1, i))
+		} else {
+			testDataMap[i] = []byte(fmt.Sprintf("%d", i))
+		}
 	}
 }
 
-func BenchmarkWrite(b *testing.B) {
+func BenchmarkCHLoadWriteDefault(b *testing.B)         { benchmarkCHLoadWrite(gzip.DefaultCompression, b) }
+func BenchmarkCHLoadWriteNoCompression(b *testing.B)   { benchmarkCHLoadWrite(gzip.NoCompression, b) }
+func BenchmarkCHLoadWriteBestSpeed(b *testing.B)       { benchmarkCHLoadWrite(gzip.BestSpeed, b) }
+func BenchmarkCHLoadWriteBestCompression(b *testing.B) { benchmarkCHLoadWrite(gzip.BestCompression, b) }
+func BenchmarkCHLoadWriteHuffmanOnly(b *testing.B)     { benchmarkCHLoadWrite(gzip.HuffmanOnly, b) }
+
+func benchmarkCHLoadWrite(comprLevel config.GzipComprLevel, b *testing.B) {
 	chConn := &chConnMock{
 		buf: &bytes.Buffer{},
 	}
 
-	chL := New(chConn, gzip.NoCompression)
+	chL := New(chConn, comprLevel)
 	for n := 0; n < b.N; n++ {
-		chL.Write(testDataMap[n%10])
-		if n%10 == 0 {
-			chL.WriteByte('\n')
-		} else {
-			chL.WriteByte('\t')
+		for i := 0; i < 100; i++ {
+			chL.Write(testDataMap[n%10])
+			if n%10 == 0 {
+				chL.WriteByte('\n')
+			} else {
+				chL.WriteByte('\t')
+			}
 		}
+
+		chL.Flush(config.ChTableName{DatabaseName: "", TableName: ""}, []string{})
 	}
 }

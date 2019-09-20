@@ -57,13 +57,13 @@ type genericTable struct {
 	memBufferPgDMLsCnt int         // number of pg DML commands in the current buffer,
 	// i.e. 1 update pg dml command => 2 ch inserts: with -1 sign, and +1 sign
 
-	inSync                  bool          // protected via table mutex
-	syncedRows              uint64        // number of processed rows during the sync
-	liveTuples              uint64        // number of live tuples taken from pg_statistics table, i.e. approx num of rows
-	syncBuf                 *bytes.Buffer // buffer for various things during the sync
-	syncLastBatchTime       time.Time     //to calculate rate
-	auxTblRowID             uint64        // row_id stored in the aux table
-	auxTableNameColumnValue []byte        // table name for the table_name_column_name column
+	inSync            bool          // protected via table mutex
+	syncedRows        uint64        // number of processed rows during the sync
+	liveTuples        uint64        // number of live tuples taken from pg_statistics table, i.e. approx num of rows
+	syncBuf           *bytes.Buffer // buffer for various things during the sync
+	syncLastBatchTime time.Time     //to calculate rate
+	auxTblRowID       uint64        // row_id stored in the aux table
+	pgTableName       []byte        // table name for the table_name_column_name column
 
 	bulkUploader    bulkupload.BulkUploader // used only during the sync
 	syncSnapshotLSN dbtypes.LSN             // LSN of the initial copy snapshot, protected via table mutex
@@ -81,33 +81,35 @@ type genericTable struct {
 func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage kvstorage.KVStorage,
 	loader chload.CHLoader, tblCfg *config.Table) genericTable {
 	t := genericTable{
-		Mutex:                   &sync.Mutex{},
-		memFlushMutex:           &sync.Mutex{},
-		syncBuf:                 &bytes.Buffer{},
-		ctx:                     ctx,
-		chLoader:                loader,
-		cfg:                     tblCfg,
-		columnMapping:           make(map[string]config.ChColumn),
-		chUsedColumns:           make([]string, 0),
-		pgUsedColumns:           make([]string, 0),
-		tupleColumns:            tblCfg.TupleColumns,
-		persStorage:             persStorage,
-		logger:                  logger.With("table", tblCfg.PgTableName.String()),
-		auxTableNameColumnValue: []byte(tblCfg.PgTableName.String()),
-		syncPgColumns:           make(map[int]*config.PgColumn),
-		syncColProps:            make(map[int]*config.ColumnProperty),
+		Mutex:         &sync.Mutex{},
+		memFlushMutex: &sync.Mutex{},
+		syncBuf:       &bytes.Buffer{},
+		ctx:           ctx,
+		chLoader:      loader,
+		cfg:           tblCfg,
+		columnMapping: make(map[string]config.ChColumn),
+		chUsedColumns: make([]string, 0),
+		pgUsedColumns: make([]string, 0),
+		tupleColumns:  tblCfg.TupleColumns,
+		persStorage:   persStorage,
+		logger:        logger.With("table", tblCfg.PgTableName.String()),
+		pgTableName:   []byte(tblCfg.PgTableName.NamespacedName()),
+		syncPgColumns: make(map[int]*config.PgColumn),
+		syncColProps:  make(map[int]*config.ColumnProperty),
 	}
 
-	for pgColID, pgCol := range t.tupleColumns {
+	pgUsedColID := 0
+	for _, pgCol := range t.tupleColumns {
 		chCol, ok := tblCfg.ColumnMapping[pgCol.Name]
 		if !ok {
 			continue
 		}
-		t.syncPgColumns[pgColID] = t.cfg.PgColumns[pgCol.Name]
-		t.syncColProps[pgColID] = t.cfg.ColumnProperties[pgCol.Name]
 
 		t.columnMapping[pgCol.Name] = chCol
 		t.pgUsedColumns = append(t.pgUsedColumns, pgCol.Name)
+		t.syncPgColumns[pgUsedColID] = t.cfg.PgColumns[pgCol.Name]
+		t.syncColProps[pgUsedColID] = t.cfg.ColumnProperties[pgCol.Name]
+		pgUsedColID++
 
 		if tblCfg.PgColumns[pgCol.Name].IsIstore() {
 			if columnCfg, ok := tblCfg.ColumnProperties[pgCol.Name]; ok {
@@ -119,9 +121,8 @@ func NewGenericTable(ctx context.Context, logger *zap.SugaredLogger, persStorage
 		}
 	}
 
-	if tblCfg.LsnColumnName != "" {
-		t.chUsedColumns = append(t.chUsedColumns, tblCfg.LsnColumnName)
-	}
+	t.chUsedColumns = append(t.chUsedColumns, tblCfg.LsnColumnName)
+	t.chUsedColumns = append(t.chUsedColumns, tblCfg.TableNameColumnName)
 
 	return t
 }
@@ -159,11 +160,12 @@ func (t *genericTable) writeRow(tuples ...chTuple) error {
 				t.chLoader, // we use the same buffer as during the normal operation
 				tuple.row,
 				t.txFinalLSN,
-				append(tuple.extra, []byte(strconv.FormatUint(t.auxTblRowID, 10)), t.auxTableNameColumnValue)...); err != nil {
+				t.pgTableName,
+				append(tuple.extra, []byte(strconv.FormatUint(t.auxTblRowID, 10)))...); err != nil {
 				return err
 			}
 		} else {
-			if err := t.writeRowToBuffer(t.chLoader, tuple.row, t.txFinalLSN, tuple.extra...); err != nil {
+			if err := t.writeRowToBuffer(t.chLoader, tuple.row, t.txFinalLSN, t.pgTableName, tuple.extra...); err != nil {
 				return err
 			}
 		}
@@ -237,7 +239,7 @@ func (t *genericTable) Flush() error {
 	return t.flushBuffer()
 }
 
-func (t *genericTable) writeRowToBuffer(buf utils.Writer, row message.Row, lsn dbtypes.LSN, extras ...[]byte) error {
+func (t *genericTable) writeRowToBuffer(buf utils.Writer, row message.Row, lsn dbtypes.LSN, tableName []byte, extras ...[]byte) error {
 	for colId, col := range t.tupleColumns {
 		if _, ok := t.columnMapping[col.Name]; !ok {
 			continue
@@ -258,6 +260,13 @@ func (t *genericTable) writeRowToBuffer(buf utils.Writer, row message.Row, lsn d
 		return err
 	}
 	if _, err := buf.Write(lsn.Decimal()); err != nil {
+		return err
+	}
+
+	if err := buf.WriteByte(columnDelimiter); err != nil {
+		return err
+	}
+	if _, err := buf.Write(tableName); err != nil {
 		return err
 	}
 
@@ -294,10 +303,10 @@ func (t *genericTable) Init(lastFinalLSN dbtypes.LSN) error {
 	}
 
 	if lastFinalLSN.IsValid() {
-		sql := fmt.Sprintf("alter table %s delete where lsn > %d",
-			t.cfg.ChMainTable.String(), uint64(lastFinalLSN))
+		sql := fmt.Sprintf("alter table %s delete where lsn > %d and table_name = '%s'",
+			t.cfg.ChMainTable.NamespacedName(), uint64(lastFinalLSN), t.cfg.PgTableName.NamespacedName())
 
-		t.logger.Debugw("deleting all the dirty data", "sql", sql)
+		t.logger.Infow("deleting all the dirty data", "sql", sql)
 		if err := t.chLoader.Exec(sql); err != nil {
 			return fmt.Errorf("could not delete dirty tuples from %s table: %v", t.cfg.ChMainTable, err)
 		}

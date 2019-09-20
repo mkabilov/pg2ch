@@ -37,3 +37,4 @@ postgres:
 db_path: /tmp/db
 db_type: mmap
 loglevel: info
+gzip_compression: bestspeed

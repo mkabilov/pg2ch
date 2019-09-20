@@ -17,7 +17,6 @@ func NewReplacingMergeTree(table genericTable, tblCfg *config.Table) *replacingM
 	t := replacingMergeTree{
 		genericTable: table,
 	}
-	t.chUsedColumns = append(t.chUsedColumns, tblCfg.LsnColumnName, tblCfg.IsDeletedColumn)
 
 	return &t
 }
