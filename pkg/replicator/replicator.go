@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx"
 	"github.com/jackc/pgx/log/zapadapter"
@@ -70,6 +72,9 @@ type Replicator struct {
 	isEmptyTx             bool
 	syncJobs              chan config.PgTableName
 	tblRelMsgs            map[config.PgTableName]message.Relation
+
+	processedMsgCnt     int
+	streamLastBatchTime time.Time
 }
 
 func New(cfg *config.Config) *Replicator {
@@ -107,7 +112,8 @@ func New(cfg *config.Config) *Replicator {
 				"replication":      "database",
 				"application_name": config.ApplicationName},
 			PreferSimpleProtocol: true}),
-		tblRelMsgs: make(map[config.PgTableName]message.Relation, len(cfg.Tables)),
+		tblRelMsgs:          make(map[config.PgTableName]message.Relation, len(cfg.Tables)),
+		streamLastBatchTime: time.Now(),
 	}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.logger = logger.Sugar()
@@ -371,5 +377,44 @@ loop:
 				r.logger.Debugf("unhandled signal: %v", sig)
 			}
 		}
+	}
+}
+
+// Print all replicated tables LSN
+func (r *Replicator) PrintTablesLSN() {
+	var (
+		tables []string
+		maxLen int
+		lsnMap = make(map[string]string)
+	)
+
+	for tblName := range r.chTables {
+		var lsn string
+		name := tblName.String()
+
+		if len(name) > maxLen {
+			maxLen = len(name)
+		}
+
+		if tblKey := tblName.KeyName(); r.persStorage.Has(tblKey) {
+			tblLSN, err := r.persStorage.ReadLSN(tblKey)
+
+			if err != nil {
+				lsn = "INCORRECT"
+			} else {
+				lsn = tblLSN.String()
+			}
+		} else {
+			lsn = "NO"
+		}
+		lsnMap[name] = lsn
+		tables = append(tables, name)
+	}
+	sort.Strings(tables)
+
+	// print ordered list of tables
+	format := fmt.Sprintf("%%%ds\t%%s\n", maxLen)
+	for i := range tables {
+		fmt.Printf(format, tables[i], lsnMap[tables[i]])
 	}
 }

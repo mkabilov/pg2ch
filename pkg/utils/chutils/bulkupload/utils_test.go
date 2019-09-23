@@ -5,9 +5,8 @@ import (
 	"io/ioutil"
 	"testing"
 
-	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
-
 	"github.com/mkabilov/pg2ch/pkg/config"
+	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 )
 
 var (
