@@ -9,6 +9,8 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 )
 
+const maxBufferCapacity = 1024 * 1024 * 1024
+
 type CHLoad struct {
 	*bytes.Buffer
 	client *http.Client
@@ -37,6 +39,10 @@ func (c *CHLoad) Flush(tableName config.ChTableName, columns []string) error {
 
 	if err := c.conn.PerformInsert(tableName, columns, c.Buffer); err != nil {
 		return err
+	}
+
+	if c.Buffer.Cap() >= maxBufferCapacity {
+		c.Buffer.Truncate(maxBufferCapacity)
 	}
 
 	return nil
