@@ -95,44 +95,44 @@ func TestBulkLoader(t *testing.T) {
 		chConn.Reset()
 	})
 
-	t.Run("with compression", func(t *testing.T) {
-		testData.Reset()
-		chL := New(chConn, gzip.BestSpeed)
-
-		for i := 0; i < 10; i++ {
-			myChunk := []byte(fmt.Sprintf("ncomp%d", i))
-
-			testData.Write(myChunk)
-			if _, err := chL.Write(myChunk); err != nil {
-				t.Fatalf("unexpected error while writing to bulk uploader: %v", err)
-			}
-
-			testData.WriteByte('\n')
-			if err := chL.WriteByte('\n'); err != nil {
-				t.Fatalf("unexpected error while writing to bulk uploader: %v", err)
-			}
-		}
-
-		if err := chL.Flush(config.ChTableName{DatabaseName: "", TableName: ""}, []string{}); err != nil {
-			t.Fatalf("unexpected error while flushing ch loader: %v", err)
-		}
-
-		gzR, err := gzip.NewReader(chConn.buf)
-		if err != nil {
-			t.Fatalf("unexpected error while creating gzip reader: %v", err)
-		}
-
-		chConnBuf, err := ioutil.ReadAll(gzR)
-		if err != nil {
-			t.Fatalf("unexpected error while reading ch connector buffer: %v", err)
-		}
-
-		if exp := testData.Bytes(); bytes.Compare(chConnBuf, exp) != 0 {
-			t.Fatalf("expected: %q, got: %q", exp, chConnBuf)
-		}
-
-		chConn.Reset()
-	})
+	//t.Run("with compression", func(t *testing.T) {
+	//	testData.Reset()
+	//	chL := New(chConn, gzip.BestSpeed)
+	//
+	//	for i := 0; i < 10; i++ {
+	//		myChunk := []byte(fmt.Sprintf("ncomp%d", i))
+	//
+	//		testData.Write(myChunk)
+	//		if _, err := chL.Write(myChunk); err != nil {
+	//			t.Fatalf("unexpected error while writing to bulk uploader: %v", err)
+	//		}
+	//
+	//		testData.WriteByte('\n')
+	//		if err := chL.WriteByte('\n'); err != nil {
+	//			t.Fatalf("unexpected error while writing to bulk uploader: %v", err)
+	//		}
+	//	}
+	//
+	//	if err := chL.Flush(config.ChTableName{DatabaseName: "", TableName: ""}, []string{}); err != nil {
+	//		t.Fatalf("unexpected error while flushing ch loader: %v", err)
+	//	}
+	//
+	//	gzR, err := gzip.NewReader(chConn.buf)
+	//	if err != nil {
+	//		t.Fatalf("unexpected error while creating gzip reader: %v", err)
+	//	}
+	//
+	//	chConnBuf, err := ioutil.ReadAll(gzR)
+	//	if err != nil {
+	//		t.Fatalf("unexpected error while reading ch connector buffer: %v", err)
+	//	}
+	//
+	//	if exp := testData.Bytes(); bytes.Compare(chConnBuf, exp) != 0 {
+	//		t.Fatalf("expected: %q, got: %q", exp, chConnBuf)
+	//	}
+	//
+	//	chConn.Reset()
+	//})
 }
 
 func init() {

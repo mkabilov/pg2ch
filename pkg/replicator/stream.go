@@ -232,8 +232,9 @@ func (r *Replicator) processTruncate(msg *message.Truncate) error {
 func (r *Replicator) HandleMessage(lsn dbtypes.LSN, msg message.Message) error {
 	if time.Since(r.streamLastBatchTime).Seconds() >= 5 {
 		if !r.streamLastBatchTime.IsZero() {
-			r.logger.Infof("stream processing rate: %.2f msg/sec",
-				float64(r.processedMsgCnt)/time.Since(r.streamLastBatchTime).Seconds())
+			r.logger.Infof("stream processing rate: %.2f msg/sec (final LSN: %v)",
+				float64(r.processedMsgCnt)/time.Since(r.streamLastBatchTime).Seconds(),
+				r.txFinalLSN)
 		}
 
 		r.streamLastBatchTime = time.Now()
