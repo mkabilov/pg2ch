@@ -6,7 +6,7 @@ Continuous data transfer from PostgreSQL to ClickHouse using logical replication
 
 ### Status of the project
 Currently pg2ch tool is in active testing stage,
-as for now it is not for production use
+as for now it shall be not used in the production environment 
 
 ### Getting and running
 
@@ -26,14 +26,13 @@ Run:
 tables:
     {postgresql table name}:
         main_table: {clickhouse table name}
-        sync_aux_table: {clickhouse auxilary table, used for storing incoming changes of table which is in sync process}
+        sync_aux_table: {clickhouse auxiliary table, see explanation below}
         row_id_column: {name of the row_id column in the aux table, default "row_id"}
         table_name_column_name: {name of the column in the aux table which stores the name of the postgresql table the data came from, default "table_name"}
         lsn_column_name: {name of the column in the aux and main tables which is used to store the origin lsn of the row, default "lsn"}
         init_sync_skip: {skip initial copy of the data}
-        init_sync_skip_truncate: {skip truncate of the main_table during init sync}
-        engine: {clickhouse table engine: MergeTree, ReplacingMergeTree or CollapsingMergeTree}
-        max_buffer_length: {number of DML(insert/update/delete) commands to store in the memory before flushing to the main table } 
+        init_sync_skip_truncate: {skip truncate of the main_table during the init sync}
+        engine: {clickhouse table engine: MergeTree, ReplacingMergeTree or CollapsingMergeTree} 
         columns: # postgres - clickhouse column name mapping, 
                  # if not present, all the columns are expected to be on the clickhouse side with the exact same names 
             {postgresql column name}: {clickhouse column name}
@@ -70,6 +69,18 @@ db_type: {type of the storage, "diskv" or "mmap", default "diskv"}
 gzip_compression: {compression level: "no", "bestspeed", "bestcompression", "default", "huffmanonly", default: "no"}
 ```
 
+### Auxiliary table
+
+Auxiliary table is a special table used for storing incoming changes of the table which is currently in initial copy state,
+after initial copy is done, data which appeared after snapshot of the initial sync will be copied to the main table.
+
+The aux table must contain all the columns of the main table, plus the following ones:
+- `{row_id_column}` (see config file, default is `row_id`) of the `UInt64` type
+- `{table_name_column_name}` (see config file, default `table_name`) of the `LowCardinality(String)` or just `String` type
+- `{lsn_column_name}` (see config file, default `lsn`) of the `UInt64` type
+
+(in the future releases the aux table hopefully will be created automatically during the sync)
+
 ### Sample setup:
 
 - make sure you have PostgreSQL server running on `localhost:5432`
@@ -87,7 +98,7 @@ for the `pgbench_accounts` table to FULL, so that we'll receive old values of th
 CREATE TABLE pgbench_accounts (aid Int32, abalance Int32, sign Int8, lsn UInt64) ENGINE = CollapsingMergeTree(sign) ORDER BY aid;
 -- our target table
 
-CREATE TABLE pgbench_accounts_aux (aid Int32, abalance Int32, sign Int8, row_id UInt64, lsn UInt64, table_name String) ENGINE = Memory();
+CREATE TABLE pgbench_accounts_aux (aid Int32, abalance Int32, sign Int8, row_id UInt64, lsn UInt64, table_name LowCardinality(String)) ENGINE = MergeTree() PARTITION BY table_name ORDER BY lsn;
 -- will be used as an aux table
 ```
 - create `config.yaml` file with the following content:
@@ -97,7 +108,6 @@ tables:
         main_table: pgbench_accounts
         sync_aux_table: pgbench_accounts_aux
         engine: CollapsingMergeTree
-        max_buffer_length: 1000
         columns:
             aid: aid
             abalance: abalance
