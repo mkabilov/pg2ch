@@ -2,19 +2,19 @@ package chload
 
 import (
 	"bytes"
-	"net/http"
-
 	"github.com/mkabilov/pg2ch/pkg/config"
 	"github.com/mkabilov/pg2ch/pkg/utils"
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils"
 )
 
-const maxBufferCapacity = 1024 * 1024 * 1024
+const (
+	minBufferCapacity = 100 * 1024 * 1024
+	maxBufferCapacity = 1024 * 1024 * 1024
+)
 
 type CHLoad struct {
 	*bytes.Buffer
-	client *http.Client
-	conn   chutils.CHConnector
+	conn chutils.CHConnector
 }
 
 type CHLoader interface {
@@ -25,7 +25,7 @@ type CHLoader interface {
 	Query(string) ([][]string, error)
 }
 
-func New(chConn chutils.CHConnector, gzipCompressionLevel config.GzipComprLevel) *CHLoad {
+func New(chConn chutils.CHConnector) *CHLoad {
 	ch := &CHLoad{
 		conn:   chConn,
 		Buffer: &bytes.Buffer{},
@@ -42,7 +42,7 @@ func (c *CHLoad) Flush(tableName config.ChTableName, columns []string) error {
 	}
 
 	if c.Buffer.Cap() >= maxBufferCapacity {
-		c.Buffer.Truncate(maxBufferCapacity)
+		c.Buffer.Truncate(minBufferCapacity)
 	}
 
 	return nil

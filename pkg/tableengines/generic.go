@@ -22,7 +22,7 @@ import (
 
 // Generic table is a "parent" struct for all the table engines
 const (
-	flushBufferAttemptInterval = time.Second
+	flushBufferAttemptInterval = 5 * time.Second
 	maxFlushBufferAttempts     = 1000
 
 	columnDelimiter = '\t'

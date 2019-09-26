@@ -63,7 +63,7 @@ func TestBulkLoader(t *testing.T) {
 
 	t.Run("no compression", func(t *testing.T) {
 		testData.Reset()
-		chL := New(chConn, gzip.NoCompression)
+		chL := New(chConn)
 
 		for i := 0; i < 10; i++ {
 			myChunk := []byte(fmt.Sprintf("ncomp%d", i))
@@ -156,7 +156,7 @@ func benchmarkCHLoadWrite(comprLevel config.GzipComprLevel, b *testing.B) {
 		buf: &bytes.Buffer{},
 	}
 
-	chL := New(chConn, comprLevel)
+	chL := New(chConn)
 	for n := 0; n < b.N; n++ {
 		for i := 0; i < 100; i++ {
 			chL.Write(testDataMap[n%10])

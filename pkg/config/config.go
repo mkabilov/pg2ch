@@ -189,7 +189,7 @@ func (t *tableEngine) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	}
 
 	for k, v := range tableEngines {
-		if strings.ToLower(val) == strings.ToLower(v) {
+		if strings.EqualFold(val, v) {
 			*t = k
 			return nil
 		}

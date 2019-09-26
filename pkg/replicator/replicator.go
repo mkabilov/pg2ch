@@ -275,7 +275,7 @@ func (r *Replicator) Run() error {
 
 func (r *Replicator) newTable(tblName config.PgTableName, tblConfig *config.Table) (clickHouseTable, error) {
 	chConn := chutils.MakeChConnection(&r.cfg.ClickHouse, false)
-	chLoader := chload.New(chConn, r.cfg.GzipCompression)
+	chLoader := chload.New(chConn)
 	baseTable := tableengines.NewGenericTable(r.ctx, r.logger, r.persStorage, chLoader, tblConfig)
 
 	switch tblConfig.Engine {
