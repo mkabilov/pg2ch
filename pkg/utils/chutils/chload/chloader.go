@@ -8,7 +8,6 @@ import (
 )
 
 const (
-	minBufferCapacity = 100 * 1024 * 1024
 	maxBufferCapacity = 1024 * 1024 * 1024
 )
 

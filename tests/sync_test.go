@@ -54,7 +54,7 @@ from generate_series(1, 10000) i;
 `
 	addSQL = `
 insert into pg1(a,b,c,d,f1,f2,bo,num,ch) select i, i + 1, i + 2, i::text,
-	i + 1.1, i + 2.1, true, i + 3, (i+4)::text from generate_series(1, %[1]d) i;
+	i + 1.1, i + 2.1, true, i + 3, E'\t' || (i+4)::text from generate_series(1, %[1]d) i;
 
 insert into pg2(a, b, c) select array_fill(i, array[3]), array_fill(i + 1, array[3]),
 	array_fill(i::text, array[3]) from generate_series(1, %[1]d) i;
@@ -312,7 +312,7 @@ func TestBasicSync(t *testing.T) {
 		}
 
 		rows := ch.safeQuery(t, "select * from pg2ch_test.ch1 order by id desc limit 10")
-		assert.Equal(t, []string{"20000", "100", "101", "102", "100", "101.1", "102.1", "1", "103.00", "104", "1"}, rows[0][0:len(rows[0])-2], "row 0")
+		assert.Equal(t, []string{"20000", "100", "101", "102", "100", "101.1", "102.1", "1", "103.00", "104", "\t1"}, rows[0][0:len(rows[0])-2], "row 0")
 
 		rows = ch.safeQuery(t, "select * from pg2ch_test.ch2 order by id desc limit 10")
 		assert.Equal(t, "20000", rows[0][0], "row 0")

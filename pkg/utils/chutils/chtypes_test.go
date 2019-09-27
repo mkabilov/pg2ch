@@ -74,6 +74,7 @@ var (
 		{baseType: dbtypes.PgVarchar, val: ``, exp: ``},
 		{baseType: dbtypes.PgText, val: `abc`, exp: `abc`},
 		{baseType: dbtypes.PgText, val: ``, exp: ``},
+		{baseType: dbtypes.PgText, val: "\t123\nabc\t", exp: `\t123\nabc\t`},
 
 		{baseType: dbtypes.PgBigint, val: `123`, exp: `123`},
 		{baseType: dbtypes.PgBigint, val: `0`, exp: `0`},
@@ -163,6 +164,18 @@ func (mw *mockWriter) WriteByte(p byte) error {
 
 func (mw *mockWriter) Reset() {
 	mw.buf.Reset()
+}
+
+func BenchmarkConvertBaseType(b *testing.B) {
+	w := &bytes.Buffer{}
+	tupleData := &message.Tuple{
+		Kind:  message.TupleText,
+		Value: []byte("Lorem ipsum dolor sit amet,\n consectetur adipiscing elit."),
+	}
+
+	for n := 0; n < b.N; n++ {
+		convertBaseType(w, dbtypes.PgText, tupleData, &config.ColumnProperty{})
+	}
 }
 
 func TestConvertBaseType(t *testing.T) {
@@ -322,16 +335,16 @@ func TestConvertBaseType(t *testing.T) {
 			}
 
 			if err := ConvertColumn(w, column, tupleData, &config.ColumnProperty{}); err != nil {
-				t.Fatalf("%s:unexpected error: %v", vv.baseType, err)
+				t.Fatalf("%s array: unexpected error: %v", vv.baseType, err)
 			}
 
 			buf, err := ioutil.ReadAll(w.buf)
 			if err != nil {
-				t.Fatalf("%s: unexpected error while reading the buffer: %v", vv.baseType, err)
+				t.Fatalf("%s array: unexpected error while reading the buffer: %v", vv.baseType, err)
 			}
 
 			if bytes.Compare(buf, []byte(vv.exp)) != 0 {
-				t.Fatalf("%s: exp %q, got %q", vv.baseType, string(vv.exp), string(buf))
+				t.Fatalf("%s array: exp %q, got %q", vv.baseType, string(vv.exp), string(buf))
 			}
 		}
 	})

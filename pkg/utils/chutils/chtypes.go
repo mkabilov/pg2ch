@@ -82,6 +82,15 @@ var (
 	ajBoolUnknownValue = []byte("-1")
 	nullStr            = []byte(`\N`)
 	istoreNull         = []byte("[]\t[]")
+
+	decodeMap = map[byte][]byte{
+		'\b': []byte(`\b`),
+		'\f': []byte(`\f`),
+		'\n': []byte(`\n`),
+		'\r': []byte(`\r`),
+		'\t': []byte(`\t`),
+		'\v': []byte(`\v`),
+	}
 )
 
 // ToClickHouseType converts pg type into ClickHouse type
@@ -125,29 +134,18 @@ func ToClickHouseType(pgColumn *config.PgColumn) (string, error) {
 	return chType, nil
 }
 
-func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple, colProp *config.ColumnProperty) error {
-	var w []byte
-
-	if tupleData.Kind == message.TupleNull {
-		if colProp != nil && len(colProp.Coalesce) > 0 {
-			w = colProp.Coalesce
-		} else {
-			w = nullStr
-		}
-	} else {
-		w = tupleData.Value
-	}
-
+func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple, colProp *config.ColumnProperty) (err error) {
 	switch baseType {
 	case dbtypes.PgAdjustIstore:
 		fallthrough
 	case dbtypes.PgAdjustBigIstore:
 		if tupleData.Kind == message.TupleNull {
 			if colProp != nil && len(colProp.Coalesce) > 0 {
-				break
+				_, err = buf.Write(colProp.Coalesce)
 			} else {
-				w = istoreNull
+				_, err = buf.Write(istoreNull)
 			}
+			return
 		} else {
 			return pgutils.IstoreToArrays(buf, tupleData.Value)
 		}
@@ -155,7 +153,12 @@ func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple
 		fallthrough
 	case dbtypes.PgBoolean:
 		if tupleData.Kind == message.TupleNull {
-			break
+			if colProp != nil && len(colProp.Coalesce) > 0 {
+				_, err = buf.Write(colProp.Coalesce)
+			} else {
+				_, err = buf.Write(nullStr)
+			}
+			return
 		}
 
 		switch tupleData.Value[0] {
@@ -164,8 +167,8 @@ func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple
 		case pgFalse:
 			return buf.WriteByte('0')
 		case ajBoolUnknown:
-			_, err := buf.Write(ajBoolUnknownValue)
-			return err
+			_, err = buf.Write(ajBoolUnknownValue)
+			return
 		}
 	case dbtypes.PgTimestampWithTimeZone:
 		fallthrough
@@ -173,15 +176,26 @@ func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple
 		fallthrough
 	case dbtypes.PgTimestamp:
 		if tupleData.Kind == message.TupleNull {
-			break
+			if colProp != nil && len(colProp.Coalesce) > 0 {
+				_, err = buf.Write(colProp.Coalesce)
+			} else {
+				_, err = buf.Write(nullStr)
+			}
+			return
 		}
 
-		_, err := buf.Write(tupleData.Value[:timestampLength])
-		return err
+		_, err = buf.Write(tupleData.Value[:timestampLength])
+		return
 	case dbtypes.PgInterval:
 		if tupleData.Kind == message.TupleNull {
-			break
+			if colProp != nil && len(colProp.Coalesce) > 0 {
+				_, err = buf.Write(colProp.Coalesce)
+			} else {
+				_, err = buf.Write(nullStr)
+			}
+			return
 		}
+
 		res := 0
 		for p, val := range strings.Split(string(tupleData.Value), ":") {
 			intVal, err := strconv.Atoi(val)
@@ -196,24 +210,61 @@ func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple
 			case 2:
 				res += intVal
 			}
-
-			w = []byte(strconv.Itoa(res))
 		}
+		_, err = buf.Write([]byte(strconv.Itoa(res)))
+		return
 	case dbtypes.PgTime:
 		fallthrough
 	case dbtypes.PgTimeWithoutTimeZone:
 		fallthrough
 	case dbtypes.PgTimeWithTimeZone:
 		if tupleData.Kind == message.TupleNull {
-			break
+			if colProp != nil && len(colProp.Coalesce) > 0 {
+				_, err = buf.Write(colProp.Coalesce)
+			} else {
+				_, err = buf.Write(nullStr)
+			}
+			return
 		}
 
-		_, err := buf.Write(tupleData.Value[:timeLength])
-		return err
+		_, err = buf.Write(tupleData.Value[:timeLength])
+		return
+	default:
+		if tupleData.Kind == message.TupleNull {
+			if colProp != nil && len(colProp.Coalesce) > 0 {
+				_, err = buf.Write(colProp.Coalesce)
+			} else {
+				_, err = buf.Write(nullStr)
+			}
+
+			return
+		}
+
+		for i := 0; i < len(tupleData.Value); i++ {
+			switch c := tupleData.Value[i]; c {
+			case '\b':
+				_, err = buf.Write([]byte(`\b`))
+			case '\f':
+				_, err = buf.Write([]byte(`\f`))
+			case '\n':
+				_, err = buf.Write([]byte(`\n`))
+			case '\r':
+				_, err = buf.Write([]byte(`\r`))
+			case '\t':
+				_, err = buf.Write([]byte(`\t`))
+			case '\v':
+				_, err = buf.Write([]byte(`\v`))
+			default:
+				err = buf.WriteByte(c)
+			}
+
+			if err != nil {
+				return
+			}
+		}
 	}
 
-	_, err := buf.Write(w)
-	return err
+	return
 }
 
 func ConvertColumn(w utils.Writer, column *config.PgColumn, tupleData *message.Tuple, colProp *config.ColumnProperty) error {

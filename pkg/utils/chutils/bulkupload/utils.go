@@ -11,16 +11,6 @@ import (
 	"github.com/mkabilov/pg2ch/pkg/utils"
 )
 
-var decodeMap = map[byte]byte{
-	'b':  '\b',
-	'f':  '\f',
-	'n':  '\n',
-	'r':  '\r',
-	't':  '\t',
-	'v':  '\v',
-	'\\': '\\',
-}
-
 func decodeDigit(c byte, onlyOctal bool) (byte, bool) {
 	switch {
 	case c >= '0' && c <= '7':
@@ -91,8 +81,27 @@ func DecodeCopyToTuples(colBuf *bytes.Buffer, out utils.Writer, pgColumns map[in
 			continue
 		}
 
-		if decodedChar, ok := decodeMap[ch]; ok {
-			colBuf.WriteByte(decodedChar)
+		switch ch {
+		case 'b':
+			colBuf.Write([]byte(`\b`))
+			continue
+		case 'f':
+			colBuf.Write([]byte(`\f`))
+			continue
+		case 'n':
+			colBuf.Write([]byte(`\n`))
+			continue
+		case 'r':
+			colBuf.Write([]byte(`\r`))
+			continue
+		case 't':
+			colBuf.Write([]byte(`\t`))
+			continue
+		case 'v':
+			colBuf.Write([]byte(`\v`))
+			continue
+		case '\\':
+			colBuf.Write([]byte(`\\`))
 			continue
 		}
 
