@@ -312,7 +312,7 @@ func TestBasicSync(t *testing.T) {
 		}
 
 		rows := ch.safeQuery(t, "select * from pg2ch_test.ch1 order by id desc limit 10")
-		assert.Equal(t, []string{"20000", "100", "101", "102", "100", "101.1", "102.1", "1", "103.00", "104", "\t1"}, rows[0][0:len(rows[0])-2], "row 0")
+		assert.Equal(t, []string{"20000", "100", "101", "102", "100", "101.1", "102.1", "1", "103.00", "\\t104", "1"}, rows[0][0:len(rows[0])-2], "row 0")
 
 		rows = ch.safeQuery(t, "select * from pg2ch_test.ch2 order by id desc limit 10")
 		assert.Equal(t, "20000", rows[0][0], "row 0")
