@@ -42,7 +42,7 @@ func (c *CHLoad) Flush(tableName config.ChTableName, columns []string) error {
 	}
 
 	if c.Buffer.Cap() >= maxBufferCapacity {
-		c.Buffer.Truncate(minBufferCapacity)
+		c.Buffer = &bytes.Buffer{}
 	}
 
 	return nil
