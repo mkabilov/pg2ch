@@ -185,7 +185,6 @@ func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple
 		}
 
 		_, err = buf.Write(tupleData.Value[:timestampLength])
-		return
 	case dbtypes.PgInterval:
 		if tupleData.Kind == message.TupleNull {
 			if colProp != nil && len(colProp.Coalesce) > 0 {
@@ -212,7 +211,6 @@ func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple
 			}
 		}
 		_, err = buf.Write([]byte(strconv.Itoa(res)))
-		return
 	case dbtypes.PgTime:
 		fallthrough
 	case dbtypes.PgTimeWithoutTimeZone:
@@ -228,8 +226,17 @@ func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple
 		}
 
 		_, err = buf.Write(tupleData.Value[:timeLength])
-		return
-	default:
+	case dbtypes.PgText:
+		fallthrough
+	case dbtypes.PgCharacterVarying:
+		fallthrough
+	case dbtypes.PgCharacter:
+		fallthrough
+	case dbtypes.PgJson:
+		fallthrough
+	case dbtypes.PgJsonb:
+		fallthrough
+	case dbtypes.PgVarchar:
 		if tupleData.Kind == message.TupleNull {
 			if colProp != nil && len(colProp.Coalesce) > 0 {
 				_, err = buf.Write(colProp.Coalesce)
@@ -262,6 +269,18 @@ func convertBaseType(buf utils.Writer, baseType string, tupleData *message.Tuple
 				return
 			}
 		}
+	default:
+		if tupleData.Kind == message.TupleNull {
+			if colProp != nil && len(colProp.Coalesce) > 0 {
+				_, err = buf.Write(colProp.Coalesce)
+			} else {
+				_, err = buf.Write(nullStr)
+			}
+
+			return
+		}
+
+		_, err = buf.Write(tupleData.Value)
 	}
 
 	return
