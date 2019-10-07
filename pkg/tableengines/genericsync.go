@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx"
 
+	"github.com/mkabilov/pg2ch/pkg/utils"
 	"github.com/mkabilov/pg2ch/pkg/utils/chutils/bulkupload"
 	"github.com/mkabilov/pg2ch/pkg/utils/dbtypes"
 	"github.com/mkabilov/pg2ch/pkg/utils/pgutils"
@@ -147,17 +148,21 @@ func (t *genericTable) loadSyncDeltas() error {
 
 	t.logger.Infof("delta size: %s", t.deltaSize(t.syncSnapshotLSN))
 
-	chSql := fmt.Sprintf("INSERT INTO %[1]s(%[2]s) SELECT %[2]s FROM %[3]s WHERE %[4]s > %[5]d and %[7]s = '%[8]s' ORDER BY %[6]s",
-		t.cfg.ChMainTable,
-		strings.Join(t.chUsedColumns, ","),
-		t.cfg.ChSyncAuxTable,
-		t.cfg.LsnColumnName, uint64(t.syncSnapshotLSN),
-		t.cfg.RowIDColumnName,
-		t.cfg.TableNameColumnName, t.pgTableName)
-	t.logger.Debugf("executing: %s", chSql)
-	if err := t.chLoader.Exec(chSql); err != nil {
-		return fmt.Errorf("could not merge with sync aux table: %v", err)
-	}
+	utils.Try(t.ctx, 100, time.Second*5, func() error {
+		chSql := fmt.Sprintf("INSERT INTO %[1]s(%[2]s) SELECT %[2]s FROM %[3]s WHERE %[4]s > %[5]d and %[7]s = '%[8]s' ORDER BY %[6]s",
+			t.cfg.ChMainTable,
+			strings.Join(t.chUsedColumns, ","),
+			t.cfg.ChSyncAuxTable,
+			t.cfg.LsnColumnName, uint64(t.syncSnapshotLSN),
+			t.cfg.RowIDColumnName,
+			t.cfg.TableNameColumnName, t.pgTableName)
+		t.logger.Debugf("executing: %s", chSql)
+		if err := t.chLoader.Exec(chSql); err != nil {
+			return fmt.Errorf("could not merge with sync aux table: %v", err)
+		}
+
+		return nil
+	})
 
 	if !t.cfg.ChSyncAuxTable.IsEmpty() {
 		if err := t.dropTablePartition(t.cfg.ChSyncAuxTable, string(t.pgTableName)); err != nil {
