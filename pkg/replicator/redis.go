@@ -2,6 +2,7 @@ package replicator
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/tidwall/redcon"
@@ -67,6 +68,19 @@ func (r *Replicator) startRedisServer() {
 					conn.WriteInt(0)
 				} else {
 					conn.WriteInt(1)
+				}
+			case "sync":
+				if len(cmd.Args) != 3 {
+					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
+					return
+				}
+
+				if strings.ToLower(string(cmd.Args[1])) == "sleep" {
+					seconds, err := strconv.Atoi(string(cmd.Args[2]))
+					if err != nil {
+						conn.WriteError("ERR wrong value for sync sleep: " + err.Error())
+					}
+					r.syncSleep.Store(int32(seconds))
 				}
 			case "pause":
 				conn.WriteString(r.pause())

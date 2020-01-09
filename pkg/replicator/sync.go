@@ -3,6 +3,7 @@ package replicator
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/jackc/pgx"
 	"gopkg.in/djherbis/buffer.v1"
@@ -18,6 +19,8 @@ func (r *Replicator) SyncTables(syncTables []config.PgTableName, async bool) err
 	if len(syncTables) == 0 {
 		r.logger.Info("no tables to sync")
 		return nil
+	} else {
+		r.logger.Infof("%d tables to sync", len(syncTables))
 	}
 
 	doneCh := make(chan struct{}, r.cfg.SyncWorkers)
@@ -60,7 +63,7 @@ func (r *Replicator) syncTable(chUploader bulkupload.BulkUploader, conn *pgx.Con
 	defer func() {
 		r.logger.Debugf("committing pg transaction, pid: %v", conn.PID())
 		if err := tx.Commit(); err != nil {
-			r.errCh <- fmt.Errorf("could not commit: %v", err)
+			r.logger.Infof("could not commit: %v", err)
 		}
 	}()
 
@@ -192,6 +195,13 @@ func (r *Replicator) syncJob(jobID int, doneCh chan<- struct{}) {
 			}
 
 			return
+		}
+		if r.syncSleep.Load() > 0 {
+			sleepTicker := time.Tick(time.Duration(r.syncSleep.Load()) * time.Second)
+			select {
+			case <-sleepTicker:
+			case <-r.ctx.Done():
+			}
 		}
 
 		r.logger.Infof("sync job %d: %q table synced", jobID, pgTableName)

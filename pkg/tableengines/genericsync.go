@@ -148,7 +148,7 @@ func (t *genericTable) loadSyncDeltas() error {
 
 	t.logger.Infof("delta size: %s", t.deltaSize(t.syncSnapshotLSN))
 
-	utils.Try(t.ctx, 100, time.Second*5, func() error {
+	if err := utils.Try(t.ctx, 100, time.Second*5, func() error {
 		chSql := fmt.Sprintf("INSERT INTO %[1]s(%[2]s) SELECT %[2]s FROM %[3]s WHERE %[4]s > %[5]d and %[7]s = '%[8]s' ORDER BY %[6]s",
 			t.cfg.ChMainTable,
 			strings.Join(t.chUsedColumns, ","),
@@ -162,7 +162,9 @@ func (t *genericTable) loadSyncDeltas() error {
 		}
 
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("failed to merge with sync table: %v", err)
+	}
 
 	if !t.cfg.ChSyncAuxTable.IsEmpty() {
 		if err := t.dropTablePartition(t.cfg.ChSyncAuxTable, string(t.pgTableName)); err != nil {

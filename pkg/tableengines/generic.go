@@ -294,7 +294,7 @@ func (t *genericTable) Truncate() error {
 	return nil
 }
 
-// Start performs initialization and deletes all the dirty data, if any
+// Init performs initialization and deletes all the dirty data, if any
 func (t *genericTable) Init(lastFinalLSN dbtypes.LSN) error {
 	if !t.cfg.ChSyncAuxTable.IsEmpty() {
 		if err := t.truncateTable(t.cfg.ChSyncAuxTable); err != nil {

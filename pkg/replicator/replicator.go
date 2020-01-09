@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx"
 	"github.com/jackc/pgx/log/zapadapter"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
@@ -72,6 +73,7 @@ type Replicator struct {
 	isEmptyTx             bool
 	syncJobs              chan config.PgTableName
 	tblRelMsgs            map[config.PgTableName]message.Relation
+	syncSleep             atomic.Int32 // seconds to wait before starting to replicate next table
 
 	processedMsgCnt     int
 	streamLastBatchTime time.Time
@@ -115,6 +117,7 @@ func New(cfg *config.Config) *Replicator {
 		tblRelMsgs:          make(map[config.PgTableName]message.Relation, len(cfg.Tables)),
 		streamLastBatchTime: time.Now(),
 	}
+	r.syncSleep.Store(0)
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.logger = logger.Sugar()
 	r.curState.Store(StateInit)

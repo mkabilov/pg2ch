@@ -36,7 +36,7 @@ var (
 		dbtypes.PgReal:                     dbtypes.ChFloat32,
 		dbtypes.PgDoublePrecision:          dbtypes.ChFloat64,
 		dbtypes.PgInterval:                 dbtypes.ChInt32,
-		dbtypes.PgBoolean:                  dbtypes.ChUInt8,
+		dbtypes.PgBoolean:                  dbtypes.ChInt8, // in case we'd like to treat NULLs as -1
 		dbtypes.PgDecimal:                  dbtypes.ChDecimal,
 		dbtypes.PgNumeric:                  dbtypes.ChDecimal,
 		dbtypes.PgCharacter:                dbtypes.ChFixedString,
