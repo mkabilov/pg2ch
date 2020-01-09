@@ -197,6 +197,7 @@ func (r *Replicator) syncJob(jobID int, doneCh chan<- struct{}) {
 			return
 		}
 		if r.syncSleep.Load() > 0 {
+			r.logger.Infof("sync job %d: sleeping for %d sec", jobID, r.syncSleep.Load())
 			sleepTicker := time.Tick(time.Duration(r.syncSleep.Load()) * time.Second)
 			select {
 			case <-sleepTicker:
