@@ -81,6 +81,7 @@ func (r *Replicator) startRedisServer() {
 						conn.WriteError("ERR wrong value for sync sleep: " + err.Error())
 					}
 					r.syncSleep.Store(int32(seconds))
+					conn.WriteString("OK")
 				}
 			case "pause":
 				conn.WriteString(r.pause())
