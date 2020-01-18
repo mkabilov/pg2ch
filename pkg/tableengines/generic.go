@@ -296,12 +296,6 @@ func (t *genericTable) Truncate() error {
 
 // Init performs initialization and deletes all the dirty data, if any
 func (t *genericTable) Init(lastFinalLSN dbtypes.LSN) error {
-	if !t.cfg.ChSyncAuxTable.IsEmpty() {
-		if err := t.truncateTable(t.cfg.ChSyncAuxTable); err != nil {
-			return err
-		}
-	}
-
 	if lastFinalLSN.IsValid() {
 		sql := fmt.Sprintf("alter table %s delete where lsn > %d and table_name = '%s'",
 			t.cfg.ChMainTable.NamespacedName(), uint64(lastFinalLSN), t.cfg.PgTableName.NamespacedName())
