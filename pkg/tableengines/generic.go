@@ -133,11 +133,28 @@ func (t *genericTable) truncateTable(tableName config.ChTableName) error {
 	return t.chLoader.Exec(fmt.Sprintf("truncate table %s.%s", tableName.DatabaseName, tableName.TableName))
 }
 
+func (t *genericTable) createAuxTable(tableName config.ChTableName,
+	like config.ChTableName) error {
+
+	t.logger.Infof("creating %q table like %q", tableName, like)
+
+	err := t.chLoader.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %[3]s ENGINE=MergeTree()
+		ORDER BY %[1]s PARTITION BY %[2]s as
+			SELECT *, toUInt64(0) as row_id FROM %[4]s LIMIT 0;`,
+		t.cfg.RowIDColumnName, t.cfg.TableNameColumnName,
+		tableName.String(), like.String()))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (t *genericTable) dropTablePartition(tableName config.ChTableName, partitionName string) error {
 	t.logger.Infof("dropping %q partiton of the %q table", partitionName, tableName)
 
-	return t.chLoader.Exec(fmt.Sprintf("alter table %s.%s drop partition '%s'",
-		tableName.DatabaseName, tableName.TableName, partitionName))
+	return t.chLoader.Exec(fmt.Sprintf("alter table %s drop partition '%s'",
+		tableName.String(), partitionName))
 }
 
 func (t *genericTable) advanceProcessedLSN() error {

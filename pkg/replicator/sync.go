@@ -116,6 +116,13 @@ func (r *Replicator) GetTablesToSync() ([]config.PgTableName, error) {
 		})
 	}
 
+	r.logger.Infof("need to sync %d tables", len(syncTables))
+	for _, pgTableName := range syncTables {
+		if err := r.chTables[pgTableName].InitSync(); err != nil {
+			return nil, fmt.Errorf("could not start sync for %q table: %v", pgTableName.String(), err)
+		}
+	}
+
 	return syncTables, nil
 }
 

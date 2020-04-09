@@ -93,6 +93,7 @@ type PgTableName struct {
 type ChTableName struct {
 	DatabaseName string
 	TableName    string
+	Temporary    bool
 }
 
 type coalesceValue []byte

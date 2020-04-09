@@ -210,15 +210,6 @@ func (r *Replicator) Run() error {
 		return fmt.Errorf("could not get tables to sync: %v", err)
 	}
 
-	if len(tablesToSync) > 0 {
-		r.logger.Infof("need to sync %d tables", len(tablesToSync))
-		for _, pgTableName := range tablesToSync {
-			if err := r.chTables[pgTableName].InitSync(); err != nil {
-				return fmt.Errorf("could not start sync for %q table: %v", pgTableName.String(), err)
-			}
-		}
-	}
-
 	if err := r.consumer.Run(r); err != nil {
 		return err
 	}

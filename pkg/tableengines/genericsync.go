@@ -57,17 +57,28 @@ func (t *genericTable) genSyncWrite(p []byte, extras ...[]byte) error {
 }
 
 func (t *genericTable) InitSync() error {
+	var err error
+
 	t.Lock()
 	defer t.Unlock()
 
 	if !t.cfg.InitSyncSkipTruncate {
-		if err := t.truncateTable(t.cfg.ChMainTable); err != nil {
+		if err = t.truncateTable(t.cfg.ChMainTable); err != nil {
 			return fmt.Errorf("could not truncate main table: %v", err)
 		}
 	}
 
-	if !t.cfg.ChSyncAuxTable.IsEmpty() {
-		if err := t.truncateTable(t.cfg.ChSyncAuxTable); err != nil {
+	// if we have no aux table we will create it
+	if t.cfg.ChSyncAuxTable.IsEmpty() {
+		t.cfg.ChSyncAuxTable.TableName = "aux_" + t.cfg.ChMainTable.TableName
+		t.cfg.ChSyncAuxTable.DatabaseName = t.cfg.ChMainTable.DatabaseName
+		t.cfg.ChSyncAuxTable.Temporary = true
+
+		if err = t.createAuxTable(t.cfg.ChSyncAuxTable, t.cfg.ChMainTable); err != nil {
+			return fmt.Errorf("could not create aux table: %v", err)
+		}
+	} else {
+		if err = t.truncateTable(t.cfg.ChSyncAuxTable); err != nil {
 			return fmt.Errorf("could not truncate aux table: %v", err)
 		}
 	}
@@ -168,7 +179,8 @@ func (t *genericTable) loadSyncDeltas() error {
 
 	if !t.cfg.ChSyncAuxTable.IsEmpty() {
 		if err := t.dropTablePartition(t.cfg.ChSyncAuxTable, string(t.pgTableName)); err != nil {
-			return fmt.Errorf("could not drop partition of the %q table: %v", t.cfg.ChSyncAuxTable, err)
+			return fmt.Errorf("could not drop partition of the %q table: %v",
+				t.cfg.ChSyncAuxTable, err)
 		}
 	}
 
@@ -208,13 +220,14 @@ func (t *genericTable) syncAuxTableColumns() []string {
 }
 
 func (t *genericTable) deltaSize(lsn dbtypes.LSN) string {
-	res, err := t.chLoader.Query(fmt.Sprintf("SELECT count(*) FROM %s WHERE %s > %d and %s = '%s'",
+	query := fmt.Sprintf("SELECT count(*) FROM %s WHERE %s > %d and %s = '%s'",
 		t.cfg.ChSyncAuxTable,
 		t.cfg.LsnColumnName, uint64(lsn),
 		t.cfg.TableNameColumnName, t.cfg.PgTableName.NamespacedName(),
-	))
+	)
+	res, err := t.chLoader.Query(query)
 	if err != nil {
-		t.logger.Fatalf("query error: %v", err)
+		t.logger.Fatalw("query error", "err", err, "query", query)
 	}
 
 	return res[0][0]
